@@ -1,0 +1,33 @@
+# Python/runtime caches
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.cache/
+
+# Data folder
+/data/
+
+# Generated analysis outputs
+figures/
+results/
+*.h5ad
+*.csv
+*.png
+*.pdf
+
+# Local environments
+.venv/
+venv/
+env/
+
+# Private local agent instructions
+AGENTS.md
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
