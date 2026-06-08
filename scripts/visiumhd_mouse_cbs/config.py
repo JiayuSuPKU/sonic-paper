@@ -7,11 +7,11 @@ HOME = Path.home()
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = HOME / "Projects" / "SPLISOSM_paper" / "data"
 REFERENCE_ROOT = HOME / "reference" / "mm39"
-SPLISOSM_SRC = HOME / "Projects" / "SPLISOSM" / "src"
 
 RESULT_DIR = PROJECT_ROOT / "results" / "visiumhd_mouse_cbs"
 FIGURE_DIR = PROJECT_ROOT / "figures" / "visiumhd_mouse_cbs"
 SCRIPT_DIR = PROJECT_ROOT / "scripts" / "visiumhd_mouse_cbs"
+SV_METRICS_PATH = RESULT_DIR / "sv_runtime_memory_metrics.csv"
 
 GTF_FILE = REFERENCE_ROOT / "gencode.vM33.annotation.gtf.gz"
 
@@ -21,7 +21,11 @@ NEIGHBOR_DEGREE = {"16um": 1, "8um": 4, "2um": 64}
 SV_METHOD = "hsic-ir"
 DU_METHOD = "hsic-gp"
 RESOLUTION_UM = {"16um": 16, "8um": 8, "2um": 2}
-RESOLUTION_TABLE = {"16um": "square_016um", "8um": "square_008um", "2um": "square_002um"}
+RESOLUTION_TABLE = {
+    "16um": "square_016um",
+    "8um": "square_008um",
+    "2um": "square_002um",
+}
 DU_COVARIATE_MIN_COUNTS = 10
 DU_COVARIATE_MIN_BIN_PCT = 0.001
 
@@ -44,6 +48,7 @@ REMAP_NR_MM39_URLS = (
     "https://remap.univ-amu.fr/storage/remap2022/mm39/MACS2/remap2022_nr_macs2_mm39_v1_0.bed.gz",
     "https://zenodo.org/records/10527088/files/remap2022_nr_macs2_mm39_v1_0.bed.gz?download=1",
 )
+
 
 @dataclass(frozen=True)
 class DatasetConfig:
@@ -76,7 +81,10 @@ DATASETS = {
         min_bin_pct=0.001,
         structure_kind="trend_peak_bed12",
         bin_prefix="_",
-        bed12_file=DATA_ROOT / "visiumhd_3p_mouse_cbs" / "sierra_peaks" / "peak.txt.bed12",
+        bed12_file=DATA_ROOT
+        / "visiumhd_3p_mouse_cbs"
+        / "sierra_peaks"
+        / "peak.txt.bed12",
     ),
     "ffpe_probe": DatasetConfig(
         key="ffpe_probe",
@@ -106,7 +114,9 @@ DATASETS = {
         min_bin_pct=0.001,
         structure_kind="ont_gff",
         bin_prefix="_",
-        gff_file=DATA_ROOT / "visiumhd_ont_mouse_cbs" / "SAMPLE_S1_L001.transcriptome.gff.gz",
+        gff_file=DATA_ROOT
+        / "visiumhd_ont_mouse_cbs"
+        / "SAMPLE_S1_L001.transcriptome.gff.gz",
     ),
 }
 

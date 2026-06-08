@@ -17,6 +17,7 @@ from .config import (
     RESULT_DIR,
     SV_GENE_SUBSET,
     SV_METHOD,
+    SV_METRICS_PATH,
     DatasetConfig,
 )
 from .utils import (
@@ -31,8 +32,6 @@ from .utils import (
     time_call,
 )
 
-SV_METRICS_PATH = RESULT_DIR / "sv_runtime_memory_metrics.csv"
-
 
 def _merge_metric_cache(new_metrics: pd.DataFrame, *, force: bool) -> pd.DataFrame:
     """Preserve cached metric rows unless their dataset/resolution/phase was recomputed.
@@ -41,7 +40,9 @@ def _merge_metric_cache(new_metrics: pd.DataFrame, *, force: bool) -> pd.DataFra
     benchmark values instead of replacing them with placeholder load events.
     """
     if new_metrics.empty:
-        return pd.read_csv(SV_METRICS_PATH) if SV_METRICS_PATH.exists() else pd.DataFrame()
+        return (
+            pd.read_csv(SV_METRICS_PATH) if SV_METRICS_PATH.exists() else pd.DataFrame()
+        )
     if force or not SV_METRICS_PATH.exists():
         return new_metrics
 
@@ -60,14 +61,24 @@ def subset_by_genes(
     targets = {normalize_gene_symbol(g) for g in genes}
     var = adata.var
     gene_mask = (
-        var[table_cfg["gene_names"]].astype(str).map(normalize_gene_symbol).isin(targets).to_numpy()
+        var[table_cfg["gene_names"]]
+        .astype(str)
+        .map(normalize_gene_symbol)
+        .isin(targets)
+        .to_numpy()
     )
     group_mask = (
-        var[table_cfg["group_iso_by"]].astype(str).map(normalize_gene_symbol).isin(targets).to_numpy()
+        var[table_cfg["group_iso_by"]]
+        .astype(str)
+        .map(normalize_gene_symbol)
+        .isin(targets)
+        .to_numpy()
     )
     mask = gene_mask | group_mask
     if not mask.any():
-        raise ValueError(f"None of the configured SV_GENE_SUBSET genes were present: {genes}")
+        raise ValueError(
+            f"None of the configured SV_GENE_SUBSET genes were present: {genes}"
+        )
     return adata[:, mask].copy()
 
 
@@ -104,7 +115,9 @@ def run_sv_one(
         res = pd.read_csv(result_path)
         if "gene_key" not in res.columns:
             res["gene_key"] = res["gene"].map(normalize_gene_symbol)
-        features = pd.read_csv(eligible_path) if eligible_path.exists() else pd.DataFrame()
+        features = (
+            pd.read_csv(eligible_path) if eligible_path.exists() else pd.DataFrame()
+        )
         return res, features, pd.DataFrame()
 
     sdata = load_sdata(cfg)
@@ -190,7 +203,9 @@ def run_sv_one(
         }
     )
 
-    res = model.get_formatted_test_results("sv", with_gene_summary=True).sort_values("pvalue_adj")
+    res = model.get_formatted_test_results("sv", with_gene_summary=True).sort_values(
+        "pvalue_adj"
+    )
     res["dataset_key"] = cfg.key
     res["dataset"] = cfg.short_label
     res["resolution"] = resolution
@@ -224,7 +239,9 @@ def run_sv_suite(
         results[(cfg.key, "16um")] = res16
         metrics.append(m16)
         if features16.empty:
-            features16 = pd.read_csv(RESULT_DIR / f"eligible_16um_features_{cfg.key}.csv")
+            features16 = pd.read_csv(
+                RESULT_DIR / f"eligible_16um_features_{cfg.key}.csv"
+            )
         # Finer grids reuse the 16um-filtered feature universe so resolution
         # comparisons are not driven by changing gene eligibility.
         isoforms = features16["isoform"].astype(str).tolist()
@@ -249,7 +266,9 @@ def run_sv_suite(
     return results, metric_df
 
 
-def cross_resolution_comparison(sv_results: dict[tuple[str, str], pd.DataFrame]) -> pd.DataFrame:
+def cross_resolution_comparison(
+    sv_results: dict[tuple[str, str], pd.DataFrame],
+) -> pd.DataFrame:
     """Summarize within-platform SV agreement for notebook plotting.
 
     This is intentionally derived on demand from cached SV result tables rather
@@ -295,7 +314,8 @@ def cross_platform_comparison(
     sv16 = {cfg.key: sv_results.get((cfg.key, "16um")) for cfg in DATASETS.values()}
     sv16 = {key: df for key, df in sv16.items() if df is not None}
     sets = {
-        key: set(df.loc[df["pvalue_adj"] < FDR_THRESHOLD, "gene_key"]) for key, df in sv16.items()
+        key: set(df.loc[df["pvalue_adj"] < FDR_THRESHOLD, "gene_key"])
+        for key, df in sv16.items()
     }
     rows = []
     keys = list(sv16)
@@ -318,7 +338,9 @@ def cross_platform_comparison(
 
     corr_rows = []
     for left, right in combinations(keys, 2):
-        a = sv16[left][["gene_key", "gene", "pvalue", "pvalue_adj", "count_avg"]].rename(
+        a = sv16[left][
+            ["gene_key", "gene", "pvalue", "pvalue_adj", "count_avg"]
+        ].rename(
             columns={
                 "gene": f"gene_{left}",
                 "pvalue": f"pvalue_{left}",
@@ -326,7 +348,9 @@ def cross_platform_comparison(
                 "count_avg": f"expr_{left}",
             }
         )
-        b = sv16[right][["gene_key", "gene", "pvalue", "pvalue_adj", "count_avg"]].rename(
+        b = sv16[right][
+            ["gene_key", "gene", "pvalue", "pvalue_adj", "count_avg"]
+        ].rename(
             columns={
                 "gene": f"gene_{right}",
                 "pvalue": f"pvalue_{right}",
@@ -351,7 +375,8 @@ def cross_platform_comparison(
             rho = np.nan
             if group.shape[0] >= 2:
                 rho, _ = spearmanr(
-                    minus_log10_p(group[f"pvalue_{left}"]), minus_log10_p(group[f"pvalue_{right}"])
+                    minus_log10_p(group[f"pvalue_{left}"]),
+                    minus_log10_p(group[f"pvalue_{right}"]),
                 )
             corr_rows.append(
                 {
@@ -368,7 +393,9 @@ def cross_platform_comparison(
     return intersections, corr, prioritize_shared_hits(sv16)
 
 
-def prioritize_shared_hits(sv16: dict[str, pd.DataFrame], *, min_platforms: int = 2) -> pd.DataFrame:
+def prioritize_shared_hits(
+    sv16: dict[str, pd.DataFrame], *, min_platforms: int = 2
+) -> pd.DataFrame:
     """Rank shared 16um SVP calls across platforms.
 
     The saved table is one row per gene and keeps pairwise plus triple shared
@@ -384,7 +411,9 @@ def prioritize_shared_hits(sv16: dict[str, pd.DataFrame], *, min_platforms: int 
         df = sv16[key].copy()
         if "gene_key" not in df:
             df["gene_key"] = df["gene"].map(normalize_gene_symbol)
-        ranked = df.sort_values("pvalue").drop_duplicates("gene_key").reset_index(drop=True)
+        ranked = (
+            df.sort_values("pvalue").drop_duplicates("gene_key").reset_index(drop=True)
+        )
         ranked[f"rank_{key}"] = np.arange(1, ranked.shape[0] + 1)
         ranked[f"pvalue_{key}"] = ranked["pvalue"].to_numpy()
         ranked[f"padj_{key}"] = ranked["pvalue_adj"].to_numpy()
@@ -417,7 +446,9 @@ def prioritize_shared_hits(sv16: dict[str, pd.DataFrame], *, min_platforms: int 
     score["n_platforms_tested"] = score[padj_cols].notna().sum(axis=1)
     score["n_platforms_called"] = called.sum(axis=1)
     score["called_platforms"] = [
-        ";".join(DATASETS[key].short_label for key in dataset_keys if row[f"called_{key}"])
+        ";".join(
+            DATASETS[key].short_label for key in dataset_keys if row[f"called_{key}"]
+        )
         for _, row in called.iterrows()
     ]
     score["sharing_class"] = score["n_platforms_called"].map(

@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-# ruff: noqa: I001
-
 import gc
-import os
 import warnings
 from functools import partial
 from itertools import combinations
@@ -14,21 +11,8 @@ import pandas as pd
 import scipy.sparse as sp
 from anndata import AnnData
 from scipy.stats import spearmanr
-
-os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
-
 from spatialdata.models import TableModel
 
-from .utils import (
-    load_sdata,
-    minus_log10_p,
-    neighbor_degrees_by_res,
-    normalize_gene_symbol,
-    resolve_table_config,
-    save_csv,
-    setup_fft_model,
-    time_call,
-)
 from .config import (
     DATASETS,
     DU_COVARIATE_MIN_BIN_PCT,
@@ -43,6 +27,16 @@ from .config import (
     DatasetConfig,
 )
 from .reference_annotations import remap_tf_symbols
+from .utils import (
+    load_sdata,
+    minus_log10_p,
+    neighbor_degrees_by_res,
+    normalize_gene_symbol,
+    resolve_table_config,
+    save_csv,
+    setup_fft_model,
+    time_call,
+)
 
 
 def build_gene_expression_table(
@@ -67,7 +61,8 @@ def build_gene_expression_table(
     selected_gene_arr = gene_arr[mask]
     selected_keys = gene_keys[mask]
     key_to_label = {
-        key: selected_gene_arr[np.flatnonzero(selected_keys == key)[0]] for key in set(selected_keys)
+        key: selected_gene_arr[np.flatnonzero(selected_keys == key)[0]]
+        for key in set(selected_keys)
     }
     unique_keys = sorted(key_to_label)
     unique_genes = [key_to_label[key] for key in unique_keys]
@@ -80,7 +75,9 @@ def build_gene_expression_table(
     counts = adata.layers["counts"].tocsr()
     x_gene = (counts[:, mask] @ agg_mat.T).tocsr()
     gene_total_counts = np.asarray(x_gene.sum(axis=0)).ravel()
-    gene_bin_pct = np.asarray((x_gene > 0).sum(axis=0)).ravel() / max(1, x_gene.shape[0])
+    gene_bin_pct = np.asarray((x_gene > 0).sum(axis=0)).ravel() / max(
+        1, x_gene.shape[0]
+    )
     keep = (gene_total_counts >= min_counts) & (gene_bin_pct > min_bin_pct)
     if not keep.any():
         raise ValueError(
@@ -88,13 +85,20 @@ def build_gene_expression_table(
             f"(min_counts={min_counts}, min_bin_pct>{min_bin_pct})."
         )
     x_gene = x_gene[:, keep].tocsr()
-    unique_genes = [gene for gene, keep_gene in zip(unique_genes, keep, strict=False) if keep_gene]
-    unique_keys = [key for key, keep_gene in zip(unique_keys, keep, strict=False) if keep_gene]
+    unique_genes = [
+        gene for gene, keep_gene in zip(unique_genes, keep, strict=False) if keep_gene
+    ]
+    unique_keys = [
+        key for key, keep_gene in zip(unique_keys, keep, strict=False) if keep_gene
+    ]
     gene_total_counts = gene_total_counts[keep]
     gene_bin_pct = gene_bin_pct[keep]
     total_counts = np.asarray(counts.sum(axis=1)).ravel()
     scale = np.divide(
-        1e4, total_counts, out=np.zeros_like(total_counts, dtype=float), where=total_counts > 0
+        1e4,
+        total_counts,
+        out=np.zeros_like(total_counts, dtype=float),
+        where=total_counts > 0,
     )
     x_norm = x_gene.multiply(scale[:, None]).tocsr()
     x_norm.data = np.log1p(x_norm.data)
@@ -110,7 +114,11 @@ def build_gene_expression_table(
         index=unique_genes,
     )
     out = AnnData(
-        X=x_norm, obs=adata.obs.copy(), var=var, uns=adata.uns.copy(), obsm=adata.obsm.copy()
+        X=x_norm,
+        obs=adata.obs.copy(),
+        var=var,
+        uns=adata.uns.copy(),
+        obsm=adata.obsm.copy(),
     )
     out.layers["counts"] = x_norm
     return out
@@ -220,7 +228,10 @@ def _cached_du_matches_inputs(
     if cached.empty:
         return not svp_keys and not covariate_keys
     cached = _ensure_du_keys(cached)
-    return set(cached["gene_key"]) == svp_keys and set(cached["covariate_key"]) == covariate_keys
+    return (
+        set(cached["gene_key"]) == svp_keys
+        and set(cached["covariate_key"]) == covariate_keys
+    )
 
 
 def _du_output_columns(df: pd.DataFrame) -> list[str]:
@@ -276,7 +287,9 @@ def run_du_suite(
         table_cfg = resolve_table_config(cfg, sdata, "16um")
         adata = sdata.tables[table_cfg["table_name"]]
         # Design matrix: filtered gene-level log-normalized regulator expression.
-        covariate_adata = build_gene_expression_table(adata, table_cfg["gene_names"], covariate_genes)
+        covariate_adata = build_gene_expression_table(
+            adata, table_cfg["gene_names"], covariate_genes
+        )
         filtered_covariate_keys = set(covariate_adata.var["gene_key"].astype(str))
 
         if out_path.exists() and not force:
@@ -374,9 +387,9 @@ def run_du_suite(
                 "n_pairs": n_pairs,
             }
         )
-        du = model.get_formatted_test_results("du", with_gene_summary=False).sort_values(
-            "pvalue_adj"
-        )
+        du = model.get_formatted_test_results(
+            "du", with_gene_summary=False
+        ).sort_values("pvalue_adj")
         du["gene_key"] = du["gene"].map(normalize_gene_symbol)
         du["covariate_key"] = du["covariate"].map(normalize_gene_symbol)
         du["covariate_set"] = covariate_set
@@ -428,7 +441,15 @@ def _merge_du_pair(
     left = left[left["gene_key"].isin(shared_svp)]
     right = right[right["gene_key"].isin(shared_svp)]
     return left[
-        ["gene_key", "covariate_key", "gene", "covariate", "pvalue", "pvalue_adj", "statistic"]
+        [
+            "gene_key",
+            "covariate_key",
+            "gene",
+            "covariate",
+            "pvalue",
+            "pvalue_adj",
+            "statistic",
+        ]
     ].merge(
         right[["gene_key", "covariate_key", "pvalue", "pvalue_adj", "statistic"]],
         on=["gene_key", "covariate_key"],
@@ -477,15 +498,21 @@ def du_pairwise_agreement(
                 "right": right_cfg.short_label,
                 "n_shared_svp": len(shared_svp),
                 "n_shared_covariates": len(shared_covariates),
-                "n_shared_rbps": len(shared_covariates) if covariate_set == "rbp" else np.nan,
-                "n_shared_tfs": len(shared_covariates) if covariate_set == "tf_chip" else np.nan,
+                "n_shared_rbps": (
+                    len(shared_covariates) if covariate_set == "rbp" else np.nan
+                ),
+                "n_shared_tfs": (
+                    len(shared_covariates) if covariate_set == "tf_chip" else np.nan
+                ),
                 "shared_tested_pairs": int(merged.shape[0]),
                 "spearman_logp": rho,
                 "left_sig_pairs": len(left_sig),
                 "right_sig_pairs": len(right_sig),
                 "shared_sig_pairs": len(sig_overlap),
                 "sig_pair_union": len(sig_union),
-                "jaccard_sig_pairs": len(sig_overlap) / len(sig_union) if sig_union else np.nan,
+                "jaccard_sig_pairs": (
+                    len(sig_overlap) / len(sig_union) if sig_union else np.nan
+                ),
             }
         )
     return pd.DataFrame(rows)
@@ -498,7 +525,15 @@ def _dataset_du_for_shared_pairs(
 ) -> pd.DataFrame:
     """Prepare one dataset's DU rows for all-platform shared-pair merging."""
     df = _ensure_du_keys(du_results[cfg_key])
-    keep = ["gene_key", "covariate_key", "gene", "covariate", "pvalue", "pvalue_adj", "statistic"]
+    keep = [
+        "gene_key",
+        "covariate_key",
+        "gene",
+        "covariate",
+        "pvalue",
+        "pvalue_adj",
+        "statistic",
+    ]
     df = df[df["gene_key"].isin(shared_svp)][keep].copy()
     suffix_map = {
         "gene": f"gene_{cfg_key}",
@@ -530,8 +565,10 @@ def du_shared_associations(
     merged: pd.DataFrame | None = None
     for key in dataset_keys:
         part = _dataset_du_for_shared_pairs(key, du_results, shared_svp)
-        merged = part if merged is None else merged.merge(
-            part, on=["gene_key", "covariate_key"], how="inner"
+        merged = (
+            part
+            if merged is None
+            else merged.merge(part, on=["gene_key", "covariate_key"], how="inner")
         )
     if merged is None or merged.empty:
         return pd.DataFrame()

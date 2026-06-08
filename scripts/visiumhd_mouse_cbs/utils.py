@@ -1,21 +1,15 @@
 from __future__ import annotations
 
 import json
-import os
 import resource
-import sys
 import time
 from pathlib import Path
 from typing import Any
 
-os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
-os.environ.setdefault("MPLCONFIGDIR", "/private/tmp/codex_mpl_config")
-os.environ.setdefault("XDG_CACHE_HOME", "/private/tmp/codex_cache")
-os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
-os.makedirs(os.environ["XDG_CACHE_HOME"], exist_ok=True)
-
 import numpy as np
 import pandas as pd
+import spatialdata as sd
+from splisosm import SplisosmFFT
 
 from .config import (
     DATASETS,
@@ -27,15 +21,8 @@ from .config import (
     RESULT_DIR,
     RHO,
     SCRIPT_DIR,
-    SPLISOSM_SRC,
     DatasetConfig,
 )
-
-if str(SPLISOSM_SRC) not in sys.path:
-    sys.path.insert(0, str(SPLISOSM_SRC))
-
-import spatialdata as sd
-from splisosm import SplisosmFFT
 
 
 def log(message: str) -> None:
@@ -111,20 +98,26 @@ def resolve_bin_element(sdata, cfg: DatasetConfig, resolution: str) -> str:
     suffix_matches = sorted(name for name in shapes if name.endswith(table))
     if len(suffix_matches) == 1:
         return suffix_matches[0]
-    raise ValueError(f"Could not resolve bins for {cfg.key} {resolution}: {sorted(shapes)}")
+    raise ValueError(
+        f"Could not resolve bins for {cfg.key} {resolution}: {sorted(shapes)}"
+    )
 
 
 def resolve_table_config(cfg: DatasetConfig, sdata, resolution: str) -> dict[str, Any]:
     """Resolve the table, shape element, and annotation columns for one grid."""
     table = RESOLUTION_TABLE[resolution]
     if table not in sdata.tables:
-        raise ValueError(f"{table!r} not found in {cfg.key}: {sorted(sdata.tables.keys())}")
+        raise ValueError(
+            f"{table!r} not found in {cfg.key}: {sorted(sdata.tables.keys())}"
+        )
 
     adata = sdata.tables[table]
     var_cols = list(adata.var.columns)
     group_iso_by = cfg.group_iso_by if cfg.group_iso_by in var_cols else None
     if group_iso_by is None:
-        raise ValueError(f"Could not infer group_iso_by for {cfg.key} {resolution}: {var_cols}")
+        raise ValueError(
+            f"Could not infer group_iso_by for {cfg.key} {resolution}: {var_cols}"
+        )
 
     gene_names = cfg.gene_names if cfg.gene_names in var_cols else None
 
@@ -179,7 +172,9 @@ def model_feature_rows(model: SplisosmFFT, table_cfg: dict[str, Any]) -> pd.Data
     rows = []
     var = model._adata.var
     group_col = table_cfg["group_iso_by"]
-    for gene_name, iso_names in zip(model.gene_names, model._gene_iso_names, strict=True):
+    for gene_name, iso_names in zip(
+        model.gene_names, model._gene_iso_names, strict=True
+    ):
         group_id = str(var.loc[iso_names[0], group_col])
         for iso in iso_names:
             rows.append(
