@@ -29,15 +29,13 @@ provided.
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
 
-os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
-os.environ.setdefault("MPLBACKEND", "Agg")
-os.environ.setdefault("MPLCONFIGDIR", "/private/tmp/quadsv_mplconfig")
+import matplotlib
 
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd

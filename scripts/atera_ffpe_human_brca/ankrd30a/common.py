@@ -1,4 +1,4 @@
-"""Common constants, dependency settings, and helpers for ANKRD30A analyses."""
+"""Common constants and helpers for ANKRD30A analyses."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from ..config import (
     ANKRD30A_PROBE_MAPPINGS_CSV,
     ANKRD30A_REGULATOR_PRIORITY_CSV,
     ANKRD30A_TRANSCRIPT_ANNOTATIONS_CSV,
-    HOME,
     TCGA_ANALYSIS_DIR,
 )
 from ..utils import project_path
@@ -70,11 +69,6 @@ TRPS1_PROSEQ_TIMEPOINTS = (
 )
 TRPS1_PROSEQ_TSS_HALF_WINDOW_BP = 1_000
 TRPS1_PROSEQ_SIGNAL_EPSILON = 1e-3
-PYBIGWIG_MODULE = "pyBigWig"
-PYBIGWIG_INSTALL_HINT = (
-    "Install pyBigWig in the quadsv_dev environment before running "
-    "ankrd30a/run_trps1_proseq.py."
-)
 
 CORRELATION_TARGETS = (
     ("ankrd30a_pb84_2_usage_fraction", "PB84+2 usage fraction"),
@@ -95,16 +89,6 @@ TCGA_QUANTIFICATION_OUTPUTS = (
     PROBE_REGION_COUNTS_NAME,
     PROBE_REGION_USAGE_NAME,
 )
-
-# External tools used only by the ANKRD30A TCGA quantification stage.
-BIOINFO_BIN = HOME / "miniforge3" / "envs" / "bioinfo" / "bin"
-STRINGTIE_BIN = BIOINFO_BIN / "stringtie"
-STRINGTIE_PREPDE_BIN = BIOINFO_BIN / "prepDE.py"
-STRINGTIE_PREPDE_READ_LENGTH = 75
-FEATURECOUNTS_BIN = BIOINFO_BIN / "featureCounts"
-FEATURECOUNTS_THREADS = 4
-FEATURECOUNTS_BATCH_SIZE = 100
-BEDTOOLS_BIN = Path("/opt/homebrew/bin/bedtools")
 
 SAMPLE_COLUMNS = (
     "file_id",
@@ -207,10 +191,3 @@ def _read_required_tsv(
 def _probe_region_feature_name(codeword: int | str) -> str:
     """Return the matrix feature name for one Atera ANKRD30A codeword."""
     return f"probe_{int(codeword)}"
-
-
-def _resolve_tool(path: Path, label: str) -> str:
-    """Return an executable path if configured and present."""
-    if path.exists():
-        return str(path)
-    raise FileNotFoundError(f"{label} executable not found at {project_path(path)}")

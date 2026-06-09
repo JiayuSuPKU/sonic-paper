@@ -12,18 +12,46 @@ matrix containing configured POSTAR3 RBPs and ReMap human TF-ChIP covariates
 `min_counts=100`, `min_bin_pct=0.05`, `min_component_size=100`,
 `rho=0.99`, and `k_neighbors=4`.
 
+## Minimal Dependencies
+
+The full workflow can run from the same shared `quadsv_paper_splisosm` conda environment as
+the [Visium HD analysis](../visiumhd_mouse_cbs/README.md):
+
+```bash
+mamba create -y -n quadsv_paper_splisosm -c conda-forge -c bioconda \
+  python=3.12 numpy pandas scipy matplotlib anndata spatialdata pybigwig \
+  jupyter nbconvert ipykernel black ruff samtools bedtools stringtie subread \
+  htslib pip
+conda run -n quadsv_paper_splisosm python -m pip install splisosm==1.2.0
+```
+
+Python requirements used directly by these scripts are `splisosm`, `numpy`,
+`pandas`, `scipy`, `matplotlib`, `anndata`, `spatialdata`, and `pyBigWig`.
+The notebooks additionally need `jupyter`, `nbconvert`, and `ipykernel`.
+`black` and `ruff` are only needed for code checks.
+
+The [ANKRD30A TCGA stage](./ankrd30a/) also requires command-line tools available on `PATH` or
+inside the active conda environment: `samtools`, `stringtie`, `prepDE.py`,
+`featureCounts` from `subread`, and `bedtools`. Controlled TCGA BAM slicing
+also requires a valid GDC token passed with `--token-file`, `GDC_TOKEN_FILE`, or
+`GDC_TOKEN`; the downloader uses the GDC API directly and does not need the
+`gdc-client` executable.
+
+If importing `spatialdata` raises a Numba cache error on this machine, rerun
+with `NUMBA_DISABLE_JIT=1`.
+
 ## How To Run
 
 All commands assume the repository root is the current working directory.
 
 ```bash
-/Users/jysumac/miniforge3/envs/quadsv_dev/bin/python scripts/atera_ffpe_human_brca/workflow.py --n-jobs 8
+conda run -n quadsv_paper_splisosm python scripts/atera_ffpe_human_brca/workflow.py --n-jobs 8
 ```
 
 Use `--force` to recompute cached outputs:
 
 ```bash
-/Users/jysumac/miniforge3/envs/quadsv_dev/bin/python scripts/atera_ffpe_human_brca/workflow.py --force --n-jobs 8
+conda run -n quadsv_paper_splisosm python scripts/atera_ffpe_human_brca/workflow.py --force --n-jobs 8
 ```
 
 By default, `workflow.py` runs SV, all-SVP DU, all-SVP probe genome/transcript
@@ -38,8 +66,8 @@ figure-specific panel code and reads only workflow-generated caches.
 Standalone downstream entry points:
 
 ```bash
-/Users/jysumac/miniforge3/envs/quadsv_dev/bin/python scripts/atera_ffpe_human_brca/plot_top20_svp_probe_transcript_panels.py --render
-/Users/jysumac/miniforge3/envs/quadsv_dev/bin/python scripts/atera_ffpe_human_brca/run_ankrd30a_analysis.py
+conda run -n quadsv_paper_splisosm python scripts/atera_ffpe_human_brca/plot_top20_svp_probe_transcript_panels.py --render
+conda run -n quadsv_paper_splisosm python scripts/atera_ffpe_human_brca/run_ankrd30a_analysis.py
 ```
 
 The standalone `run_ankrd30a_analysis.py` file wraps the ANKRD30A-specific analysis, which lives in the `ankrd30a/` subfolder:
@@ -89,13 +117,12 @@ Reference inputs live under `~/reference/`:
 Download helpers are intentionally small and idempotent:
 
 ```bash
-/Users/jysumac/miniforge3/envs/quadsv_dev/bin/python scripts/atera_ffpe_human_brca/download_pb_brca.py
-/Users/jysumac/miniforge3/envs/quadsv_dev/bin/python scripts/atera_ffpe_human_brca/ankrd30a/download_tcga_brca_ankrd30a.py --token-file /path/to/gdc-token.txt --threads 8
-/Users/jysumac/miniforge3/envs/quadsv_dev/bin/python scripts/atera_ffpe_human_brca/ankrd30a/download_tcga_brca_clinical_expression.py
+conda run -n quadsv_paper_splisosm python scripts/atera_ffpe_human_brca/download_pb_brca.py
+conda run -n quadsv_paper_splisosm python scripts/atera_ffpe_human_brca/ankrd30a/download_tcga_brca_ankrd30a.py --token-file /path/to/gdc-token.txt --threads 8
+conda run -n quadsv_paper_splisosm python scripts/atera_ffpe_human_brca/ankrd30a/download_tcga_brca_clinical_expression.py
 ```
 
-Runtime settings, tool paths, regulator lists, and output folders live in
-`config.py`.
+Runtime settings, regulator lists, and output folders live in `config.py`.
 
 ## Outputs
 
@@ -147,9 +174,9 @@ figures/atera_ffpe_human_brca/top20_svp_probe_transcript_panels/
 ## Code Checks
 
 ```bash
-/Users/jysumac/miniforge3/envs/quadsv_dev/bin/python -m ruff check scripts/atera_ffpe_human_brca/*.py scripts/atera_ffpe_human_brca/ankrd30a
-/Users/jysumac/miniforge3/envs/quadsv_dev/bin/python -m black --check scripts/atera_ffpe_human_brca/*.py scripts/atera_ffpe_human_brca/ankrd30a
-/Users/jysumac/miniforge3/envs/quadsv_dev/bin/python -m compileall -q scripts/atera_ffpe_human_brca
+conda run -n quadsv_paper_splisosm python -m ruff check scripts/atera_ffpe_human_brca/*.py scripts/atera_ffpe_human_brca/ankrd30a
+conda run -n quadsv_paper_splisosm python -m black --check scripts/atera_ffpe_human_brca/*.py scripts/atera_ffpe_human_brca/ankrd30a
+conda run -n quadsv_paper_splisosm python -m compileall -q scripts/atera_ffpe_human_brca
 ```
 
 The notebook is intentionally excluded from ruff/black because it is the manual

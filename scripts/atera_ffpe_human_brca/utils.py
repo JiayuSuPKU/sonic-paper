@@ -3,7 +3,6 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
-import os
 import resource
 import shutil
 import time
@@ -13,15 +12,6 @@ from collections.abc import Iterable
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
-
-os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
-os.environ.setdefault("MPLBACKEND", "Agg")
-os.environ.setdefault("MPLCONFIGDIR", "/private/tmp/quadsv_mplconfig")
-os.environ.setdefault("XDG_CACHE_HOME", "/private/tmp/quadsv_cache")
-
-# Direct matplotlib and numba caches away from the repo and non-writable homes.
-Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
-Path(os.environ["XDG_CACHE_HOME"]).mkdir(parents=True, exist_ok=True)
 
 import numpy as np
 import pandas as pd

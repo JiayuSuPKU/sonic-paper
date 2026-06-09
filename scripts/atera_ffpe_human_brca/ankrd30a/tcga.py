@@ -38,9 +38,6 @@ from ..utils import bh_fdr, log, normalize_gene_symbol, project_path
 from .common import (
     CORRELATION_MIN_SAMPLES,
     CORRELATION_TARGETS,
-    FEATURECOUNTS_BATCH_SIZE,
-    FEATURECOUNTS_BIN,
-    FEATURECOUNTS_THREADS,
     PB_TRANSCRIPTS_OF_INTEREST,
     PROBE_REGION_CODEWORDS,
     PROBE_REGION_COUNTS_NAME,
@@ -48,9 +45,6 @@ from .common import (
     PROBE_REGION_USAGE_NAME,
     QUANT_SAMPLE_COLUMNS,
     SAMPLE_COLUMNS,
-    STRINGTIE_BIN,
-    STRINGTIE_PREPDE_BIN,
-    STRINGTIE_PREPDE_READ_LENGTH,
     TARGET_GENE,
     TCGA_QUANTIFICATION_OUTPUTS,
     TRANSCRIPT_COUNT_NAME,
@@ -59,13 +53,18 @@ from .common import (
     _quant_path,
     _read_required_tsv,
     _require_columns,
-    _resolve_tool,
     default_slice_region_1based,
 )
 from .long_read import all_pacbio_ankrd30a_transcript_ids
 
 PROBE_REGION_AGGREGATION_COLUMN = "probe_region_aggregation"
 PROBE_REGION_AGGREGATION_VALUE = "sum_regions_by_codeword"
+STRINGTIE_CMD = "stringtie"
+STRINGTIE_PREPDE_CMD = "prepDE.py"
+STRINGTIE_PREPDE_READ_LENGTH = 75
+FEATURECOUNTS_CMD = "featureCounts"
+FEATURECOUNTS_THREADS = 4
+FEATURECOUNTS_BATCH_SIZE = 100
 
 
 def _sample_key(row: dict[str, object]) -> str:
@@ -257,7 +256,7 @@ def _run_featurecounts_probe_counts(
     work_dir: Path,
 ) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
     """Count direct probe-region and broad gene-region fragments with featureCounts."""
-    featurecounts = _resolve_tool(FEATURECOUNTS_BIN, "featureCounts")
+    featurecounts = FEATURECOUNTS_CMD
 
     saf = work_dir / "ankrd30a_probe_regions.saf"
     _write_featurecounts_saf(saf, probe_regions)
@@ -355,8 +354,8 @@ def _run_stringtie_transcript_counts(
     work_dir: Path,
 ) -> tuple[dict[str, dict[str, float]], list[str]]:
     """Estimate PacBio transcript raw counts from sliced BAMs with StringTie/prepDE."""
-    stringtie = _resolve_tool(STRINGTIE_BIN, "StringTie")
-    prepde = _resolve_tool(STRINGTIE_PREPDE_BIN, "StringTie prepDE.py")
+    stringtie = STRINGTIE_CMD
+    prepde = STRINGTIE_PREPDE_CMD
 
     guide = work_dir / "ankrd30a_pacbio_qc_guide.gff"
     required_transcripts = _write_ankrd30a_pacbio_guide(guide)

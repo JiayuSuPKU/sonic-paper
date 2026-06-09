@@ -25,7 +25,6 @@ statistical tests.
 from __future__ import annotations
 
 import argparse
-import importlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -36,6 +35,7 @@ if __package__ in {None, ""}:
 
 import numpy as np
 import pandas as pd
+import pyBigWig
 
 from ..config import (
     ANKRD30A_TRANSCRIPT_ANNOTATIONS_CSV,
@@ -50,8 +50,6 @@ from .common import (
     DEFAULT_SLICE_REGION,
     PB_EVENT_CLASS_BY_TRANSCRIPT,
     PB_TRANSCRIPT_SHORT_LABELS,
-    PYBIGWIG_INSTALL_HINT,
-    PYBIGWIG_MODULE,
     TARGET_GENE,
     TRPS1_PROSEQ_GEO_ACCESSION,
     TRPS1_PROSEQ_SIGNAL_EPSILON,
@@ -60,13 +58,6 @@ from .common import (
     TRPS1_PROSEQ_TSS_HALF_WINDOW_BP,
     default_slice_region_1based,
 )
-
-# Import pyBigWig lazily through the configured module name so dependency
-# errors point users to the ANKRD30A PRO-seq workflow requirement.
-try:
-    pyBigWig = importlib.import_module(PYBIGWIG_MODULE)
-except ImportError as exc:
-    raise ImportError(PYBIGWIG_INSTALL_HINT) from exc
 
 
 def _ensure_dirs() -> None:
