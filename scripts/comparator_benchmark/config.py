@@ -1,0 +1,356 @@
+"""Static configuration for the comparator benchmark scripts.
+
+Mirrors the structure of ``scripts/visiumhd_mouse_cbs/config.py``: top-level
+path constants first, then magic thresholds, then a per-panel dataclass with
+all dataset-specific paths / GEO accessions / curated gene lists, and finally
+panel-specific download metadata (sample lists, GSM dictionaries) used by
+the downloader scripts.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Roots — mirror visiumhd_mouse_cbs/config.py:7-14
+# ---------------------------------------------------------------------------
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = PROJECT_ROOT / "data"
+QUADSV_SRC = (
+    Path(os.environ.get("QUADSV_SRC", PROJECT_ROOT.parent / "quadsv"))
+    .expanduser()
+    .resolve()
+)
+
+RESULT_DIR = PROJECT_ROOT / "results" / "comparator_benchmark"
+FIGURE_DIR = PROJECT_ROOT / "figures" / "comparator_benchmark"
+
+NUMBA_CACHE_DIR = Path(
+    os.environ.get("NUMBA_CACHE_DIR", PROJECT_ROOT / ".cache" / "numba")
+)
+NUMBA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("NUMBA_CACHE_DIR", str(NUMBA_CACHE_DIR))
+
+# ---------------------------------------------------------------------------
+# Sweep / test thresholds
+# ---------------------------------------------------------------------------
+
+PRESENCE_THRESHOLD = 0.05
+MAX_GENES = 3000
+N_RADIAL_BINS = 30
+EPS = 1e-12  # numerical floor for log/divide
+
+# ---------------------------------------------------------------------------
+# Comparator benchmark workflow settings and cache names
+# ---------------------------------------------------------------------------
+
+TEST_LABELS: tuple[str, ...] = ("DE", "DF", "DF_norm")
+SPATIAL_TESTS: tuple[tuple[str, bool], ...] = (("DF", False), ("DF_norm", True))
+RADIAL_BIN_DIAGNOSTIC_BINS: tuple[int, ...] = (8, 12, 16, 24, 30, 45)
+
+AD_PIG_FULL_INPUTS: tuple[str, ...] = ("raw", "log1p")
+AD_PIG_FULL_BINNINGS: tuple[str, ...] = ("linear", "log")
+AD_PIG_FULL_FEATURE_MODES: tuple[str, ...] = ("radial", "2d")
+AD_PIG_REFERENCE_INPUT = "raw"
+AD_PIG_REFERENCE_BINNING = "linear"
+AD_PIG_REFERENCE_FEATURE_MODE = "radial"
+AD_PIG_REFERENCE_N_RADIAL_BINS = N_RADIAL_BINS
+AD_PIG_FDR_ALPHA = 0.05
+AD_PIG_ENRICHMENT_TOP_N = 100
+
+AD_PIG_FULL_TESTS_FILE = "ad_pig_full_tests.csv"
+AD_PIG_FULL_NULL_ECDF_FILE = "ad_pig_full_null_ecdf.csv"
+AD_PIG_RADIAL_BIN_ROBUSTNESS_FILE = "ad_pig_radial_bin_robustness.csv"
+AD_PIG_ANISOTROPY_FILE = "ad_pig_anisotropy.csv"
+AD_PIG_SPECTRAL_REPLICATE_DISTANCE_FILE = "ad_pig_spectral_replicate_distance.csv"
+AD_ENRICH_CONTRAST_FILE = "ad_pig_enrichment_contrasts.csv"
+
+ANISOTROPY_METHOD = "quadsv.comparators.features.power_spectrum_anisotropy"
+CLUSTERPROFILER_RSCRIPT = Path(__file__).with_name("run_clusterprofiler_enrichment.R")
+
+# ---------------------------------------------------------------------------
+# Stockholm Spatial Transcriptomics geometry (ad_pig only)
+# ---------------------------------------------------------------------------
+
+ST_SPOT_PITCH_UM = 200.0  # spot-to-spot distance, centre to centre
+
+# ---------------------------------------------------------------------------
+# Curated gene panels
+# ---------------------------------------------------------------------------
+
+# AD/PIG probe QC from the original analysis notes. Three probes with design
+# issues are removed; cross-reactive probes are assigned to the shared family
+# symbols used for downstream ranking and enrichment.
+AD_PIG_DROP_PROBES: tuple[str, ...] = ("H2-D1", "Cd63-ps", "RP23-269H21.1")
+AD_PIG_RENAME_PROBES: dict[str, str] = {
+    "C4a": "C4",
+    "C4b": "C4",
+    "Serpina3n": "Serpina3",
+    "Lyz2": "Lyz",
+}
+AD_PIG_STALE_PROBE_NAMES = frozenset(AD_PIG_DROP_PROBES) | frozenset(
+    AD_PIG_RENAME_PROBES
+)
+
+# Full PIG (plaque-induced gene) module from Chen et al. *Cell* 2020 —
+# genes co-induced around amyloid plaques in AppNL-G-F cortex (their
+# Table S2 + Fig 4 module-A signature). Used as the ad_pig positive-
+# control set. Includes the original 10-gene "core" subset (Cst7,
+# Tyrobp, C4, Ctsd, Gfap, Trem2, Apoe, Hexb, Cd68, Itgax) plus the
+# wider complement-cascade (C1q*, C4*), microglial-effector (Csf1r,
+# Mpeg1, Plek), endo-lysosomal (Cts*, Hex*, Lgmn, Man2b1, Npc2),
+# antigen-presentation (H2-K1, B2m), and additional Iba1/CD9-class
+# markers from the broader module. Names below are post-QC symbols.
+AD_PIG_POS_CONTROLS: tuple[str, ...] = (
+    "Apoe",
+    "Arpc1b",
+    "Axl",
+    "B2m",
+    "C1qa",
+    "C1qb",
+    "C1qc",
+    "C4",
+    "Cd63",
+    "Cd9",
+    "Clu",
+    "Csf1r",
+    "Cst3",
+    "Ctsa",
+    "Ctsb",
+    "Ctsd",
+    "Ctsh",
+    "Ctsl",
+    "Ctss",
+    "Ctsz",
+    "Cx3cr1",
+    "Cyba",
+    "Fcer1g",
+    "Fcgr3",
+    "Fcrls",
+    "Gfap",
+    "Gns",
+    "Gpx4",
+    "Grn",
+    "Gusb",
+    "H2-K1",
+    "Hexa",
+    "Hexb",
+    "Igfbp5",
+    "Itgb5",
+    "Itm2b",
+    "Laptm5",
+    "Lgals3bp",
+    "Lgmn",
+    "Ly86",
+    "Lyz",
+    "Man2b1",
+    "Mpeg1",
+    "Npc2",
+    "Olfml3",
+    "Plek",
+    "Prdx6",
+    "Rpl18a",
+    "S100a6",
+    "Serpina3",
+    "Trem2",
+    "Tyrobp",
+    "Vsir",
+)
+
+# Curated trajectory-class marker panel for the continuous postnatal-time
+# analysis (``brain_dev``). Five trajectory classes cover developmental
+# dynamics of the mouse postnatal brain (P5 -> P60). Each class supports one
+# canonical temporal-shape pattern the ``DF`` test should distinguish from a
+# linear DE baseline.
+BRAIN_DEV_TRAJECTORY_MARKERS: dict[str, tuple[str, ...]] = {
+    # Monotonic decline P5 → P60. Radial-glia / neural progenitor
+    # markers — abundant in proliferative niches at P5, lost as the
+    # niche resolves.
+    "progenitor_decline": (
+        "Fabp7",  # BLBP, radial glia / astrocyte progenitor
+        "Vim",  # vimentin, radial glia intermediate filament
+        "Slc1a3",  # GLAST, radial-glial Glu transporter
+        "Nes",  # nestin, neural stem-cell marker
+        "Sox2",  # neural stem-cell TF
+        "Pax6",  # cortical progenitor TF
+        "Mki67",  # proliferation marker
+    ),
+    # Inverted-U / peak at P5–P12, decline by P21+. Immature /
+    # migrating neuron markers. Headline non-monotonic class — a
+    # linear pearson r on time gives a near-zero coefficient even
+    # though the spatial pattern at P5 and P60 differs dramatically
+    # from P12.
+    "immature_neuron_peak": (
+        "Dcx",  # doublecortin, gold-standard immature-neuron marker
+        "Cd24a",  # surface marker on immature neurons
+        "Tubb2b",  # tubulin β-2B, neuronal microtubule
+        "Dpysl3",  # CRMP4, axonal pathfinding
+        "Dpysl5",  # CRMP5, related axonal pathfinding
+        "Sox11",  # immature-neuron TF
+        "Neurod2",  # immature-neuron TF
+    ),
+    # Monotonic rise → plateau by P21. Mature-neuron synaptic /
+    # cytoskeletal markers — accumulate as the network matures.
+    "mature_neuron_rise": (
+        "Snap25",  # SNARE, synaptic vesicle exocytosis
+        "Syp",  # synaptophysin, presynaptic vesicle
+        "Syn1",  # synapsin I
+        "Map2",  # microtubule-associated protein, dendrites
+        "Rbfox3",  # NeuN, mature-neuron splicing factor
+    ),
+    # Late rise, accelerates after P14. Myelin / oligodendrocyte
+    # markers — myelination peaks P14–P30 in mouse, plateaus by P60.
+    "myelin_late_rise": (
+        "Mbp",  # myelin basic protein
+        "Plp1",  # proteolipid protein 1
+        "Mag",  # myelin-associated glycoprotein
+        "Mog",  # myelin oligodendrocyte glycoprotein
+        "Cnp",  # 2',3'-cyclic nucleotide phosphodiesterase
+    ),
+    # Post-P5 rise, plateau by P14–P21. Mature astrocytes — Gfap is
+    # cleared from radial glia then re-expressed in mature astrocytes,
+    # so its trajectory is region-dependent and worth showcasing.
+    "astrocyte_mature_rise": (
+        "Gfap",  # astrocyte intermediate filament
+        "Aldh1l1",  # mature astrocyte marker
+        "S100b",  # astrocyte Ca²⁺-binding protein
+    ),
+}
+
+BRAIN_DEV_TRAJECTORY_FLAT: tuple[str, ...] = tuple(
+    g for genes in BRAIN_DEV_TRAJECTORY_MARKERS.values() for g in genes
+)  # 27 genes total
+
+# ---------------------------------------------------------------------------
+# PanelConfig — per-panel paths + GEO accession + curated genes.
+# Mirrors `DatasetConfig` in visiumhd_mouse_cbs/config.py:38-101.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PanelConfig:
+    key: str
+    data_root: Path  # e.g. data/ad_pig — has raw/, adata/, ...
+    metadata_csv: Path  # row-per-sample metadata table the loader reads
+    pos_controls: tuple[str, ...]
+    geo_accession: str | None = None  # downloaders use these; benchmark ignores
+    raw_url: str | None = None
+    raw_min_bytes: int | None = None
+
+
+PANELS: dict[str, PanelConfig] = {
+    "ad_pig": PanelConfig(
+        key="ad_pig",
+        data_root=DATA_ROOT / "ad_pig",
+        metadata_csv=DATA_ROOT / "ad_pig" / "metadata.csv",
+        pos_controls=AD_PIG_POS_CONTROLS,
+        geo_accession="GSE152506",
+        raw_url=(
+            "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE152nnn/"
+            "GSE152506/suppl/GSE152506_raw_counts.txt.gz"
+        ),
+        raw_min_bytes=200_000_000,  # ~258 MB expected
+    ),
+    # Continuous postnatal-time brain-development panel. ``build_sample_sets``
+    # emits a single SampleSet with a continuous ``log_pn_day`` design over
+    # all six timepoints (P5, P7, P9, P12, P21, P60) of the ANTERIOR plane
+    # (n = 17). Positive controls are the curated trajectory-class markers.
+    "brain_dev": PanelConfig(
+        key="brain_dev",
+        data_root=DATA_ROOT / "brain_dev",
+        metadata_csv=DATA_ROOT / "brain_dev" / "metadata.csv",
+        pos_controls=BRAIN_DEV_TRAJECTORY_FLAT,
+        geo_accession="GSE313896",
+        raw_url=(
+            "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE313nnn/"
+            "GSE313896/suppl/GSE313896_RAW.tar"
+        ),
+        raw_min_bytes=2_000_000_000,  # ~2.4 GB expected
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
+# AD/PIG (GSE152506) — Stockholm ST sample list
+# (sample_title, genotype, age_months) parsed from GEO sample-level metadata.
+# ---------------------------------------------------------------------------
+
+AD_PIG_SAMPLES: tuple[tuple[str, str, int], ...] = (
+    ("B02_D1", "WT", 3),
+    ("B02_E1", "WT", 3),
+    ("B03_C2", "WT", 3),
+    ("B03_D2", "WT", 3),
+    ("N02_C1", "TG", 3),
+    ("N02_D1", "TG", 3),
+    ("N03_C2", "TG", 3),
+    ("N03_D2", "TG", 3),
+    ("B07_C2", "WT", 6),
+    ("N07_C1", "TG", 6),
+    ("B06_E1", "WT", 12),
+    ("N06_D2", "TG", 12),
+    ("B04_D1", "WT", 18),
+    ("B04_E1", "WT", 18),
+    ("B05_D2", "WT", 18),
+    ("B05_E2", "WT", 18),
+    ("N04_D1", "TG", 18),
+    ("N04_E1", "TG", 18),
+    ("N05_C2", "TG", 18),
+    ("N05_D2", "TG", 18),
+)
+
+
+# ---------------------------------------------------------------------------
+# Postnatal brain (GSE313896) — GSM ID → canonical sample title
+# ---------------------------------------------------------------------------
+
+BRAIN_DEV_GSM_TITLES: dict[str, str] = {
+    "GSM9377328": "P5_THALAMIC_PLANE_REP1",
+    "GSM9377329": "P5_ANTERIOR_PLANE_REP1",
+    "GSM9377330": "P7_THALAMIC_PLANE_REP1",
+    "GSM9377331": "P7_ANTERIOR_PLANE_REP1",
+    "GSM9377332": "P12_THALAMIC_PLANE_REP1",
+    "GSM9377333": "P12_ANTERIOR_PLANE_REP1",
+    "GSM9377334": "P9_THALAMIC_PLANE_REP1",
+    "GSM9377335": "P9_ANTERIOR_PLANE_REP1",
+    "GSM9377336": "P9_BRAINSTEM_PLANE_REP1",
+    "GSM9377337": "P12_BRAINSTEM_PLANE_REP1",
+    "GSM9377338": "P5_BRAINSTEM_PLANE_REP1",
+    "GSM9377339": "P5_THALAMIC_PLANE_REP2",
+    "GSM9377340": "P7_BRAINSTEM_PLANE_REP1",
+    "GSM9377341": "P7_ANTERIOR_PLANE_REP2",
+    "GSM9377342": "P9_THALAMIC_PLANE_REP2",
+    "GSM9377343": "P9_BRAINSTEM_PLANE_REP2",
+    "GSM9377344": "P9_ANTERIOR_PLANE_REP2",
+    "GSM9377345": "P12_BRAINSTEM_PLANE_REP2",
+    "GSM9377346": "P12_THALAMIC_PLANE_REP2",
+    "GSM9377347": "P12_ANTERIOR_PLANE_REP2",
+    "GSM9377348": "P60_ANTERIOR_PLANE_REP2",
+    "GSM9377349": "P60_BRAINSTEM_PLANE_REP1",
+    "GSM9377350": "P60_THALAMIC_PLANE_REP1",
+    "GSM9377351": "P60_ANTERIOR_PLANE_REP1",
+    "GSM9377352": "P5_BRAINSTEM_PLANE_REP2",
+    "GSM9377353": "P5_ANTERIOR_PLANE_REP2",
+    "GSM9377354": "P60_BRAINSTEM_PLANE_REP2",
+    "GSM9377355": "P21_THALAMIC_PLANE_REP1",
+    "GSM9377356": "P21_BRAINSTEM_PLANE_REP1",
+    "GSM9377357": "P7_BRAINSTEM_PLANE_REP2",
+    "GSM9377358": "P21_ANTERIOR_PLANE_REP2",
+    "GSM9377359": "P21_THALAMIC_PLANE_REP2",
+    "GSM9377360": "P21_BRAINSTEM_PLANE_REP2",
+    "GSM9377361": "P21_ANTERIOR_PLANE_REP1",
+    "GSM9377362": "P12_ANTERIOR_PLANE_REP3",
+    "GSM9377363": "P5_ANTERIOR_PLANE_REP3",
+    "GSM9377364": "P5_BRAINSTEM_PLANE_REP3",
+    "GSM9377365": "P5_THALAMIC_PLANE_REP3",
+    "GSM9377366": "P7_ANTERIOR_PLANE_REP3",
+    "GSM9377367": "P7_THALAMIC_PLANE_REP2",
+    "GSM9377368": "P12_BRAINSTEM_PLANE_REP3",
+    "GSM9377369": "P12_THALAMIC_PLANE_REP3",
+    "GSM9377370": "P60_ANTERIOR_PLANE_REP3",
+    "GSM9377371": "P60_THALAMIC_PLANE_REP2",
+    "GSM9377372": "P60_BRAINSTEM_PLANE_REP3",
+    "GSM9377373": "P9_ANTERIOR_PLANE_REP3",
+}

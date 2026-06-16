@@ -1,0 +1,29 @@
+name: quadsv_paper
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - anndata
+  - scanpy
+  - spatialdata
+  - finufft
+  - s3fs
+  - numba
+  - joblib
+  - tqdm
+  - nbconvert
+  - ipykernel
+  - r-base
+  - bioconductor-clusterprofiler
+  - bioconductor-org.mm.eg.db
+  - bioconductor-annotationdbi
+  - setuptools
+  - setuptools-scm
+  - wheel
+  - pip
+  - adjusttext
