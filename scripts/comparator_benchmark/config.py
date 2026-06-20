@@ -68,18 +68,31 @@ AD_PIG_ANISOTROPY_FILE = "ad_pig_anisotropy.csv"
 AD_PIG_SPECTRAL_REPLICATE_DISTANCE_FILE = "ad_pig_spectral_replicate_distance.csv"
 AD_ENRICH_CONTRAST_FILE = "ad_pig_enrichment_contrasts.csv"
 
-ANISOTROPY_METHOD = "quadsv.comparators.features.power_spectrum_anisotropy"
+BRAIN_DEV_REFERENCE_INPUT = "raw"
+BRAIN_DEV_REFERENCE_BINNING = "linear"
+BRAIN_DEV_REFERENCE_FEATURE_MODE = "2d"
+BRAIN_DEV_REFERENCE_N_RADIAL_BINS = N_RADIAL_BINS
+BRAIN_DEV_FULL_INPUTS: tuple[str, ...] = ("raw", "log1p")
+BRAIN_DEV_FULL_FEATURE_MODES: tuple[str, ...] = ("radial", "2d")
+BRAIN_DEV_NULL_PERMUTATIONS = 50
+BRAIN_DEV_TIMEPOINT_ORDER: tuple[str, ...] = ("P5", "P7", "P9", "P12", "P21", "P60")
+BRAIN_DEV_ENRICHMENT_TOP_N = 100
+BRAIN_DEV_CELL_TYPE_PROGRAM_TOP_N = 8
+BRAIN_DEV_CELL_TYPE_CONTROL_TOP_N = 30
+BRAIN_DEV_TESTS_FILE = "brain_dev_tests.csv"
+BRAIN_DEV_NULL_ECDF_FILE = "brain_dev_null_ecdf.csv"
+BRAIN_DEV_ANISOTROPY_FILE = "brain_dev_anisotropy.csv"
+BRAIN_DEV_POSITIVE_CONTROLS_FILE = "brain_dev_positive_controls.csv"
+BRAIN_DEV_ENRICH_CONTRAST_FILE = "brain_dev_enrichment_contrasts.csv"
+
 CLUSTERPROFILER_RSCRIPT = Path(__file__).with_name("run_clusterprofiler_enrichment.R")
 
 # ---------------------------------------------------------------------------
+# Dataset and QC constants
+# ---------------------------------------------------------------------------
+
 # Stockholm Spatial Transcriptomics geometry (ad_pig only)
-# ---------------------------------------------------------------------------
-
 ST_SPOT_PITCH_UM = 200.0  # spot-to-spot distance, centre to centre
-
-# ---------------------------------------------------------------------------
-# Curated gene panels
-# ---------------------------------------------------------------------------
 
 # AD/PIG probe QC from the original analysis notes. Three probes with design
 # issues are removed; cross-reactive probes are assigned to the shared family
@@ -94,6 +107,16 @@ AD_PIG_RENAME_PROBES: dict[str, str] = {
 AD_PIG_STALE_PROBE_NAMES = frozenset(AD_PIG_DROP_PROBES) | frozenset(
     AD_PIG_RENAME_PROBES
 )
+
+# 10x Visium geometry (brain_dev only)
+BRAIN_DEV_SPOT_DIAMETER_UM = 55.0  # capture-spot diameter
+BRAIN_DEV_MIN_GENE_SPOTS = 3
+BRAIN_DEV_MIN_COUNTS_PER_SPOT = 3_000
+BRAIN_DEV_MAX_COUNTS_PER_SPOT = 50_000
+
+# ---------------------------------------------------------------------------
+# Curated gene panels
+# ---------------------------------------------------------------------------
 
 # Full PIG (plaque-induced gene) module from Chen et al. *Cell* 2020 —
 # genes co-induced around amyloid plaques in AppNL-G-F cortex (their
@@ -160,69 +183,163 @@ AD_PIG_POS_CONTROLS: tuple[str, ...] = (
     "Vsir",
 )
 
-# Curated trajectory-class marker panel for the continuous postnatal-time
-# analysis (``brain_dev``). Five trajectory classes cover developmental
-# dynamics of the mouse postnatal brain (P5 -> P60). Each class supports one
-# canonical temporal-shape pattern the ``DF`` test should distinguish from a
-# linear DE baseline.
-BRAIN_DEV_TRAJECTORY_MARKERS: dict[str, tuple[str, ...]] = {
-    # Monotonic decline P5 → P60. Radial-glia / neural progenitor
-    # markers — abundant in proliferative niches at P5, lost as the
-    # niche resolves.
-    "progenitor_decline": (
-        "Fabp7",  # BLBP, radial glia / astrocyte progenitor
-        "Vim",  # vimentin, radial glia intermediate filament
-        "Slc1a3",  # GLAST, radial-glial Glu transporter
-        "Nes",  # nestin, neural stem-cell marker
-        "Sox2",  # neural stem-cell TF
-        "Pax6",  # cortical progenitor TF
-        "Mki67",  # proliferation marker
+
+# Local copy of the Cell 2026 brain-vascularization supplement used to define
+# the brain-development positive controls.
+BRAIN_DEV_TABLE_S4_CNMFS = (
+    DATA_ROOT / "brain_dev" / "supplementary" / "table_s4_cnmf_programs.xlsx"
+)
+
+# Paper-derived positive-control groups for the continuous postnatal-time
+# analysis (``brain_dev``). These map to Table S4 cNMF enrichment rows. The
+# workflow selects the most enriched programs per group, then ranks their genes
+# by mean cNMF score.
+BRAIN_DEV_CELL_TYPE_CONTROL_GROUPS: dict[str, tuple[str, ...]] = {
+    "immature_neuron": (
+        "Immature neurons",
+        "Cytoskeleton/axon scaffold",
     ),
-    # Inverted-U / peak at P5–P12, decline by P21+. Immature /
-    # migrating neuron markers. Headline non-monotonic class — a
-    # linear pearson r on time gives a near-zero coefficient even
-    # though the spatial pattern at P5 and P60 differs dramatically
-    # from P12.
-    "immature_neuron_peak": (
-        "Dcx",  # doublecortin, gold-standard immature-neuron marker
-        "Cd24a",  # surface marker on immature neurons
-        "Tubb2b",  # tubulin β-2B, neuronal microtubule
-        "Dpysl3",  # CRMP4, axonal pathfinding
-        "Dpysl5",  # CRMP5, related axonal pathfinding
-        "Sox11",  # immature-neuron TF
-        "Neurod2",  # immature-neuron TF
+    "mature_synaptic_neuron": (
+        "Neurons",
+        "Synaptic vesicle/exocytosis",
     ),
-    # Monotonic rise → plateau by P21. Mature-neuron synaptic /
-    # cytoskeletal markers — accumulate as the network matures.
-    "mature_neuron_rise": (
-        "Snap25",  # SNARE, synaptic vesicle exocytosis
-        "Syp",  # synaptophysin, presynaptic vesicle
-        "Syn1",  # synapsin I
-        "Map2",  # microtubule-associated protein, dendrites
-        "Rbfox3",  # NeuN, mature-neuron splicing factor
+    "astrocyte": ("Astrocyte",),
+    "oligodendrocyte": ("OPC", "Oligodendrocyte"),
+    "vascular": ("Endothelial", "VSMC"),
+}
+
+BRAIN_DEV_CELL_TYPE_MANUAL_GENES: dict[str, tuple[str, ...]] = {
+    "immature_neuron": (
+        "Sox4",
+        "Sox11",
+        "Gap43",
+        "Dcx",
+        "Tubb3",
+        "Kif1a",
+        "Kif5a",
+        "Mapt",
+        "Nefh",
+        "Nefl",
+        "Nefm",
+        "Stmn2",
+        "Tubb2b",
+        "Actb",
     ),
-    # Late rise, accelerates after P14. Myelin / oligodendrocyte
-    # markers — myelination peaks P14–P30 in mouse, plateaus by P60.
-    "myelin_late_rise": (
-        "Mbp",  # myelin basic protein
-        "Plp1",  # proteolipid protein 1
-        "Mag",  # myelin-associated glycoprotein
-        "Mog",  # myelin oligodendrocyte glycoprotein
-        "Cnp",  # 2',3'-cyclic nucleotide phosphodiesterase
+    "mature_synaptic_neuron": (
+        "Camk2a",
+        "Slc17a6",
+        "Slc17a7",
+        "Snap25",
+        "Syt1",
+        "Syt2",
+        "Thy1",
+        "Ppp1r1b",
+        "Grin2c",
+        "Gria1",
+        "Gabra1",
+        "Gabra2",
+        "Gad1",
+        "Gad2",
+        "Nos1",
+        "Pvalb",
+        "Slc32a1",
+        "Slc6a1",
+        "Slc6a11",
+        "Sst",
+        "Vip",
+        "Drd1",
+        "Drd2",
+        "Pantr1",
+        "Calm2",
+        "Ddc",
+        "Nr4a2",
+        "Pitx3",
+        "Slc18a2",
+        "Slc6a3",
+        "Th",
+        "Fev",
+        "Gata2",
+        "Gata3",
+        "Slc6a4",
+        "Tph2",
+        "Dbh",
+        "Slc6a2",
+        "Chat",
+        "Slc18a3",
+        "Slc5a7",
+        "Hdc",
+        "Dlg4",
+        "Slc1a2",
+        "Slc1a3",
+        "Stx1a",
+        "Stx1b",
+        "Syn1",
+        "Syn2",
+        "Syn3",
+        "Syp",
+        "Syt7",
+        "Vamp1",
+        "Vamp2",
     ),
-    # Post-P5 rise, plateau by P14–P21. Mature astrocytes — Gfap is
-    # cleared from radial glia then re-expressed in mature astrocytes,
-    # so its trajectory is region-dependent and worth showcasing.
-    "astrocyte_mature_rise": (
-        "Gfap",  # astrocyte intermediate filament
-        "Aldh1l1",  # mature astrocyte marker
-        "S100b",  # astrocyte Ca²⁺-binding protein
+    "astrocyte": (
+        "Aldh1l1",
+        "Apoe",
+        "Aqp4",
+        "Gja1",
+        "Gfap",
+        "S100b",
+        "Slc1a2",
+        "Slc1a3",
+    ),
+    "oligodendrocyte": (
+        "Cspg4",
+        "Gpr17",
+        "Olig1",
+        "Olig2",
+        "Pdgfra",
+        "Sox10",
+        "Nfasc",
+        "Sirt2",
+        "Cldn11",
+        "Cnp",
+        "Gpr37",
+        "Mag",
+        "Mbp",
+        "Mog",
+        "Plp1",
+    ),
+    "vascular": (
+        "Aplnr",
+        "Cldn5",
+        "Bsg",
+        "Flt1",
+        "Erg",
+        "Slc38a5",
+        "Fn1",
+        "Eng",
+        "Kdr",
+        "Nos3",
+        "Tfrc",
+        "Pecam1",
+        "Tek",
+        "Vwf",
+        "Rgs5",
+        "Acta2",
+        "Cald1",
+        "Cnn1",
+        "Myh11",
+        "Myl9",
+        "Tagln",
     ),
 }
 
-BRAIN_DEV_TRAJECTORY_FLAT: tuple[str, ...] = tuple(
-    g for genes in BRAIN_DEV_TRAJECTORY_MARKERS.values() for g in genes
-)  # 27 genes total
+BRAIN_DEV_CELL_TYPE_LABELS: dict[str, str] = {
+    "immature_neuron": "Immature neuron",
+    "mature_synaptic_neuron": "Mature synaptic neuron",
+    "astrocyte": "Astrocyte",
+    "oligodendrocyte": "Oligodendrocyte",
+    "vascular": "Vascular / mural",
+}
 
 # ---------------------------------------------------------------------------
 # PanelConfig — per-panel paths + GEO accession + curated genes.
@@ -257,12 +374,13 @@ PANELS: dict[str, PanelConfig] = {
     # Continuous postnatal-time brain-development panel. ``build_sample_sets``
     # emits a single SampleSet with a continuous ``log_pn_day`` design over
     # all six timepoints (P5, P7, P9, P12, P21, P60) of the ANTERIOR plane
-    # (n = 17). Positive controls are the curated trajectory-class markers.
+    # (n = 17). Positive controls are paper-derived Table S4 cNMF
+    # cell-type/process genes.
     "brain_dev": PanelConfig(
         key="brain_dev",
         data_root=DATA_ROOT / "brain_dev",
         metadata_csv=DATA_ROOT / "brain_dev" / "metadata.csv",
-        pos_controls=BRAIN_DEV_TRAJECTORY_FLAT,
+        pos_controls=(),  # to be defined later from manual + Table S4 cNMF genes
         geo_accession="GSE313896",
         raw_url=(
             "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE313nnn/"

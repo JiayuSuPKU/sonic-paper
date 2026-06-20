@@ -22,6 +22,7 @@ from scipy import sparse
 from .config import (
     AD_PIG_DROP_PROBES,
     AD_PIG_RENAME_PROBES,
+    BRAIN_DEV_NULL_PERMUTATIONS,
     FIGURE_DIR,
     MAX_GENES,
     N_RADIAL_BINS,
@@ -41,7 +42,7 @@ def _is_comparison_gene(gene: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 1. Logging / fs / plotting
+# 1. Logging / filesystem
 # ---------------------------------------------------------------------------
 
 
@@ -66,28 +67,15 @@ def save_csv(df: pd.DataFrame, path: Path, index: bool = False) -> None:
     log(f"wrote {rel} ({df.shape[0]:,} rows)")
 
 
-def configure_paper_matplotlib() -> None:
-    """Apply the benchmark figure font and line defaults."""
-    import matplotlib as mpl
-
-    mpl.rcParams.update(
-        {
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "font.family": ["Arial", "DejaVu Sans"],
-            "font.size": 6,
-            "axes.titlesize": 7,
-            "axes.labelsize": 6,
-            "xtick.labelsize": 6,
-            "ytick.labelsize": 6,
-            "legend.fontsize": 5.5,
-            "axes.linewidth": 0.6,
-            "xtick.major.width": 0.5,
-            "ytick.major.width": 0.5,
-            "xtick.major.size": 2.5,
-            "ytick.major.size": 2.5,
-        }
-    )
+def cache_has_columns(path: Path, required: set[str]) -> bool:
+    """Return whether a CSV exists and has at least the required columns."""
+    if not path.exists():
+        return False
+    try:
+        df = pd.read_csv(path, nrows=1)
+    except (OSError, pd.errors.EmptyDataError):
+        return False
+    return required.issubset(df.columns)
 
 
 def format_pvalue(p: float) -> str:
@@ -127,6 +115,14 @@ def l1_normalize_rows(values: np.ndarray, eps: float = 1e-12) -> np.ndarray:
 
 def radial_frequency_axis(comparator: Any) -> np.ndarray:
     """Return radial-bin centers for a fitted comparator."""
+    # Comparator class records retained frequency bins in intervals
+    intervals = getattr(comparator, "frequency_bin_intervals_", None)
+    if intervals is not None:
+        intervals = np.asarray(intervals, dtype=float)
+        if intervals.ndim == 2 and intervals.shape[0] == comparator.spectra_.shape[-1]:
+            return 0.5 * (intervals[:, 0] + intervals[:, 1])
+
+    # Fall back to requested edges or unit-spaced bins if intervals are missing.
     n_bins = comparator.spectra_.shape[-1]
     edges = np.asarray(getattr(comparator, "freq_edges", []), dtype=float)
     if len(edges) == n_bins + 1:
@@ -136,10 +132,52 @@ def radial_frequency_axis(comparator: Any) -> np.ndarray:
     return np.arange(n_bins, dtype=float)
 
 
+def scale_visium_spatial_to_spot_diameter_um(
+    adata: ad.AnnData,
+    spot_diameter_um: float,
+    *,
+    obsm_key: str = "spatial",
+) -> ad.AnnData:
+    """Set Visium spatial coordinates in micrometers from raw fullres pixels."""
+    spatial_uns = adata.uns.setdefault("spatial", {})
+    scalefactors = (
+        spatial_uns.setdefault("scalefactors", {})
+        if isinstance(spatial_uns, dict)
+        else {}
+    )
+    fullres_spot_diameter = float(scalefactors.get("spot_diameter_fullres", 0.0))
+    if not np.isfinite(fullres_spot_diameter) or fullres_spot_diameter <= 0:
+        return adata
+
+    if {"pxl_col_in_fullres", "pxl_row_in_fullres"}.issubset(adata.obs.columns):
+        coords = np.column_stack(
+            [
+                adata.obs["pxl_col_in_fullres"].to_numpy(float),
+                adata.obs["pxl_row_in_fullres"].to_numpy(float),
+            ]
+        )
+    elif obsm_key in adata.obsm:
+        coords = np.asarray(adata.obsm[obsm_key], dtype=float)
+    else:
+        return adata
+    if coords.ndim != 2 or coords.shape[1] < 2:
+        return adata
+
+    # Map the current coordinates from fullres pixels to micrometers
+    scale = float(spot_diameter_um) / fullres_spot_diameter
+    adata.obsm[obsm_key] = coords * scale
+    if isinstance(spatial_uns, dict):
+        scalefactors["spot_diameter_um"] = float(spot_diameter_um)
+        scalefactors["coordinate_um_per_input_unit"] = scale
+        scalefactors["coordinate_units"] = "um"
+        scalefactors["coordinate_scale_source"] = "spot_diameter_fullres"
+    return adata
+
+
 def add_length_scale_axis(
     ax: Any,
-    ticks: Sequence[float] = (1 / 2000, 1 / 1000, 1 / 500),
-    labels: Sequence[str] = ("2 mm", "1 mm", "500 um"),
+    ticks: Sequence[float] = (1 / 1000, 1 / 500),
+    labels: Sequence[str] = ("1 mm", "500 um"),
 ) -> Any:
     """Add a top axis with physical length scales for radial frequency plots."""
     sec = ax.secondary_xaxis("top")
@@ -265,23 +303,40 @@ def build_permutation_nulls(
     real_set: SampleSet,
     n_perm: int = 12,
     rng_seed: int = 42,
+    continuous_groups: Sequence[str] | None = None,
 ) -> list[SampleSet]:
     """Generate null contrasts by shuffling sample-level design values.
 
     For binary contrasts, the shuffled design is represented back as
     ``a_paths`` / ``b_paths`` so the downstream two-group test path remains
     unchanged. For continuous-design contrasts, the sample list is fixed and
-    only ``design_values`` is shuffled.
+    only ``design_values`` is shuffled. When ``continuous_groups`` is set, each
+    permuted design value must come from a different group than the target
+    sample, which avoids within-timepoint-only null swaps for brain-dev.
     """
     if real_set.design_values is not None:
         design = np.asarray(real_set.design_values, dtype=float)
+        groups = (
+            None
+            if continuous_groups is None
+            else np.asarray(list(continuous_groups), dtype=str)
+        )
+        if groups is not None and groups.shape[0] != design.shape[0]:
+            raise ValueError("continuous_groups must align with design_values")
         rng = np.random.default_rng(rng_seed)
         seen = {tuple(design.tolist())}
         out: list[SampleSet] = []
         attempts = 0
-        while len(out) < n_perm and attempts < 200 * max(n_perm, 1):
+        max_attempts = 1000 * max(n_perm, 1)
+        while len(out) < n_perm and attempts < max_attempts:
             attempts += 1
-            permuted = rng.permutation(design).astype(float)
+            order = rng.permutation(design.shape[0])
+            # When groups are set, skip permutations that would assign any sample the
+            # same group as itself. This avoids within-timepoint-only null swaps for
+            # the brain development dataset.
+            if groups is not None and np.any(groups[order] == groups):
+                continue
+            permuted = design[order].astype(float)
             key = tuple(permuted.tolist())
             if key in seen:
                 continue
@@ -378,7 +433,15 @@ def build_sample_sets(panel: str, meta: pd.DataFrame) -> list[SampleSet]:
             design_values=log_pn_day,
             design_name="log_pn_day",
         )
-        sets = [real, *build_permutation_nulls(real, n_perm=12, rng_seed=42)]
+        sets = [
+            real,
+            *build_permutation_nulls(
+                real,
+                n_perm=BRAIN_DEV_NULL_PERMUTATIONS,
+                rng_seed=42,
+                continuous_groups=sub["timepoint"].astype(str).tolist(),
+            ),
+        ]
         return sets
 
     raise ValueError(f"Unknown panel: {panel!r}")
@@ -556,11 +619,13 @@ def log1p_normalized_samples(samples: dict[Path, ad.AnnData]) -> dict[Path, ad.A
 # ---------------------------------------------------------------------------
 
 
-def geometric_frequency_edges(  # noqa: C901
-    linear_edges: np.ndarray,
-    comparator=None,
-) -> np.ndarray:
-    """Pure geometric frequency edges, collapsed only to remove empty bins."""
+def geometric_frequency_edges(linear_edges: np.ndarray) -> np.ndarray:
+    """Return the requested geometric radial-frequency edge grid.
+
+    Empty-bin handling is delegated to ``ComparatorIrregular`` via
+    ``adaptive_freq_edges=True`` so fitted comparators record both the requested
+    and actual retained bin counts.
+    """
     edges = np.asarray(linear_edges, dtype=float)
     if (
         edges.ndim != 1
@@ -570,63 +635,7 @@ def geometric_frequency_edges(  # noqa: C901
     ):
         raise ValueError("linear_edges must start at 0 and be strictly increasing.")
 
-    # Generate raw geometric frequency edges from the linear ones.
-    candidate = np.concatenate(
-        ([0.0], np.geomspace(edges[1], edges[-1], edges.size - 1))
-    )
-    if comparator is None:
-        return candidate
-
-    shapes = getattr(comparator, "_grid_shapes", None)
-    spacings = getattr(comparator, "_spacings", None)
-    fft_solver = getattr(comparator, "_spectrum_fft_solver", "rfft2")
-    if shapes is None or spacings is None:
-        return candidate
-
-    # Generate per-sample frequency grids.
-    f_max = float(edges[-1])
-    grids: list[np.ndarray] = []
-    for shape, spacing in zip(shapes, spacings, strict=True):
-        ny, nx = int(shape[0]), int(shape[1])
-        dy, dx = (
-            (float(spacing[0]), float(spacing[1]))
-            if spacing is not None
-            else (1.0, 1.0)
-        )
-        ky = np.fft.fftfreq(ny, d=dy)
-        if fft_solver == "fft2":
-            kx = np.fft.fftfreq(nx, d=dx)
-        elif fft_solver == "rfft2":
-            kx = np.fft.rfftfreq(nx, d=dx)
-        else:
-            raise ValueError(f"Unsupported FFT solver: {fft_solver!r}")
-        kx_grid, ky_grid = np.meshgrid(kx, ky)
-        grid = np.sqrt(kx_grid**2 + ky_grid**2).ravel()
-        grid = grid[(grid > 0) & (grid <= f_max)]
-        if grid.size:
-            grids.append(grid.astype(float))
-    if not grids:
-        return candidate
-
-    # Collapse the geometric frequency edges to remove bins that are empty in any sample.
-    out = candidate
-    while True:
-        empty_idx = None
-        for grid in grids:
-            idx = np.clip(np.digitize(grid, out) - 1, 0, len(out) - 2)
-            counts = np.bincount(idx, minlength=len(out) - 1)
-            empty = np.flatnonzero(counts == 0)
-            if empty.size:
-                empty_idx = int(empty[0])
-                break
-        if empty_idx is None:
-            return out
-        if out.size <= 2:
-            raise RuntimeError("could not collapse log-frequency edges")
-
-        last_bin = out.size - 2
-        remove_edge_idx = empty_idx if empty_idx == last_bin else empty_idx + 1
-        out = np.delete(out, remove_edge_idx)
+    return np.concatenate(([0.0], np.geomspace(edges[1], edges[-1], edges.size - 1)))
 
 
 def fit_all_samples(
@@ -635,13 +644,16 @@ def fit_all_samples(
     feature_mode: str,
     n_radial_bins: int = N_RADIAL_BINS,
     freq_edges: np.ndarray | None = None,
+    adaptive_freq_edges: bool = True,
 ):
     """Fit a ``ComparatorIrregular`` on ALL samples in the panel.
 
     Returns ``(cmp, sample_paths_in_order)``. The comparator is design-
     agnostic with cached ``cmp.spectra_`` array sub-indexed by sample
     and passed to any binary or GLM contrast at call time via
-    ``compare_two_groups`` / ``compare_glm``.
+    ``compare_two_groups`` / ``compare_glm``. Frequency bins are adaptive by
+    default so empty radial bins are merged by QuadSV and the fitted comparator
+    records the actual retained bin count.
     """
     from quadsv import ComparatorIrregular
 
@@ -654,6 +666,7 @@ def fit_all_samples(
         feature_mode=feature_mode,
         n_radial_bins=n_radial_bins,
         freq_edges=freq_edges,
+        adaptive_freq_edges=adaptive_freq_edges,
         obsm_key="spatial",
     )
     t0 = time.time()

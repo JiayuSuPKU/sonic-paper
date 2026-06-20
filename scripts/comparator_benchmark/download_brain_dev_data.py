@@ -43,12 +43,17 @@ if __package__ in {None, ""}:
 
 from .config import (
     BRAIN_DEV_GSM_TITLES,
+    BRAIN_DEV_MAX_COUNTS_PER_SPOT,
+    BRAIN_DEV_MIN_COUNTS_PER_SPOT,
+    BRAIN_DEV_MIN_GENE_SPOTS,
+    BRAIN_DEV_SPOT_DIAMETER_UM,
     PANELS,
 )
 from .utils import (
     download_with_progress,
     gunzip_to,
     human_size,
+    scale_visium_spatial_to_spot_diameter_um,
 )
 
 logger = logging.getLogger("download_brain_dev_data")
@@ -73,6 +78,33 @@ SUFFIX_MAP: list[tuple[str, str]] = [
 SAMPLE_TITLE_RE = re.compile(
     r"^(?P<timepoint>P\d+)_(?P<plane>ANTERIOR|THALAMIC|BRAINSTEM)_PLANE_REP(?P<rep>\d+)$"
 )
+
+
+def _apply_brain_dev_qc(adata, sample_title: str):
+    """Apply the paper-level Visium spot/gene QC before writing AnnData."""
+    import scanpy as sc
+
+    before = (adata.n_obs, adata.n_vars)
+    adata.var_names_make_unique()
+
+    if "in_tissue" in adata.obs:
+        in_tissue = adata.obs["in_tissue"].to_numpy().astype(bool)
+        adata = adata[in_tissue].copy()
+
+    sc.pp.filter_genes(adata, min_cells=BRAIN_DEV_MIN_GENE_SPOTS)
+    sc.pp.filter_cells(adata, min_counts=BRAIN_DEV_MIN_COUNTS_PER_SPOT)
+    sc.pp.filter_cells(adata, max_counts=BRAIN_DEV_MAX_COUNTS_PER_SPOT)
+    sc.pp.filter_genes(adata, min_cells=BRAIN_DEV_MIN_GENE_SPOTS)
+
+    logger.info(
+        "[%s] QC spots %d -> %d, genes %d -> %d",
+        sample_title,
+        before[0],
+        adata.n_obs,
+        before[1],
+        adata.n_vars,
+    )
+    return adata
 
 
 def _list_samples(tarball: Path) -> dict[str, dict[str, str]]:
@@ -144,6 +176,8 @@ def _convert_to_h5ad(
     except Exception as e:  # noqa: BLE001
         logger.error("[%s] load_visium_sample failed: %s", sample_title, e)
         return False
+    adata = _apply_brain_dev_qc(adata, sample_title)
+    adata = scale_visium_spatial_to_spot_diameter_um(adata, BRAIN_DEV_SPOT_DIAMETER_UM)
 
     m = SAMPLE_TITLE_RE.match(sample_title)
     if m:

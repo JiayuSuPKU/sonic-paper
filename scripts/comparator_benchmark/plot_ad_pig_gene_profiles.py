@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
-from scipy import sparse
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -26,8 +25,16 @@ from .config import (
     EPS,
     RESULT_DIR,
 )
-from .utils import (
+from .plot_common import (
     configure_paper_matplotlib,
+)
+from .plot_common import (
+    gene_values as common_gene_values,
+)
+from .plot_common import (
+    gene_vmax as common_gene_vmax,
+)
+from .utils import (
     fit_all_samples,
     format_pvalue,
     l1_normalize_rows,
@@ -98,18 +105,13 @@ class AdPigProfilePlotter:
 
     def gene_values(self, gene: str, path: Path) -> np.ndarray:
         """Return log1p expression values for one gene/sample map."""
-        x = self.samples[path][:, gene].X
-        if sparse.issparse(x):
-            x = x.toarray()
-        return np.log1p(np.asarray(x).ravel())
+        return common_gene_values(self.samples[path], gene)
 
     def gene_vmax(self, gene: str, q: float = 0.99) -> float:
         """Shared upper color limit for the WT/AppNL-G-F maps of one gene."""
-        vals = np.concatenate(
-            [self.gene_values(gene, self.wt_path), self.gene_values(gene, self.ad_path)]
+        return common_gene_vmax(
+            (self.samples[self.wt_path], self.samples[self.ad_path]), gene, q=q
         )
-        vals = vals[np.isfinite(vals)]
-        return max(float(np.quantile(vals, q)), 1e-6)
 
     def plot_spatial(self, ax, gene: str, path: Path, title: str, vmax: float):
         """Draw one spatial expression map with a caller-provided color scale."""
