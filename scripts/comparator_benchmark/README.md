@@ -12,18 +12,17 @@ expression (DE) baseline for both AD/PIG and brain-development benchmarks.
 
 ## Minimal Dependencies
 
-Install the non-`quadsv` dependencies from the environment YAML files. The
-current comparator benchmark environment is below; apply any additional
-`env*.yml` overlays the same way.
+Install the non-`quadsv` dependencies from the root environment YAML file.
+Apply any additional `env*.yml` overlays the same way.
 
 ```bash
-mamba env create -f scripts/comparator_benchmark/environment.yml
+mamba env create -f environment.yml
 ```
 
 For an existing environment:
 
 ```bash
-mamba env update -n quadsv_paper -f scripts/comparator_benchmark/environment.yml --prune
+mamba env update -n quadsv_paper -f environment.yml --prune
 ```
 
 Install `quadsv` interactively from the local source checkout with its dev and
@@ -285,11 +284,9 @@ scripts/comparator_benchmark/
 ├── config.py
 ├── download_ad_pig_data.py
 ├── download_brain_dev_data.py
-├── environment.yml
 ├── plot_ad_pig_gene_profiles.py
 ├── plot_brain_dev_gene_profiles.py
 ├── plot_common.py
-├── run_clusterprofiler_enrichment.R
 ├── utils.py
 ├── workflow.py
 └── visualization.ipynb

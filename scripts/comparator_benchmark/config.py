@@ -85,7 +85,7 @@ BRAIN_DEV_ANISOTROPY_FILE = "brain_dev_anisotropy.csv"
 BRAIN_DEV_POSITIVE_CONTROLS_FILE = "brain_dev_positive_controls.csv"
 BRAIN_DEV_ENRICH_CONTRAST_FILE = "brain_dev_enrichment_contrasts.csv"
 
-CLUSTERPROFILER_RSCRIPT = Path(__file__).with_name("run_clusterprofiler_enrichment.R")
+CLUSTERPROFILER_RSCRIPT = PROJECT_ROOT / "scripts" / "run_clusterprofiler.R"
 
 # ---------------------------------------------------------------------------
 # Dataset and QC constants

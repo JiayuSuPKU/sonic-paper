@@ -1438,6 +1438,8 @@ def _run_topn_enrichment_cache(
                 "variant": variant,
                 "rank": rank,
                 "gene": gene,
+                "orgdb": "org.Mm.eg.db",
+                "organism": "mmu",
                 "out_path": str(enrich_path),
             }
             for rank, gene in enumerate(dict.fromkeys(genes), start=1)

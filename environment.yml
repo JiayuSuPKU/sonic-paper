@@ -21,6 +21,7 @@ dependencies:
   - r-base
   - bioconductor-clusterprofiler
   - bioconductor-org.mm.eg.db
+  - bioconductor-org.hs.eg.db
   - bioconductor-annotationdbi
   - setuptools
   - setuptools-scm
