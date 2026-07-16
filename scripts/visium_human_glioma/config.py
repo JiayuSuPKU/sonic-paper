@@ -25,15 +25,16 @@ MIN_FRAC_PER_SAMPLE = 0.02
 MIN_SAMPLES_FRAC = 0.50
 MIN_SAMPLES_PER_GROUP = 3
 N_RADIAL_BINS = 30
-N_LABEL_PERMUTATIONS = 20
+N_LABEL_PERMUTATIONS = 50
 FDR_ALPHA = 0.05
 
 REAL_TESTS_FILE = RESULT_DIR / "idh_status_tests.csv"
 PERMUTATION_NULL_FILE = RESULT_DIR / "idh_status_permutation_null.csv"
 SPECTRA_FILE = RESULT_DIR / "idh_status_spectra.npz"
 SPATIAL_DIAGNOSTICS_FILE = RESULT_DIR / "idh_status_spatial_diagnostics.csv"
-MAIN_FIGURE_PDF = FIGURE_DIR / "idh_status_expression_patterns.pdf"
-SUPPLEMENTARY_DIAGNOSTICS_PDF = FIGURE_DIR / "idh_status_supp_diagnostics.pdf"
+CACHE_SUMMARY_FILE = RESULT_DIR / "idh_status_cache_summary.json"
+MAIN_FIGURE_PDF = FIGURE_DIR / "idh_main.pdf"
+SUPPLEMENTARY_DIAGNOSTICS_PDF = FIGURE_DIR / "idh_supp.pdf"
 ENRICHMENT_TERMS_FILE = RESULT_DIR / "idh_status_clusterprofiler_enrichment.csv"
 META_PROGRAM_GENE_MAP_FILE = (
     RESULT_DIR / "idh_status_df_norm_top100_metaprogram_map.csv"
@@ -105,7 +106,7 @@ META_PROGRAMS = (
         "key": "ecm_integrin",
         "label": "ECM / integrin",
         "short_label": "ECM",
-        "color": "#5F5F5F",
+        "color": "#303030",
         "genes": ("FN1", "COL1A1", "COL6A1", "COL1A2", "TNC"),
         "terms": (
             ("KEGG", "hsa04512", "ECM-receptor interaction"),

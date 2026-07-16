@@ -218,16 +218,14 @@ run_one <- function(sub) {
 
   go_simplified_ids <- NULL
   if (!is.null(go)) {
-    go_simplified <- tryCatch(
-      simplify(go, cutoff = GO_SIMPLIFY_CUTOFF, by = "p.adjust", select_fun = min, measure = GO_SIMPLIFY_MEASURE),
-      error = function(e) {
-        message("simplify failed for ", query_name, ": ", conditionMessage(e))
-        NULL
-      }
+    go_simplified <- simplify(
+      go,
+      cutoff = GO_SIMPLIFY_CUTOFF,
+      by = "p.adjust",
+      select_fun = min,
+      measure = GO_SIMPLIFY_MEASURE
     )
-    if (!is.null(go_simplified)) {
-      go_simplified_ids <- as.character(as.data.frame(go_simplified)$ID)
-    }
+    go_simplified_ids <- as.character(as.data.frame(go_simplified)$ID)
   }
 
   kegg <- NULL

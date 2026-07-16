@@ -13,8 +13,8 @@ Idempotent pipeline:
    capture-spot diameter, and writes ``<data_root>/adata/<sample>.h5ad`` for
    fast reloading in notebooks.
 
-Reruns are cheap: every step skips work whose output already exists and is
-large enough to trust.
+Reruns are cheap: every step skips work whose archive and completed output
+have been validated.
 
 Typical invocation::
 
@@ -52,6 +52,7 @@ from .config import (
 logger = logging.getLogger("download_glioma_data")
 
 MIN_TARBALL_BYTES = 1_000_000  # 1 MB; anything smaller is presumed broken.
+EXTRACTION_COMPLETE_MARKER = ".extract_complete"
 VISIUM_SPOT_DIAMETER_UM = 55.0
 H5AD_CACHE_VERSION = "visium_human_glioma_qc_um_v3"
 ALL_SAMPLES = IDH_MUTANT_SAMPLE_IDS + IDH_WILDTYPE_SAMPLE_IDS
@@ -64,6 +65,17 @@ def _human(nbytes: int) -> str:
             return f"{nbytes:.1f} {unit}"
         nbytes /= 1024.0
     return f"{nbytes:.1f} TB"
+
+
+def _tarball_is_valid(path: Path, expected_min_bytes: int) -> bool:
+    """Return whether a gzip tarball is large enough and readable end to end."""
+    if not path.exists() or path.stat().st_size < expected_min_bytes:
+        return False
+    try:
+        with tarfile.open(path, "r:gz") as tf:
+            return bool(tf.getmembers())
+    except (tarfile.TarError, OSError, EOFError):
+        return False
 
 
 def _download(url: str, dest: Path, expected_min_bytes: int) -> bool:
@@ -103,9 +115,9 @@ def _download(url: str, dest: Path, expected_min_bytes: int) -> bool:
                             flush=True,
                         )
                 print()
-        if tmp.stat().st_size < expected_min_bytes:
+        if not _tarball_is_valid(tmp, expected_min_bytes):
             logger.warning(
-                "Downloaded %s is only %s (< %s min); discarding.",
+                "Downloaded %s is not a valid tarball (%s; %s min); discarding.",
                 url,
                 _human(tmp.stat().st_size),
                 _human(expected_min_bytes),
@@ -144,8 +156,9 @@ def _extract(tarball: Path, dest_dir: Path) -> bool:
     try:
         with tarfile.open(tarball, "r:gz") as tf:
             tf.extractall(dest_dir, members=_safe_tar_members(tf, dest_dir))
+        (dest_dir / EXTRACTION_COMPLETE_MARKER).write_text("complete\n")
         return True
-    except (tarfile.TarError, OSError) as e:
+    except (tarfile.TarError, OSError, EOFError) as e:
         logger.error("Extraction failed for %s: %s", tarball, e)
         return False
 
@@ -178,6 +191,16 @@ def _spaceranger_layout_ready(outs: Path) -> bool:
         (outs / "filtered_feature_bc_matrix.h5").exists()
         and (spatial / "tissue_positions_list.csv").exists()
         and (spatial / "scalefactors_json.json").exists()
+    )
+
+
+def _extraction_ready(extracted_root: Path) -> bool:
+    """Return whether extraction finished and contains the required Visium files."""
+    if not (extracted_root / EXTRACTION_COMPLETE_MARKER).exists():
+        return False
+    matches = _find_layout_files(extracted_root)
+    return all(
+        matches[key] is not None for key in ("matrix", "positions", "scalefactors")
     )
 
 
@@ -381,7 +404,7 @@ def process_sample(sample: str, data_root: Path) -> tuple[str, bool]:
     h5ad = data_root / "adata" / f"{sample}.h5ad"
 
     # 1. Download.
-    if raw.exists() and raw.stat().st_size >= MIN_TARBALL_BYTES:
+    if _tarball_is_valid(raw, MIN_TARBALL_BYTES):
         logger.info(
             "[%s] raw tarball already present (%s)", sample, _human(raw.stat().st_size)
         )
@@ -394,9 +417,7 @@ def process_sample(sample: str, data_root: Path) -> tuple[str, bool]:
             return sample, False
 
     # 2. Extract.
-    marker = extracted_root / "outs"
-    alt_marker = extracted_root  # some tarballs extract with outs at the root
-    if marker.exists() or (alt_marker.exists() and any(alt_marker.iterdir())):
+    if _extraction_ready(extracted_root):
         logger.info("[%s] spaceranger dir already extracted", sample)
     else:
         if extracted_root.exists():

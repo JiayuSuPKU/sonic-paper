@@ -127,7 +127,7 @@ def load_normalized_samples_from_metadata(
     """Load samples from cached workflow metadata h5ad paths."""
     return _load_normalized_samples_from_meta(
         meta.copy(),
-        missing_context="referenced by cached sample_metadata.csv",
+        missing_context="referenced by cached spectra metadata",
     )
 
 
@@ -176,10 +176,10 @@ def select_gene_panel(
         ascending=[False, True],
         kind="stable",
     )
-    genes = summary["gene"].head(max_genes).tolist()
+    genes = summary.loc[summary["passes_detection"], "gene"].head(max_genes).tolist()
     log(
-        f"selected top {len(genes):,} genes by mean log-normalized expression "
-        f"after QC; detection audit threshold is >= {min_frac_per_sample:.0%} "
+        f"selected top {len(genes):,} detected genes by mean log-normalized "
+        f"expression after QC; threshold is >= {min_frac_per_sample:.0%} "
         f"spots in >= {n_needed}/{n_samples} samples"
     )
     return genes, summary

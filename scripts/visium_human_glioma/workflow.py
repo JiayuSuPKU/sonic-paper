@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -19,6 +21,7 @@ if __package__ in {None, ""}:
     __package__ = "scripts.visium_human_glioma"
 
 from .config import (
+    CACHE_SUMMARY_FILE,
     ENRICHMENT_TERMS_FILE,
     FDR_ALPHA,
     GROUP_LABELS,
@@ -34,8 +37,12 @@ from .config import (
     PERMUTATION_NULL_FILE,
     PROJECT_ROOT,
     REAL_TESTS_FILE,
+    SAMPLE_MAX_QC_EXCLUDED_FRAC,
+    SAMPLES,
     SPATIAL_DIAGNOSTICS_FILE,
     SPECTRA_FILE,
+    SPOT_MAX_PCT_MITO,
+    SPOT_MIN_COUNTS,
 )
 from .utils import (
     align_samples_to_genes,
@@ -45,12 +52,126 @@ from .utils import (
     merge_real_tests,
     project_relative,
     resolve_data_root,
+    sample_metadata,
     save_csv,
     select_gene_panel,
 )
 
 CLUSTERPROFILER_SCRIPT = PROJECT_ROOT / "scripts" / "run_clusterprofiler.R"
 CLUSTERPROFILER_TIMEOUT_SECONDS = 900
+CACHE_SCHEMA_VERSION = 1
+
+COMPARISON_CACHE_FILES = {
+    "real_tests": REAL_TESTS_FILE,
+    "permutation_null": PERMUTATION_NULL_FILE,
+    "spectra": SPECTRA_FILE,
+    "spatial_diagnostics": SPATIAL_DIAGNOSTICS_FILE,
+}
+
+
+def _file_fingerprint(path: Path, *, digest: bool = False) -> dict[str, Any]:
+    """Return stable metadata for one cache input or output."""
+    resolved = path.resolve()
+    if not path.exists():
+        return {"path": str(resolved), "exists": False}
+    stat = path.stat()
+    result: dict[str, Any] = {
+        "path": str(resolved),
+        "exists": True,
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+    }
+    if digest:
+        sha256 = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                sha256.update(chunk)
+        result["sha256"] = sha256.hexdigest()
+    return result
+
+
+def _load_cache_summary() -> dict[str, Any]:
+    """Read the cache manifest, treating a missing or malformed file as stale."""
+    try:
+        summary = json.loads(CACHE_SUMMARY_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {"schema_version": CACHE_SCHEMA_VERSION}
+    if summary.get("schema_version") != CACHE_SCHEMA_VERSION:
+        return {"schema_version": CACHE_SCHEMA_VERSION}
+    return summary
+
+
+def _write_cache_summary(
+    section: str,
+    *,
+    signature: dict[str, Any],
+    outputs: dict[str, Any],
+    invalidate: tuple[str, ...] = (),
+) -> None:
+    """Atomically update one cache stage and invalidate its dependents."""
+    summary = _load_cache_summary()
+    for name in invalidate:
+        summary.pop(name, None)
+    summary[section] = {"signature": signature, "outputs": outputs}
+    CACHE_SUMMARY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CACHE_SUMMARY_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    tmp.replace(CACHE_SUMMARY_FILE)
+    log(f"wrote {project_relative(CACHE_SUMMARY_FILE)}")
+
+
+def _output_fingerprints(
+    paths: dict[str, Path], *, digest: bool = False
+) -> dict[str, dict[str, Any]]:
+    return {
+        name: _file_fingerprint(path, digest=digest) for name, path in paths.items()
+    }
+
+
+def _comparison_signature(data_root: Path) -> dict[str, Any]:
+    """Describe every input that changes the IDH-status comparison."""
+    import quadsv
+
+    meta = sample_metadata(data_root)
+    inputs = []
+    for row in meta.itertuples(index=False):
+        inputs.append(
+            {
+                "sample_id": str(row.sample_id),
+                "group": str(row.group),
+                "h5ad": _file_fingerprint(Path(row.h5ad_path)),
+            }
+        )
+    return {
+        "data_root": str(data_root.resolve()),
+        "inputs": inputs,
+        "quadsv_version": quadsv.__version__,
+        "parameters": {
+            "n_genes": N_GENES,
+            "spot_min_counts": SPOT_MIN_COUNTS,
+            "spot_max_pct_mito": SPOT_MAX_PCT_MITO,
+            "sample_max_qc_excluded_frac": SAMPLE_MAX_QC_EXCLUDED_FRAC,
+            "min_frac_per_sample": MIN_FRAC_PER_SAMPLE,
+            "min_samples_frac": MIN_SAMPLES_FRAC,
+            "min_samples_per_group": MIN_SAMPLES_PER_GROUP,
+            "n_radial_bins": N_RADIAL_BINS,
+            "n_label_permutations": N_LABEL_PERMUTATIONS,
+        },
+    }
+
+
+def _enrichment_signature() -> dict[str, Any]:
+    """Describe the tested genes and wrapper used for pathway enrichment."""
+    return {
+        "real_tests": _file_fingerprint(REAL_TESTS_FILE, digest=True),
+        "clusterprofiler_wrapper": _file_fingerprint(
+            CLUSTERPROFILER_SCRIPT, digest=True
+        ),
+        "top_n": 100,
+        "sources": ["GO:BP", "KEGG"],
+        "orgdb": "org.Hs.eg.db",
+        "organism": "hsa",
+    }
 
 
 def _fit_radial_comparator(
@@ -76,7 +197,7 @@ def _fit_radial_comparator(
     return cmp
 
 
-def _idh_status_comparison_cache_ready() -> bool:
+def _idh_status_comparison_cache_ready(data_root: Path) -> bool:
     """Return whether the complete IDH-status comparison cache is valid."""
     if not all(
         path.exists() and path.stat().st_size > 0
@@ -87,6 +208,11 @@ def _idh_status_comparison_cache_ready() -> bool:
             SPATIAL_DIAGNOSTICS_FILE,
         )
     ):
+        return False
+    section = _load_cache_summary().get("comparison", {})
+    if section.get("signature") != _comparison_signature(data_root):
+        return False
+    if section.get("outputs") != _output_fingerprints(COMPARISON_CACHE_FILES):
         return False
     if not _spatial_diagnostics_cache_ready():
         return False
@@ -101,10 +227,10 @@ def _idh_status_comparison_cache_ready() -> bool:
     }
     null_required = {"perm_idx", "test", "P_value", "P_adj"}
     try:
-        if not required.issubset(
-            pd.read_csv(REAL_TESTS_FILE, nrows=0).columns
-        ) or not null_required.issubset(
-            pd.read_csv(PERMUTATION_NULL_FILE, nrows=0).columns
+        real_tests = pd.read_csv(REAL_TESTS_FILE)
+        null = pd.read_csv(PERMUTATION_NULL_FILE)
+        if not required.issubset(real_tests.columns) or not null_required.issubset(
+            null.columns
         ):
             return False
         with np.load(SPECTRA_FILE, allow_pickle=True) as spectra:
@@ -112,14 +238,33 @@ def _idh_status_comparison_cache_ready() -> bool:
                 spectra.files
             ):
                 return False
-        null = pd.read_csv(PERMUTATION_NULL_FILE, usecols=["perm_idx", "test"])
+            spectra_shape = spectra["spectra"].shape
+            n_edges = spectra["freq_edges"].size
+            cached_samples = spectra["sample_ids"].astype(str).tolist()
+            cached_groups = spectra["groups"].astype(str).tolist()
+            cached_genes = spectra["genes"].astype(str).tolist()
     except (OSError, ValueError, KeyError, pd.errors.ParserError):
         return False
-    permutation_counts = null.groupby("test")["perm_idx"].nunique().to_dict()
-    return permutation_counts == {
-        "DF": N_LABEL_PERMUTATIONS,
-        "DF_norm": N_LABEL_PERMUTATIONS,
-    }
+    expected_samples = [sample_id for sample_id, _group in SAMPLES]
+    expected_groups = [group for _sample_id, group in SAMPLES]
+    n_genes = real_tests.shape[0]
+    if (
+        real_tests["Feature"].nunique() != n_genes
+        or set(real_tests["Feature"].astype(str)) != set(cached_genes)
+        or cached_samples != expected_samples
+        or cached_groups != expected_groups
+        or spectra_shape != (len(SAMPLES), n_genes, N_RADIAL_BINS)
+        or n_edges != N_RADIAL_BINS + 1
+    ):
+        return False
+    expected_null_rows = 2 * N_LABEL_PERMUTATIONS * n_genes
+    counts = null.groupby(["test", "perm_idx"], sort=False).size()
+    return (
+        len(null) == expected_null_rows
+        and set(counts.index.get_level_values("test")) == {"DF", "DF_norm"}
+        and counts.size == 2 * N_LABEL_PERMUTATIONS
+        and counts.eq(n_genes).all()
+    )
 
 
 def _permuted_group_labels(
@@ -400,6 +545,12 @@ def _enrichment_cache_ready() -> bool:
     """Return whether cached GO BP and KEGG results cover both ranked gene sets."""
     if not ENRICHMENT_TERMS_FILE.exists() or ENRICHMENT_TERMS_FILE.stat().st_size == 0:
         return False
+    section = _load_cache_summary().get("enrichment", {})
+    if section.get("signature") != _enrichment_signature():
+        return False
+    outputs = {"enrichment": _file_fingerprint(ENRICHMENT_TERMS_FILE, digest=True)}
+    if section.get("outputs") != outputs:
+        return False
     try:
         terms = pd.read_csv(ENRICHMENT_TERMS_FILE)
     except (OSError, ValueError, pd.errors.ParserError):
@@ -494,6 +645,12 @@ def run_enrichment_cache(
             f"{formatted}. Check the R output and KEGG network access."
         )
     save_csv(terms, ENRICHMENT_TERMS_FILE)
+    META_PROGRAM_GENE_MAP_FILE.unlink(missing_ok=True)
+    _write_cache_summary(
+        "enrichment",
+        signature=_enrichment_signature(),
+        outputs={"enrichment": _file_fingerprint(ENRICHMENT_TERMS_FILE, digest=True)},
+    )
     return {"enrichment": project_relative(ENRICHMENT_TERMS_FILE)}
 
 
@@ -727,7 +884,8 @@ def run_idh_status_comparison_cache(
 ) -> dict[str, str]:
     """Cache the IDH-status DE/DF comparison, nulls, spectra, and diagnostics."""
     ensure_dirs()
-    if _idh_status_comparison_cache_ready() and not force:
+    resolved_data_root = resolve_data_root(data_root)
+    if _idh_status_comparison_cache_ready(resolved_data_root) and not force:
         log("using cached glioma IDH-status comparison; pass --force to recompute")
         return {
             "real_tests": project_relative(REAL_TESTS_FILE),
@@ -736,7 +894,8 @@ def run_idh_status_comparison_cache(
             "spatial_diagnostics": project_relative(SPATIAL_DIAGNOSTICS_FILE),
         }
 
-    resolved_data_root = resolve_data_root(data_root)
+    ENRICHMENT_TERMS_FILE.unlink(missing_ok=True)
+    META_PROGRAM_GENE_MAP_FILE.unlink(missing_ok=True)
     log(f"data_root={resolved_data_root}")
     # Load all samples once, normalize in memory, then keep only the selected genes.
     samples, meta = load_normalized_samples(resolved_data_root)
@@ -821,6 +980,13 @@ def run_idh_status_comparison_cache(
         SPATIAL_DIAGNOSTICS_FILE,
     )
 
+    _write_cache_summary(
+        "comparison",
+        signature=_comparison_signature(resolved_data_root),
+        outputs=_output_fingerprints(COMPARISON_CACHE_FILES),
+        invalidate=("enrichment",),
+    )
+
     return {
         "real_tests": project_relative(REAL_TESTS_FILE),
         "permutation_null": project_relative(PERMUTATION_NULL_FILE),
@@ -844,8 +1010,8 @@ def run_workflow(
     )
     if run_enrichment:
         outputs.update(run_enrichment_cache(force=force))
-    if ENRICHMENT_TERMS_FILE.exists():
         outputs.update(run_metaprogram_gene_map_cache())
+    outputs["cache_summary"] = project_relative(CACHE_SUMMARY_FILE)
     return {"outputs": outputs}
 
 

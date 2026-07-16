@@ -261,9 +261,9 @@ def add_length_scale_axis(
     if len(tick_labels) >= 2:
         tick_labels[0].set_horizontalalignment("right")
         tick_labels[-1].set_horizontalalignment("left")
-    sec.tick_params(width=0.4, length=2, pad=0.5)
+    sec.tick_params(width=0.5, length=2, pad=0.5)
     for tick in ticks:
-        ax.axvline(tick, color="0.72", lw=0.45, ls=":", zorder=0)
+        ax.axvline(tick, color="0.72", lw=0.5, ls=":", zorder=0)
     return sec
 
 
@@ -486,7 +486,7 @@ class GliomaGeneProfilePlotter:
             )
 
         for ax in (raw_ax, l1_ax):
-            ax.grid(color="0.90", lw=0.35, alpha=0.7)
+            ax.grid(color="0.90", lw=0.5, alpha=0.7)
             for spine in ("top", "right"):
                 ax.spines[spine].set_visible(False)
 
@@ -538,7 +538,7 @@ def draw_gene_profile_panel(
         )
     cax = fig.add_subplot(map_gs[0, len(selected)])
     cbar = fig.colorbar(last_sc, cax=cax)
-    cbar.ax.tick_params(labelsize=FONT_MIN, width=0.4, length=1.8, pad=1.2)
+    cbar.ax.tick_params(labelsize=FONT_MIN, width=0.5, length=1.8, pad=1.2)
     cbar.ax.set_title("Log1p", fontsize=FONT_MIN, pad=0.8)
 
     profile_gs = gridspec.GridSpecFromSubplotSpec(
@@ -572,7 +572,7 @@ def draw_gene_profile_panel(
     )
 
 
-def _make_page(
+def make_gene_profile_page(
     genes: Sequence[str],
     *,
     plotter: GliomaGeneProfilePlotter,
@@ -636,7 +636,7 @@ def generate_pdf(
     with PdfPages(output) as pdf:
         for page_index, start in enumerate(page_starts):
             subset = genes[start : start + genes_per_page]
-            fig = _make_page(
+            fig = make_gene_profile_page(
                 subset,
                 plotter=plotter,
                 sample_ids=sample_ids,
@@ -664,7 +664,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=FIGURE_DIR / "idh_status_gene_profiles.pdf",
+        default=FIGURE_DIR / "idh_selected_genes.pdf",
         help="Output multi-page PDF path.",
     )
     parser.add_argument(
