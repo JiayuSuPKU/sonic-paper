@@ -187,7 +187,7 @@ def plot_brain_raw_profiles(
     ax.set_ylabel("Radial power", labelpad=1)
     ax.tick_params(labelbottom=False)
     add_length_scale_axis(ax)
-    ax.grid(color="0.90", lw=0.35)
+    ax.grid(color="0.90", lw=0.5)
     ax.set_xlim(frequency[0], frequency[-1])
     if show_legend:
         ax.legend(

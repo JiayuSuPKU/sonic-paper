@@ -185,7 +185,7 @@ def add_length_scale_axis(
     sec.set_xticklabels(labels, fontsize=5)
     sec.tick_params(width=0.4, length=2, pad=1)
     for tick in ticks:
-        ax.axvline(tick, color="0.72", lw=0.45, ls=":", zorder=0)
+        ax.axvline(tick, color="0.72", lw=0.5, ls=":", zorder=0)
     return sec
 
 
