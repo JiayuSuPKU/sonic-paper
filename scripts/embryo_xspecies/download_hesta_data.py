@@ -11,39 +11,50 @@ the H&E ``.tif.gz``, and the processed per-section ``*_HESTA.h5ad`` files
 The section catalog is discovered at run time from GEO's machine-readable
 brief dump (``config.HUMAN.GEO_BRIEF_URL``) — all 77 samples, their titles
 (``"CS12-13, Embryo1, Section1"``), and the per-file FTP URLs. By default the
-script downloads the section IDs listed in ``config.HUMAN.ALL_SECTIONS``.
+script downloads the section IDs listed in ``config.HUMAN.ALL_SECTIONS``:
+the reported representative pair for each of 12 configured embryos from Pan
+et al. Supplementary Table 3, plus two quality-ranked sections for the single
+embryo at each of CS17 and CS18. The supplemental ranking is documented in
+``config.py`` and uses Pan et al. Supplementary Table 1a.
 
 Idempotent download pipeline:
 
 1. Discover the current GEO catalog to map section IDs to public h5ad URLs.
-2. Select section IDs from ``config.HUMAN.ALL_SECTIONS``. ``--representative``
-   uses ``config.HUMAN.REPRESENTATIVE_SECTIONS`` instead; ``--sections`` filters
-   the configured IDs by exact match, substring, or shell-style glob.
+2. Validate that every configured embryo contributes its two reported
+   sections, with two additional sections at CS17/CS18, then select those IDs.
+   ``--representative`` uses the highest-ranked section per stage;
+   ``--sections`` filters the configured IDs by exact match, substring, or
+   shell-style glob.
 3. For each selected URL, read the remote byte count via ``HEAD`` or a one-byte
    ``Range`` request. Existing local files with matching sizes are skipped;
    files with unavailable remote size are kept but logged unverified.
 4. Download missing or stale files to ``<name>.part`` with HTTP ``Range`` resume,
    verify the final byte count when known, then atomically rename into place.
    Downloads are parallelised across sections (``--workers N``, default 6).
-5. Merge completed/kept rows into ``metadata.csv`` with repo-relative
-   ``h5ad_path`` and explicit ``source_url``.
+5. Merge completed/kept configured rows into ``metadata.csv`` with
+   repo-relative ``h5ad_path`` and explicit ``source_url``. Rows outside the
+   current configured panel are removed.
 
 Usage::
 
-    # default: every section listed in config.HUMAN.ALL_SECTIONS (21 sections, ~63 GB)
+    # default: four sections per stage, 28 sections across 7 stages
     python -m scripts.embryo_xspecies.download_hesta_data
 
     # one representative section per configured stage
     python -m scripts.embryo_xspecies.download_hesta_data --representative
 
     # a matched subset (exact names, substrings, or shell-style globs)
-    python -m scripts.embryo_xspecies.download_hesta_data --sections CS17 'CS23_E1S*'
+    python -m scripts.embryo_xspecies.download_hesta_data --sections CS19 'CS23_E1S*'
+
+    # inspect new files and transfer size without writing anything
+    python -m scripts.embryo_xspecies.download_hesta_data --dry-run
 """
 
 from __future__ import annotations
 
 import argparse
 import fnmatch
+import http.client
 import logging
 import re
 import time
@@ -83,9 +94,7 @@ class _Section:
 
     @property
     def day(self) -> float:
-        return C.SECTION_TO_DAY.get(
-            self.section_id, C.CS_TO_DAY.get(self.carnegie_stage, float("nan"))
-        )
+        return C.SECTION_TO_DAY[self.section_id]
 
 
 def _https(url: str) -> str:
@@ -93,14 +102,36 @@ def _https(url: str) -> str:
     return re.sub(r"^ftp://", "https://", url.strip())
 
 
-def _discover_catalog(*, timeout: int = 60) -> list[_Section]:
+def _discover_catalog(*, timeout: int = 60, max_attempts: int = 4) -> list[_Section]:
     """Parse GEO's brief sample dump into the full per-section catalog."""
-    try:
-        with open_url(C.GEO_BRIEF_URL, timeout=timeout) as resp:
-            txt = resp.read().decode("utf-8", errors="replace")
-    except (urllib.error.URLError, TimeoutError) as exc:
-        logger.error("Could not fetch GEO brief dump (%s): %s", C.GEO_BRIEF_URL, exc)
-        return []
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with open_url(C.GEO_BRIEF_URL, timeout=timeout) as resp:
+                txt = resp.read().decode("utf-8", errors="replace")
+            break
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            ConnectionError,
+            http.client.HTTPException,
+        ) as exc:
+            if attempt == max_attempts:
+                logger.error(
+                    "Could not fetch GEO brief dump after %d attempts (%s): %s",
+                    max_attempts,
+                    C.GEO_BRIEF_URL,
+                    exc,
+                )
+                return []
+            sleep_s = min(2 ** (attempt - 1), 8)
+            logger.warning(
+                "GEO catalog attempt %d/%d failed: %s; retrying in %ds.",
+                attempt,
+                max_attempts,
+                exc,
+                sleep_s,
+            )
+            time.sleep(sleep_s)
     out: list[_Section] = []
     for block in re.split(r"^\^SAMPLE = ", txt, flags=re.M)[1:]:
         gsm = block.splitlines()[0].strip()
@@ -125,6 +156,27 @@ def _discover_catalog(*, timeout: int = 60) -> list[_Section]:
 
 
 def _configured_section_ids(*, representative: bool = False) -> list[str]:
+    for stage, section_ids in C.ALL_SECTIONS.items():
+        embryo_counts: dict[str, int] = {}
+        for section_id in section_ids:
+            match = re.fullmatch(rf"{re.escape(stage)}_(E\d+)S\d+", section_id)
+            if not match:
+                raise ValueError(f"Invalid configured HESTA section id: {section_id}")
+            embryo = match.group(1)
+            embryo_counts[embryo] = embryo_counts.get(embryo, 0) + 1
+        expected_embryos = {
+            embryo_id.removeprefix(f"{stage}_")
+            for embryo_id in C.EMBRYO_TO_SEX
+            if embryo_id.startswith(f"{stage}_")
+        }
+        expected_sections = 4 if stage in C.SINGLE_EMBRYO_STAGES else 2
+        if set(embryo_counts) != expected_embryos or set(embryo_counts.values()) != {
+            expected_sections
+        }:
+            raise ValueError(
+                f"{stage} must configure {expected_sections} sections from each "
+                f"of {sorted(expected_embryos)}; found {embryo_counts}."
+            )
     sections_by_stage = C.REPRESENTATIVE_SECTIONS if representative else C.ALL_SECTIONS
     out: list[str] = []
     for cs in C.KEPT_TIMEPOINTS:
@@ -145,7 +197,7 @@ def _select(
     patterns: list[str] | None,
     representative: bool,
 ) -> list[_Section]:
-    """Pick configured sections, one per stage, or sections matching patterns."""
+    """Pick the configured replicated panel or its requested subset."""
     want = set(
         _configured_section_ids(representative=False if patterns else representative)
     )
@@ -208,6 +260,52 @@ def _fetch_one(
     return s, n, "downloaded"
 
 
+def _inspect_one(
+    s: _Section, *, force: bool
+) -> tuple[_Section, int | None, int | None, str]:
+    """Return remote size, remaining bytes, and planned action without writing."""
+    dest = C.RAW_DIR / f"{s.section_id}_HESTA.h5ad"
+    part = dest.with_name(dest.name + ".part")
+    remote = remote_size(s.url)
+    local = dest.stat().st_size if dest.exists() else None
+    if not force and local is not None and remote == local:
+        return s, remote, 0, "present"
+    if not force and local is not None and remote is None:
+        return s, None, 0, "present-unverified"
+    resumed = part.stat().st_size if part.exists() and remote is not None else 0
+    remaining = None if remote is None else max(0, remote - resumed)
+    return s, remote, remaining, "new" if local is None else "replace"
+
+
+def _dry_run(chosen: list[_Section], *, force: bool, workers: int) -> int:
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        results = list(ex.map(lambda s: _inspect_one(s, force=force), chosen))
+    planned = [result for result in results if result[3] in {"new", "replace"}]
+    for section, remote, _remaining, action in planned:
+        size = "unknown" if remote is None else f"{remote / 1e9:.2f} GB"
+        logger.info("[%s] %s (%s)", section.section_id, action, size)
+    counts = {
+        status: sum(result[3] == status for result in results)
+        for status in ("new", "replace", "present", "present-unverified")
+    }
+    known_remaining = sum(result[2] or 0 for result in planned)
+    unknown = sum(result[2] is None for result in planned)
+    logger.info(
+        "DRY RUN: %d new, %d replace, %d present, %d present-unverified.",
+        counts["new"],
+        counts["replace"],
+        counts["present"],
+        counts["present-unverified"],
+    )
+    logger.info(
+        "DRY RUN: %.2f GB (%.2f GiB) remaining%s.",
+        known_remaining / 1e9,
+        known_remaining / 2**30,
+        f" plus {unknown} unknown-size file(s)" if unknown else "",
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     p = argparse.ArgumentParser(
@@ -227,6 +325,11 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true", help="Re-download even if present + size-sane."
     )
     p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report planned files and transfer size without writing anything.",
+    )
+    p.add_argument(
         "--workers", type=int, default=6, help="Parallel download workers (default 6)."
     )
     p.add_argument(
@@ -234,7 +337,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
 
-    ensure_species_output_dirs(C)
     catalog = _discover_catalog()
     if not catalog:
         logger.error("Empty catalog — could not discover sections from GEO.")
@@ -256,6 +358,10 @@ def main(argv: list[str] | None = None) -> int:
         "Selected %d section(s) → %s  (workers=%d)", len(chosen), C.RAW_DIR, workers
     )
 
+    if args.dry_run:
+        return _dry_run(chosen, force=args.force, workers=workers)
+
+    ensure_species_output_dirs(C)
     t0 = time.time()
     if workers == 1:
         results = [
@@ -282,6 +388,8 @@ def main(argv: list[str] | None = None) -> int:
                 "day": s.day,
                 "gsm": s.gsm,
                 "embryo": s.embryo,
+                "embryo_id": f"{s.carnegie_stage}_E{s.embryo}",
+                "sex": C.EMBRYO_TO_SEX[f"{s.carnegie_stage}_E{s.embryo}"],
                 "section": s.section,
                 "h5ad_path": _metadata_path(s.section_id),
                 "source_url": s.url,
@@ -293,18 +401,18 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Nothing downloaded — metadata.csv not written.")
         return 1
     new = pd.DataFrame(rows)
-    # Merge into any existing metadata.csv rather than overwriting it, so a
-    # subset run does not wipe rows for sections fetched by earlier runs. Rows
-    # for sections handled this run take priority.
+    # A subset run retains earlier rows only when they remain in the configured
+    # panel. Rows handled by this run take priority.
     if C.META_CSV.exists():
-        try:
-            old = pd.read_csv(C.META_CSV)
-            old = old[~old["section_id"].isin(new["section_id"])]
-            new = pd.concat([old, new], ignore_index=True)
-        except (OSError, ValueError, KeyError) as exc:
-            logger.warning(
-                "Could not merge existing %s (%s) — writing fresh.", C.META_CSV, exc
-            )
+        old = pd.read_csv(C.META_CSV)
+        old = old[~old["section_id"].isin(new["section_id"])]
+        new = pd.concat([old, new], ignore_index=True)
+    configured = set(_configured_section_ids())
+    new = new[new["section_id"].isin(configured)].copy()
+    new["embryo_id"] = new["section_id"].str.replace(r"S\d+$", "", regex=True)
+    new["sex"] = new["embryo_id"].map(C.EMBRYO_TO_SEX)
+    if new["sex"].isna().any():
+        raise ValueError("Missing configured HESTA embryo sex metadata.")
     stage_rank = {tp: i for i, tp in enumerate(C.KEPT_TIMEPOINTS)}
     meta = (
         new.assign(_stage_rank=new["timepoint"].map(stage_rank).fillna(len(stage_rank)))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import logging
 import re
 import time
@@ -35,7 +36,13 @@ def remote_size(url: str, *, timeout: int = 30) -> int | None:
         with open_url(url, method="HEAD", timeout=timeout) as resp:
             cl = resp.headers.get("Content-Length")
             return int(cl) if cl is not None else None
-    except (urllib.error.URLError, ValueError, TimeoutError):
+    except (
+        urllib.error.URLError,
+        ValueError,
+        TimeoutError,
+        ConnectionError,
+        http.client.HTTPException,
+    ):
         pass
     try:
         headers = dict(_HEADERS)
@@ -45,7 +52,13 @@ def remote_size(url: str, *, timeout: int = 30) -> int | None:
             cr = resp.headers.get("Content-Range", "")
             m = re.search(r"/(\d+)\s*$", cr)
             return int(m.group(1)) if m else None
-    except (urllib.error.URLError, ValueError, TimeoutError):
+    except (
+        urllib.error.URLError,
+        ValueError,
+        TimeoutError,
+        ConnectionError,
+        http.client.HTTPException,
+    ):
         return None
 
 
@@ -142,7 +155,13 @@ def download(
             if exc.code == 404:
                 raise
             last_exc = exc
-        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            ConnectionError,
+            OSError,
+            http.client.HTTPException,
+        ) as exc:
             last_exc = exc
         else:
             actual = part.stat().st_size if part.exists() else 0

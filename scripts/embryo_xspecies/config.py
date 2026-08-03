@@ -149,46 +149,92 @@ MOUSE = _species_config(
 )
 
 # --- human: Stereo-seq HESTA -------------------------------------------------
+# Supplementary Table 3 reports two representative sections per embryo. Use
+# those pairs for the 12 configured embryos, yielding four sections per stage
+# where two embryos are available. CS17 and CS18 have only one embryo, so
+# supplement their reported pairs with the two highest-quality remaining
+# sections, ranked within embryo by
+#
+#   sqrt(mean UMI * mean gene)
+#   * valid-CID fraction * clean-read fraction
+#   * uniquely-mapped fraction * annotated-read fraction
+#
+# This balances transcript capture and sequencing quality only where more than
+# the publication's two representative sections are needed.
 HUMAN_ALL_SECTIONS: dict[str, list[str]] = {
-    "CS12-13": ["CS12-13_E1S1", "CS12-13_E1S2", "CS12-13_E1S3"],
-    "CS14-15": ["CS14-15_E1S1", "CS14-15_E1S2", "CS14-15_E1S3"],
-    "CS17": ["CS17_E1S1", "CS17_E1S2", "CS17_E1S3"],
-    "CS18": ["CS18_E1S1", "CS18_E1S2", "CS18_E1S3"],
-    "CS19": ["CS19_E1S1", "CS19_E1S2", "CS19_E1S3"],
-    "CS20": ["CS20_E1S1", "CS20_E1S2", "CS20_E1S3"],
-    "CS23": ["CS23_E1S1", "CS23_E1S2", "CS23_E1S3"],
+    "CS12-13": ["CS12-13_E1S2", "CS12-13_E1S3", "CS12-13_E2S3", "CS12-13_E2S4"],
+    "CS14-15": [
+        "CS14-15_E1S3",
+        "CS14-15_E1S4",
+        "CS14-15_E2S1",
+        "CS14-15_E2S2",
+    ],
+    "CS17": ["CS17_E1S9", "CS17_E1S10", "CS17_E1S6", "CS17_E1S3"],
+    "CS18": ["CS18_E1S2", "CS18_E1S3", "CS18_E1S6", "CS18_E1S5"],
+    "CS19": ["CS19_E1S1", "CS19_E1S2", "CS19_E2S1", "CS19_E2S2"],
+    "CS20": ["CS20_E1S6", "CS20_E1S7", "CS20_E2S2", "CS20_E2S3"],
+    "CS23": ["CS23_E1S2", "CS23_E1S3", "CS23_E2S5", "CS23_E2S10"],
 }
 HUMAN_REPRESENTATIVE_SECTIONS: dict[str, list[str]] = {
-    cs: [sections[0]] for cs, sections in HUMAN_ALL_SECTIONS.items()
+    "CS12-13": ["CS12-13_E1S3"],
+    "CS14-15": ["CS14-15_E1S3"],
+    "CS17": ["CS17_E1S6"],
+    "CS18": ["CS18_E1S2"],
+    "CS19": ["CS19_E2S2"],
+    "CS20": ["CS20_E1S7"],
+    "CS23": ["CS23_E2S10"],
 }
 
 # Days post-conception for the configured HESTA sections, from Pan et al. 2026
 # Supplementary Table 1a ("Summary of Spatiotemporal transcriptomic data").
 HESTA_SECTION_DAYS: dict[str, float] = {
-    "CS12-13_E1S1": 29.0,
     "CS12-13_E1S2": 29.0,
     "CS12-13_E1S3": 29.0,
-    "CS14-15_E1S1": 31.0,
-    "CS14-15_E1S2": 31.0,
+    "CS12-13_E2S3": 26.0,
+    "CS12-13_E2S4": 26.0,
     "CS14-15_E1S3": 31.0,
-    "CS17_E1S1": 41.0,
-    "CS17_E1S2": 41.0,
+    "CS14-15_E1S4": 31.0,
+    "CS14-15_E2S1": 35.0,
+    "CS14-15_E2S2": 35.0,
+    "CS17_E1S9": 41.0,
+    "CS17_E1S10": 41.0,
+    "CS17_E1S6": 41.0,
     "CS17_E1S3": 41.0,
-    "CS18_E1S1": 47.0,
     "CS18_E1S2": 47.0,
     "CS18_E1S3": 47.0,
+    "CS18_E1S6": 47.0,
+    "CS18_E1S5": 47.0,
     "CS19_E1S1": 44.0,
     "CS19_E1S2": 44.0,
-    "CS19_E1S3": 44.0,
-    "CS20_E1S1": 48.0,
-    "CS20_E1S2": 48.0,
-    "CS20_E1S3": 48.0,
-    "CS23_E1S1": 59.0,
+    "CS19_E2S1": 42.0,
+    "CS19_E2S2": 42.0,
+    "CS20_E1S6": 48.0,
+    "CS20_E1S7": 48.0,
+    "CS20_E2S2": 50.0,
+    "CS20_E2S3": 50.0,
     "CS23_E1S2": 59.0,
     "CS23_E1S3": 59.0,
+    "CS23_E2S5": 59.0,
+    "CS23_E2S10": 59.0,
 }
+HESTA_EMBRYO_SEX: dict[str, str] = {
+    "CS12-13_E1": "male",
+    "CS12-13_E2": "female",
+    "CS14-15_E1": "female",
+    "CS14-15_E2": "female",
+    "CS17_E1": "male",
+    "CS18_E1": "female",
+    "CS19_E1": "female",
+    "CS19_E2": "male",
+    "CS20_E1": "female",
+    "CS20_E2": "male",
+    "CS23_E1": "male",
+    "CS23_E2": "male",
+}
+HESTA_SINGLE_EMBRYO_STAGES = frozenset({"CS17", "CS18"})
 CS_TO_DAY: dict[str, float] = {
-    cs: HESTA_SECTION_DAYS[sections[0]] for cs, sections in HUMAN_ALL_SECTIONS.items()
+    cs: sum(HESTA_SECTION_DAYS[section] for section in sections) / len(sections)
+    for cs, sections in HUMAN_ALL_SECTIONS.items()
 }
 ALL_CARNEGIE_STAGES: list[str] = list(CS_TO_DAY)
 GEO_SERIES = "GSE326326"
@@ -211,6 +257,8 @@ HUMAN = _species_config(
     ALL_SECTIONS=HUMAN_ALL_SECTIONS,
     REPRESENTATIVE_SECTIONS=HUMAN_REPRESENTATIVE_SECTIONS,
     SECTION_TO_DAY=HESTA_SECTION_DAYS,
+    EMBRYO_TO_SEX=HESTA_EMBRYO_SEX,
+    SINGLE_EMBRYO_STAGES=HESTA_SINGLE_EMBRYO_STAGES,
     DAY_RANGE=(min(HESTA_SECTION_DAYS.values()), max(HESTA_SECTION_DAYS.values())),
     GEO_SERIES=GEO_SERIES,
     GEO_BRIEF_URL=GEO_BRIEF_URL,
