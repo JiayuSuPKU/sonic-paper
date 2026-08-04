@@ -8,7 +8,7 @@ configuration objects:
 
 The adopted radial-spectrum embedding recipe is the winner of the richness
 diagnosis (``figure_supp_richness``): geometric, low-frequency-dense bins at
-``N_RADIAL_BINS=80`` (≈41 retained on the shared-supported grid), **L1-log**
+``N_RADIAL_BINS=80`` (merged to a shared-supported grid), **L1-log**
 shape scaling, **equal** frequency weighting, per-bin z-score, and ``N_PC=5``.
 """
 
@@ -29,6 +29,27 @@ COMPARISON_FIGURE_DIR = FIGURE_DIR / "comparison"
 MOUSE_ONLY_FIGURE_DIR = FIGURE_DIR / "mouse_only"
 HUMAN_ONLY_FIGURE_DIR = FIGURE_DIR / "human_only"
 
+# --- shared spatial-pattern analysis ----------------------------------------
+# Use library-size-normalized log1p expression over every configured slide.
+# A downstream gene must be detected in strictly more than 1% of observed bins
+# in every slide of its species.
+ANALYSIS_EXPRESSION_MODE = "log1p_norm"
+ANALYSIS_NORMALIZATION_TARGET_SUM = 1e4
+MIN_GENE_DETECTED_BIN_FRACTION = 0.01
+
+# --- QuadSV spatial-variability detector configuration ----------------------
+# Each species config exposes ``SV_RESULT_DIR`` and ``SV_MANIFEST_JSON`` under
+# its mouse-only or human-only result directory. Every gene returned by the
+# default panel selector is tested; raw Q, Z, and p-values are retained without
+# FDR filtering.
+SV_KERNEL_METHOD = "car"
+SV_RHO = 0.9
+SV_NEIGHBOR_DEGREE = 1
+SV_FFT_SOLVER = "rfft2"
+SV_CHUNK_SIZE = 16
+SV_FFT_WORKERS = 4
+SV_N_JOBS = 2
+
 # --- spatial/spectral grid shared across species ----------------------------
 # Stereo-seq bin50 means 50 x 50 DNBs. The DNB pitch is 0.5 µm, so one bin50
 # observation spans 25 µm on each side.
@@ -36,7 +57,6 @@ STEREO_DNB_PITCH_UM = 0.5
 BIN_SIZE_DNB = 50
 BIN_SIZE_UM = STEREO_DNB_PITCH_UM * BIN_SIZE_DNB
 N_RADIAL_BINS = 80
-PRESENCE_THRESHOLD = 0.0
 
 # --- adopted radial-spectrum embedding recipe --------------------------------
 FREQ_SPACING = "geom"
@@ -56,11 +76,11 @@ def _species_config(
     data_key: str,
     result_dir: Path,
     figure_dir: Path,
-    min_extent_um: float,
     annotation_col: str,
     **extra,
 ) -> SimpleNamespace:
     data_root = DATA_ROOT / data_key
+    sv_result_dir = result_dir / "spatial_variability"
     cfg = SimpleNamespace(
         PANEL_KEY=panel_key,
         SPECIES=species,
@@ -70,8 +90,9 @@ def _species_config(
         META_CSV=data_root / "metadata.csv",
         RESULT_DIR=result_dir,
         FIGURE_DIR=figure_dir,
+        SV_RESULT_DIR=sv_result_dir,
+        SV_MANIFEST_JSON=sv_result_dir / "manifest.json",
         GEOMETRY_CSV=result_dir / "section_geometry.csv",
-        MIN_EXTENT_UM=min_extent_um,
         ANNOTATION_COL=annotation_col,
     )
     cfg.__dict__.update(extra)
@@ -80,7 +101,13 @@ def _species_config(
 
 def ensure_species_output_dirs(cfg: SimpleNamespace) -> None:
     """Create one species' raw, prepared, result, and figure directories."""
-    for d in (cfg.RAW_DIR, cfg.SDATA_DIR, cfg.RESULT_DIR, cfg.FIGURE_DIR):
+    for d in (
+        cfg.RAW_DIR,
+        cfg.SDATA_DIR,
+        cfg.RESULT_DIR,
+        cfg.FIGURE_DIR,
+        cfg.SV_RESULT_DIR,
+    ):
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -138,7 +165,6 @@ MOUSE = _species_config(
     data_key="mosta",
     result_dir=MOUSE_ONLY_RESULT_DIR,
     figure_dir=MOUSE_ONLY_FIGURE_DIR,
-    min_extent_um=3400.0,
     annotation_col="annotation",
     STAGE_TO_DAY=STAGE_TO_DAY,
     ALL_TIMEPOINTS=ALL_TIMEPOINTS,
@@ -249,7 +275,6 @@ HUMAN = _species_config(
     data_key="hesta",
     result_dir=HUMAN_ONLY_RESULT_DIR,
     figure_dir=HUMAN_ONLY_FIGURE_DIR,
-    min_extent_um=4000.0,
     annotation_col="celltype",
     CS_TO_DAY=CS_TO_DAY,
     ALL_CARNEGIE_STAGES=ALL_CARNEGIE_STAGES,
@@ -280,3 +305,5 @@ def ensure_output_dirs() -> None:
         HUMAN_ONLY_FIGURE_DIR,
     ):
         d.mkdir(parents=True, exist_ok=True)
+    for cfg in SPECIES_CONFIGS.values():
+        ensure_species_output_dirs(cfg)

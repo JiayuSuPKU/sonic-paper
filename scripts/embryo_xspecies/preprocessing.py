@@ -696,7 +696,6 @@ def run_preprocessing(
     cfg: Any,
     *,
     stages: list[str] | None = None,
-    min_extent_um: float | None = None,
     annotation_col: str | None = None,
     force: bool = False,
     dry_run: bool = False,
@@ -779,13 +778,9 @@ def run_preprocessing(
     geom.to_csv(cfg.GEOMETRY_CSV, index=False)
     logger.info("Wrote %s (%d sections).", cfg.GEOMETRY_CSV, len(geom))
 
-    # Count how many sections survive the configured minimum extent filter.
-    min_extent_um = cfg.MIN_EXTENT_UM if min_extent_um is None else min_extent_um
-    geom["keep"] = geom["min_extent_um"] >= min_extent_um
     print("\n=== per-stage geometry (bin50) ===")
     agg = {
         "n_sections": ("section_id", "count"),
-        "n_kept": ("keep", "sum"),
         "min_extent_mm_med": ("min_extent_um", lambda s: s.median() / 1000),
         "n_bins_med": ("n_bins", "median"),
         "genes": ("n_genes", "median"),
@@ -797,28 +792,6 @@ def run_preprocessing(
         .reindex(_stage_order(cfg, geom["timepoint"]))
     )
     print(summ.to_string(float_format="%.2f"))
-    print(
-        f"\nSections clearing min_extent_um={min_extent_um:.0f} um: "
-        f"{int(geom['keep'].sum())}/{len(geom)}"
-    )
-
-    if cfg.PANEL_KEY == "mouse":
-        kept_tp = sorted(
-            set(geom.loc[geom["keep"], "timepoint"]),
-            key=lambda t: cfg.STAGE_TO_DAY.get(t, 1e9),
-        )
-        print(f"Recommended KEPT_TIMEPOINTS = {kept_tp}")
-        if kept_tp != list(cfg.KEPT_TIMEPOINTS):
-            logger.warning(
-                "config.MOUSE.KEPT_TIMEPOINTS = %s differs from the recommendation above - "
-                "update config.py if you want figures to use %s.",
-                list(cfg.KEPT_TIMEPOINTS),
-                kept_tp,
-            )
-
-    if not geom["keep"].any():
-        logger.error("No section clears the size cutoff.")
-        return 1
     return 0
 
 
@@ -839,7 +812,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Restrict to these timepoints/Carnegie stages.",
     )
-    p.add_argument("--min-extent-um", type=float, default=None)
     p.add_argument(
         "--annotation-col",
         default=None,
@@ -870,7 +842,6 @@ def main(argv: list[str] | None = None) -> int:
         run_preprocessing(
             cfg,
             stages=args.stages,
-            min_extent_um=args.min_extent_um,
             annotation_col=args.annotation_col,
             force=args.force,
             dry_run=args.dry_run,
