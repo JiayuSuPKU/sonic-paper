@@ -6,10 +6,9 @@ configuration objects:
 - ``MOUSE`` — Stereo-seq MOSTA mouse embryo sections.
 - ``HUMAN`` — Stereo-seq HESTA human embryo sections.
 
-The adopted radial-spectrum embedding recipe is the winner of the richness
-diagnosis (``figure_supp_richness``): geometric, low-frequency-dense bins at
-``N_RADIAL_BINS=80`` (merged to a shared-supported grid), **L1-log**
-shape scaling, **equal** frequency weighting, per-bin z-score, and ``N_PC=5``.
+The radial-spectrum embedding uses geometric, low-frequency-dense bins at
+``N_RADIAL_BINS=80`` (merged to a shared-supported grid), L1-log shape scaling,
+equal frequency weighting, per-bin z-score, and ``N_PC=5``.
 """
 
 from __future__ import annotations
@@ -58,10 +57,8 @@ BIN_SIZE_DNB = 50
 BIN_SIZE_UM = STEREO_DNB_PITCH_UM * BIN_SIZE_DNB
 N_RADIAL_BINS = 80
 
-# --- adopted radial-spectrum embedding recipe --------------------------------
+# --- radial-spectrum computation and PCA embedding --------------------------
 FREQ_SPACING = "geom"
-EMBED_SCALING = "L1-log"
-EMBED_WEIGHTING = "equal"
 N_PC = 5
 
 # --- spatial-domain annotation ----------------------------------------------
@@ -81,6 +78,7 @@ def _species_config(
 ) -> SimpleNamespace:
     data_root = DATA_ROOT / data_key
     sv_result_dir = result_dir / "spatial_variability"
+    spectra_result_dir = result_dir / "spectral_embedding"
     cfg = SimpleNamespace(
         PANEL_KEY=panel_key,
         SPECIES=species,
@@ -92,6 +90,7 @@ def _species_config(
         FIGURE_DIR=figure_dir,
         SV_RESULT_DIR=sv_result_dir,
         SV_MANIFEST_JSON=sv_result_dir / "manifest.json",
+        SPECTRA_RESULT_DIR=spectra_result_dir,
         GEOMETRY_CSV=result_dir / "section_geometry.csv",
         ANNOTATION_COL=annotation_col,
     )
@@ -107,6 +106,7 @@ def ensure_species_output_dirs(cfg: SimpleNamespace) -> None:
         cfg.RESULT_DIR,
         cfg.FIGURE_DIR,
         cfg.SV_RESULT_DIR,
+        cfg.SPECTRA_RESULT_DIR,
     ):
         d.mkdir(parents=True, exist_ok=True)
 

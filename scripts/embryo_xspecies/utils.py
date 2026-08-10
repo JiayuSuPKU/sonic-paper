@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import re
@@ -285,6 +286,19 @@ def _domain_union(tables: list[Any]) -> list[str]:
     return sorted(labels)
 
 
+def prepared_domain_labels(cfg: Any) -> list[str]:
+    """Return the annotation-label union without retaining section tables."""
+    import spatialdata as sd
+
+    labels: set[str] = set()
+    for sid in filtered_metadata(cfg)["section_id"].astype(str):
+        section = sd.read_zarr(cfg.SDATA_DIR / f"{sid}.zarr")
+        labels.update(_domain_union([section.tables["bins_table"]]))
+        del section
+        gc.collect()
+    return sorted(labels)
+
+
 def _table_with_domain_channels(
     table: Any,
     gene_names: list[str],
@@ -406,6 +420,7 @@ def load_prepared_sections(
     expression_mode: str = C.ANALYSIS_EXPRESSION_MODE,
     normalization_target_sum: float = C.ANALYSIS_NORMALIZATION_TARGET_SUM,
     include_domain_channels: bool = True,
+    domain_labels: list[str] | None = None,
 ) -> tuple[list[Any], pd.DataFrame, list[str], list[str]]:
     """Load configured prepared sections and construct comparator-ready tables.
 
@@ -431,6 +446,10 @@ def load_prepared_sections(
         then applies sparse ``log1p`` to selected gene columns.
     include_domain_channels : bool
         Append one-hot annotation columns. Disable for gene-only visualization.
+    domain_labels : list of str, optional
+        Fixed annotation-label vocabulary. Supplying the species-wide union
+        lets callers load one section at a time while keeping identical
+        comparator features across all section caches.
 
     Returns
     -------
@@ -471,7 +490,12 @@ def load_prepared_sections(
         )
     if gene_panel is None:
         gene_panel = expected_genes
-    domain_union = _domain_union(raw_tables) if include_domain_channels else []
+    if not include_domain_channels:
+        domain_union = []
+    elif domain_labels is None:
+        domain_union = _domain_union(raw_tables)
+    else:
+        domain_union = list(domain_labels)
     domain_channels = [f"{C.DOMAIN_CHANNEL_PREFIX}{d}" for d in domain_union]
     cfg_label = cfg.PANEL_KEY
     logger.info(
