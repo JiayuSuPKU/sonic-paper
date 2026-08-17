@@ -182,6 +182,11 @@ run_one <- function(sub) {
   orgdb_name <- clean_scalar(sub$orgdb)
   organism <- clean_scalar(sub$organism)
   universe_path <- if ("universe_path" %in% colnames(sub)) clean_scalar(sub$universe_path) else ""
+  semantic_simplify <- !("semantic_simplify" %in% colnames(sub)) ||
+    isTRUE(as.logical(sub$semantic_simplify[[1]]))
+  semantic_simplify_p_adjust_cutoff <- if (
+    "semantic_simplify_p_adjust_cutoff" %in% colnames(sub)
+  ) as.numeric(sub$semantic_simplify_p_adjust_cutoff[[1]]) else 1
   orgdb <- load_orgdb(orgdb_name)
   mapped <- map_symbols_to_entrez(unique(as.character(sub$gene)), orgdb)
   universe_symbols <- read_universe(universe_path)
@@ -217,15 +222,28 @@ run_one <- function(sub) {
   )
 
   go_simplified_ids <- NULL
-  if (!is.null(go)) {
-    go_simplified <- simplify(
-      go,
-      cutoff = GO_SIMPLIFY_CUTOFF,
-      by = "p.adjust",
-      select_fun = min,
-      measure = GO_SIMPLIFY_MEASURE
-    )
-    go_simplified_ids <- as.character(as.data.frame(go_simplified)$ID)
+  if (!is.null(go) && semantic_simplify) {
+    # Terms outside the display FDR cannot replace a significant term because
+    # simplify() retains the minimum-p.adjust representative.
+    go_for_simplify <- go
+    go_for_simplify@result <- go_for_simplify@result[
+      !is.na(go_for_simplify@result$p.adjust) &
+        go_for_simplify@result$p.adjust <= semantic_simplify_p_adjust_cutoff,
+      ,
+      drop = FALSE
+    ]
+    if (nrow(go_for_simplify@result) > 0) {
+      go_simplified <- simplify(
+        go_for_simplify,
+        cutoff = GO_SIMPLIFY_CUTOFF,
+        by = "p.adjust",
+        select_fun = min,
+        measure = GO_SIMPLIFY_MEASURE
+      )
+      go_simplified_ids <- as.character(as.data.frame(go_simplified)$ID)
+    } else {
+      go_simplified_ids <- character()
+    }
   }
 
   kegg <- NULL

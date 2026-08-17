@@ -25,8 +25,6 @@ COMPARISON_RESULT_DIR = RESULT_DIR / "comparison"
 MOUSE_ONLY_RESULT_DIR = RESULT_DIR / "mouse_only"
 HUMAN_ONLY_RESULT_DIR = RESULT_DIR / "human_only"
 COMPARISON_FIGURE_DIR = FIGURE_DIR / "comparison"
-MOUSE_ONLY_FIGURE_DIR = FIGURE_DIR / "mouse_only"
-HUMAN_ONLY_FIGURE_DIR = FIGURE_DIR / "human_only"
 
 # --- shared spatial-pattern analysis ----------------------------------------
 # Use library-size-normalized log1p expression over every configured slide.
@@ -61,6 +59,23 @@ N_RADIAL_BINS = 80
 FREQ_SPACING = "geom"
 N_PC = 5
 
+# --- embedding metrics, clustering, and GO enrichment -----------------------
+LOCAL_MIXING_NEIGHBORS = 50
+LOCAL_MIXING_QUANTILES = 5
+N_PATTERN_CLUSTERS = 5
+TEMPORAL_MAX_WITHIN_STAGE_PERCENTILE = 0.95
+TEMPORAL_DYNAMIC_PERCENTILE_THRESHOLD = 0.9
+GO_SOURCE = "GO:BP"
+GO_ORGDB = {"mouse": "org.Mm.eg.db", "human": "org.Hs.eg.db"}
+GO_SEMANTIC_SIMPLIFY = True
+GO_TIMEOUT_SECONDS = 900
+
+# Display filters are applied only to compact presentation tables; raw
+# clusterProfiler results remain cached in full.
+GO_FDR_THRESHOLD = 0.05
+GO_MAX_TERM_UNIVERSE_FRACTION = 0.05
+GO_DISPLAY_TERMS_PER_GROUP = 4
+
 # --- spatial-domain annotation ----------------------------------------------
 # Generated comparator feature prefix, not an input adata column.
 DOMAIN_CHANNEL_PREFIX = "__domain__"
@@ -72,7 +87,6 @@ def _species_config(
     species: str,
     data_key: str,
     result_dir: Path,
-    figure_dir: Path,
     annotation_col: str,
     **extra,
 ) -> SimpleNamespace:
@@ -87,7 +101,6 @@ def _species_config(
         SDATA_DIR=data_root / "sdata",
         META_CSV=data_root / "metadata.csv",
         RESULT_DIR=result_dir,
-        FIGURE_DIR=figure_dir,
         SV_RESULT_DIR=sv_result_dir,
         SV_MANIFEST_JSON=sv_result_dir / "manifest.json",
         SPECTRA_RESULT_DIR=spectra_result_dir,
@@ -99,12 +112,11 @@ def _species_config(
 
 
 def ensure_species_output_dirs(cfg: SimpleNamespace) -> None:
-    """Create one species' raw, prepared, result, and figure directories."""
+    """Create one species' raw, prepared, and cached-result directories."""
     for d in (
         cfg.RAW_DIR,
         cfg.SDATA_DIR,
         cfg.RESULT_DIR,
-        cfg.FIGURE_DIR,
         cfg.SV_RESULT_DIR,
         cfg.SPECTRA_RESULT_DIR,
     ):
@@ -164,7 +176,6 @@ MOUSE = _species_config(
     species="mouse",
     data_key="mosta",
     result_dir=MOUSE_ONLY_RESULT_DIR,
-    figure_dir=MOUSE_ONLY_FIGURE_DIR,
     annotation_col="annotation",
     STAGE_TO_DAY=STAGE_TO_DAY,
     ALL_TIMEPOINTS=ALL_TIMEPOINTS,
@@ -274,7 +285,6 @@ HUMAN = _species_config(
     species="human",
     data_key="hesta",
     result_dir=HUMAN_ONLY_RESULT_DIR,
-    figure_dir=HUMAN_ONLY_FIGURE_DIR,
     annotation_col="celltype",
     CS_TO_DAY=CS_TO_DAY,
     ALL_CARNEGIE_STAGES=ALL_CARNEGIE_STAGES,
@@ -301,8 +311,6 @@ def ensure_output_dirs() -> None:
         MOUSE_ONLY_RESULT_DIR,
         HUMAN_ONLY_RESULT_DIR,
         COMPARISON_FIGURE_DIR,
-        MOUSE_ONLY_FIGURE_DIR,
-        HUMAN_ONLY_FIGURE_DIR,
     ):
         d.mkdir(parents=True, exist_ok=True)
     for cfg in SPECIES_CONFIGS.values():
