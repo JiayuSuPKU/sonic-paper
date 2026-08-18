@@ -319,6 +319,59 @@ def _load_species_arrays(
     }
 
 
+def comparator_from_cached_spectra(
+    bundle: dict[str, Any],
+    section_indices: Sequence[int] | np.ndarray,
+    gene_names: Sequence[str],
+) -> Any:
+    """Restore a fitted comparator view for selected sections and genes.
+
+    Prepared expression is loaded only for the requested sections so QuadSV's
+    public differential-test methods can operate on the cached spectral state
+    without recomputing FFTs or materializing every section at once.
+    """
+    indices = np.asarray(section_indices, dtype=int)
+    if indices.ndim != 1 or not len(indices):
+        raise ValueError("section_indices must be a non-empty one-dimensional array.")
+    if np.any(indices < 0) or np.any(indices >= len(bundle["section_ids"])):
+        raise IndexError("section_indices contains an out-of-range section.")
+    genes = list(map(str, gene_names))
+    if not genes or len(genes) != len(set(genes)):
+        raise ValueError("gene_names must be non-empty and unique.")
+    missing = sorted(set(genes) - set(bundle["name_to_col"]))
+    if missing:
+        raise KeyError(f"Genes are absent from the spectra cache: {missing[:5]}")
+
+    section_ids = [bundle["section_ids"][index] for index in indices]
+    sections, metadata, loaded_genes, domain_channels = utils.load_prepared_sections(
+        bundle["cfg"],
+        section_ids=section_ids,
+        gene_panel=genes,
+        expression_mode=C.ANALYSIS_EXPRESSION_MODE,
+        normalization_target_sum=C.ANALYSIS_NORMALIZATION_TARGET_SUM,
+        include_domain_channels=False,
+    )
+    if metadata["section_id"].astype(str).tolist() != section_ids:
+        raise RuntimeError("Prepared sections do not match the cached section order.")
+    if loaded_genes != genes or domain_channels:
+        raise RuntimeError("Prepared comparator feature order changed.")
+
+    comparator = utils.build_comparator(
+        sections,
+        genes,
+        freq_edges=np.asarray(bundle["freq_edges"]),
+        adaptive_freq_edges=False,
+    )
+    columns = np.asarray([bundle["name_to_col"][gene] for gene in genes], dtype=int)
+    comparator.spectra_ = bundle["spectra"][indices][:, columns, :]
+    comparator.dc_ = bundle["dc"][indices][:, columns]
+    comparator.presence_ = bundle["presence"][indices][:, columns]
+    comparator.frequency_bin_intervals_ = np.column_stack(
+        [bundle["freq_edges"][:-1], bundle["freq_edges"][1:]]
+    )
+    return comparator
+
+
 # ---------------------------------------------------------------------------
 # PCA embedding
 # ---------------------------------------------------------------------------

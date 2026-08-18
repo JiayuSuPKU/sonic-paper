@@ -65,6 +65,7 @@ LOCAL_MIXING_QUANTILES = 5
 N_PATTERN_CLUSTERS = 5
 TEMPORAL_MAX_WITHIN_STAGE_PERCENTILE = 0.95
 TEMPORAL_DYNAMIC_PERCENTILE_THRESHOLD = 0.9
+TRANSITION_FDR_THRESHOLD = 0.05
 GO_SOURCE = "GO:BP"
 GO_ORGDB = {"mouse": "org.Mm.eg.db", "human": "org.Hs.eg.db"}
 GO_SEMANTIC_SIMPLIFY = True
@@ -275,10 +276,7 @@ CS_TO_DAY: dict[str, float] = {
 }
 ALL_CARNEGIE_STAGES: list[str] = list(CS_TO_DAY)
 GEO_SERIES = "GSE326326"
-GEO_BRIEF_URL = (
-    "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi"
-    f"?acc={GEO_SERIES}&targ=gsm&form=text&view=brief"
-)
+GEO_BRIEF_URL = f"https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={GEO_SERIES}&targ=gsm&form=text&view=brief"
 
 HUMAN = _species_config(
     panel_key="human",

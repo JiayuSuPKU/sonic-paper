@@ -29,6 +29,7 @@ PC_COLUMNS = [f"PC{index}" for index in range(1, C.N_PC + 1)]
 
 # Technical families are retained in metrics but not chosen as figure examples.
 EXAMPLE_GENE_EXCLUDED_PREFIXES = (
+    "MALAT1",
     "RPL",
     "RPS",
     "MRPL",
@@ -52,12 +53,13 @@ CLUSTER_FUNCTIONAL_LABELS = {
 # ---------------------------------------------------------------------------
 # Shared GO enrichment
 # ---------------------------------------------------------------------------
-def _cached_go_enrichment(  # noqa: C901
+def cached_go_enrichment(  # noqa: C901
     queries: Mapping[str, tuple[Sequence[str], Sequence[str], str]],
     *,
     cache_name: str,
     panel: str,
     variant: str,
+    result_dir: Path = RESULT_DIR,
 ) -> pd.DataFrame:
     """Run and cache named clusterProfiler queries with explicit universes."""
     rscript = Path(sys.prefix) / "bin" / "Rscript"
@@ -94,8 +96,9 @@ def _cached_go_enrichment(  # noqa: C901
             for name, (genes, universe, orgdb) in normalized.items()
         },
     }
-    cache_path = RESULT_DIR / f"{cache_name}.csv.gz"
-    manifest_path = RESULT_DIR / f"{cache_name}_manifest.json"
+    result_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = result_dir / f"{cache_name}.csv.gz"
+    manifest_path = result_dir / f"{cache_name}_manifest.json"
     if cache_path.exists() != manifest_path.exists():
         raise RuntimeError(
             f"Incomplete GO cache: expected both {cache_path} and {manifest_path}."
@@ -840,7 +843,7 @@ def _cache_temporal_metrics(
     ]
     mouse_universe = coding["mouse_symbol"].tolist()
     human_universe = coding["human_symbol"].tolist()
-    enrichment = _cached_go_enrichment(
+    enrichment = cached_go_enrichment(
         {
             "mouse-specific dynamic": (
                 coding.loc[
@@ -976,7 +979,7 @@ def run(embedding: dict[str, Any]) -> dict[str, Any]:
                 universe,
                 C.GO_ORGDB[species],
             )
-    enrichment = _cached_go_enrichment(
+    enrichment = cached_go_enrichment(
         queries,
         cache_name="cluster_go_enrichment",
         panel="embryo_embedding",
