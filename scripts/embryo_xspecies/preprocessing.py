@@ -24,6 +24,7 @@ import pandas as pd
 import scipy.sparse as sp
 
 from . import config as C
+from . import utils
 from .config import SPECIES_CONFIGS, ensure_species_output_dirs
 
 logger = logging.getLogger("embryo_xspecies.preprocessing")
@@ -40,8 +41,6 @@ def _preprocessing_paths(cfg: Any) -> dict[str, Path]:
 
 
 _MOSTA_INDEX_RE = re.compile(r"^(\d+)_(\d+)(?:_.*)?$")
-_MOUSE_E_ANCHORS = np.array([10.5, 11.0, 11.5, 12.0, 12.75, 13.75])
-_CARNEGIE_ANCHORS = np.array([14.0, 15.0, 16.0, 17.0, 18.5, 21.5])
 _GENE_SUMMARY_CACHE_VERSION = 1
 
 
@@ -103,46 +102,6 @@ def _coords_from_mosta_index(adata: Any) -> np.ndarray:
             )
         coords.append((int(m.group(1)), int(m.group(2))))
     return np.asarray(coords, dtype=np.float64) * C.BIN_SIZE_UM
-
-
-def _mouse_e_to_carnegie(e_day: float | np.ndarray) -> float | np.ndarray:
-    """Map mouse embryonic day to the shared Carnegie-stage axis."""
-    e = np.asarray(e_day, dtype=float)
-    cs = np.interp(e, _MOUSE_E_ANCHORS, _CARNEGIE_ANCHORS)
-    lo_slope = (_CARNEGIE_ANCHORS[1] - _CARNEGIE_ANCHORS[0]) / (
-        _MOUSE_E_ANCHORS[1] - _MOUSE_E_ANCHORS[0]
-    )
-    hi_slope = (_CARNEGIE_ANCHORS[-1] - _CARNEGIE_ANCHORS[-2]) / (
-        _MOUSE_E_ANCHORS[-1] - _MOUSE_E_ANCHORS[-2]
-    )
-    cs = np.where(
-        e < _MOUSE_E_ANCHORS[0],
-        _CARNEGIE_ANCHORS[0] + (e - _MOUSE_E_ANCHORS[0]) * lo_slope,
-        cs,
-    )
-    cs = np.where(
-        e > _MOUSE_E_ANCHORS[-1],
-        _CARNEGIE_ANCHORS[-1] + (e - _MOUSE_E_ANCHORS[-1]) * hi_slope,
-        cs,
-    )
-    return float(cs) if cs.ndim == 0 else cs
-
-
-def _human_label_to_carnegie(label: str) -> float:
-    """Parse a HESTA Carnegie-stage label; ranges use their midpoint."""
-    nums = [int(x) for x in re.findall(r"\d+", str(label))]
-    return float(np.mean(nums)) if nums else float("nan")
-
-
-def _carnegie_stage(
-    species: str, *, timepoint: str | None = None, day: float | None = None
-) -> float:
-    """Return the metadata Carnegie-stage value used in preprocessing outputs."""
-    if species == "human":
-        return _human_label_to_carnegie(str(timepoint))
-    if day is None:
-        raise ValueError("mouse Carnegie-stage mapping requires day.")
-    return float(_mouse_e_to_carnegie(day))
 
 
 def _count_matrix(adata: Any, *, cfg: Any) -> Any:
@@ -334,10 +293,12 @@ def _read_selected_metadata(cfg: Any, stages: list[str] | None) -> pd.DataFrame:
         )
     if cfg.PANEL_KEY == "human":
         meta["carnegie"] = [
-            _carnegie_stage("human", timepoint=str(t)) for t in meta["timepoint"]
+            utils.carnegie_stage("human", timepoint=str(t)) for t in meta["timepoint"]
         ]
     else:
-        meta["carnegie"] = [_carnegie_stage("mouse", day=float(d)) for d in meta["day"]]
+        meta["carnegie"] = [
+            utils.carnegie_stage("mouse", day=float(d)) for d in meta["day"]
+        ]
     return meta.reset_index(drop=True)
 
 

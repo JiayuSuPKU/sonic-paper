@@ -597,43 +597,25 @@ def shared_supported_freq_edges(
 # ---------------------------------------------------------------------------
 # Mouse embryonic day (dpc) → morphologically equivalent human Carnegie stage,
 # from the UNSW Carnegie Stage Comparison (midpoints of the published CS↔E
-# ranges over the monotonic mid-range that covers our data):
-#   E10.5→CS14, E11→CS15, E11.5→CS16, E12→CS17, E12.5–13→CS18–19 (mid 18.5),
-#   E13.5–14→CS20–23 (mid 21.5). Carnegie staging ENDS at CS23 (~E13.5–14), so
-#   mouse E14.5/E15.5 are post-Carnegie (fetal): the function extrapolates them
-#   to CS>23 to flag that they lie beyond the human-comparable window.
+# The comparison spans mouse E9-E16 and human CS9-CS23 at half-day/integer-CS
+# increments, giving CS = 2 * E - 9 over the embryonic interval.
 # Source: https://embryology.med.unsw.edu.au/embryology/index.php/Carnegie_Stage_Comparison
-_MOUSE_E_ANCHORS = np.array([10.5, 11.0, 11.5, 12.0, 12.75, 13.75])
-_CARNEGIE_ANCHORS = np.array([14.0, 15.0, 16.0, 17.0, 18.5, 21.5])
-# Last Carnegie stage; mouse-E mapping above this is extrapolated / fetal.
+_MOUSE_E_MIN = 9.0
+_MOUSE_E_MAX = 16.0
 CARNEGIE_MAX = 23.0
 
 
 def mouse_e_to_carnegie(e_day: float | np.ndarray) -> float | np.ndarray:
     """Mouse embryonic day (dpc) → equivalent human Carnegie stage.
 
-    Piecewise-linear on the anchored mid-range; linearly extrapolated past the
-    ends using the local slope (so ``E15.5`` returns a value > ``CARNEGIE_MAX``,
-    denoting a post-Carnegie / fetal mouse stage with no human CS counterpart).
+    The source comparison maps E9-E16 to CS9-CS23 in half-day mouse and
+    integer-CS increments. Values outside E9-E16 are rejected because Carnegie
+    staging does not define a corresponding interval there.
     """
     e = np.asarray(e_day, dtype=float)
-    cs = np.interp(e, _MOUSE_E_ANCHORS, _CARNEGIE_ANCHORS)
-    lo_slope = (_CARNEGIE_ANCHORS[1] - _CARNEGIE_ANCHORS[0]) / (
-        _MOUSE_E_ANCHORS[1] - _MOUSE_E_ANCHORS[0]
-    )
-    hi_slope = (_CARNEGIE_ANCHORS[-1] - _CARNEGIE_ANCHORS[-2]) / (
-        _MOUSE_E_ANCHORS[-1] - _MOUSE_E_ANCHORS[-2]
-    )
-    cs = np.where(
-        e < _MOUSE_E_ANCHORS[0],
-        _CARNEGIE_ANCHORS[0] + (e - _MOUSE_E_ANCHORS[0]) * lo_slope,
-        cs,
-    )
-    cs = np.where(
-        e > _MOUSE_E_ANCHORS[-1],
-        _CARNEGIE_ANCHORS[-1] + (e - _MOUSE_E_ANCHORS[-1]) * hi_slope,
-        cs,
-    )
+    if np.any((e < _MOUSE_E_MIN) | (e > _MOUSE_E_MAX)):
+        raise ValueError("Mouse Carnegie mapping is defined only for E9-E16.")
+    cs = 2.0 * e - 9.0
     return float(cs) if cs.ndim == 0 else cs
 
 
