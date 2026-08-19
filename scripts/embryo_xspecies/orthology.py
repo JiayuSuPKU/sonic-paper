@@ -129,6 +129,15 @@ def load_orthologs() -> pd.DataFrame:
     return table
 
 
+def prepare_orthologs(*, force: bool = False) -> pd.DataFrame:
+    """Load the validated cache, downloading and rebuilding it when required."""
+    if force or not ORTHO_TSV.exists():
+        return refresh_orthologs()
+    table = load_orthologs()
+    LOGGER.info("Orthology cache is current: %s (%d pairs).", ORTHO_TSV, len(table))
+    return table
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     refresh_orthologs()

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import json
 import logging
 import re
@@ -275,8 +276,22 @@ def _read_selected_metadata(cfg: Any, stages: list[str] | None) -> pd.DataFrame:
             f"Missing {cfg.META_CSV} - run the {cfg.PANEL_KEY} download step first."
         )
     meta = pd.read_csv(cfg.META_CSV)
-    if stages:
-        meta = meta[meta["timepoint"].isin(stages)].copy()
+    selected_stages = list(stages) if stages else list(cfg.KEPT_TIMEPOINTS)
+    configured = {
+        section_id
+        for stage in selected_stages
+        for section_id in cfg.ALL_SECTIONS.get(stage, [])
+    }
+    meta = meta[
+        meta["timepoint"].isin(selected_stages)
+        & meta["section_id"].astype(str).isin(configured)
+    ].copy()
+    if meta["section_id"].duplicated().any():
+        raise ValueError(f"{cfg.META_CSV} contains duplicate configured sections.")
+    if missing := configured - set(meta["section_id"].astype(str)):
+        raise RuntimeError(
+            f"{cfg.PANEL_KEY} metadata is missing configured sections: {sorted(missing)[:10]}"
+        )
     if meta.empty:
         raise RuntimeError("No sections in metadata.csv match the requested stages.")
     meta = _sort_by_stage(cfg, meta).copy()
@@ -300,6 +315,64 @@ def _read_selected_metadata(cfg: Any, stages: list[str] | None) -> pd.DataFrame:
             utils.carnegie_stage("mouse", day=float(d)) for d in meta["day"]
         ]
     return meta.reset_index(drop=True)
+
+
+def preprocessing_is_current(cfg: Any) -> bool:
+    """Return whether one species' prepared zarr and QC cache is complete."""
+    paths = _preprocessing_paths(cfg)
+    required = [
+        paths["gene_qc"],
+        paths["section_qc"],
+        paths["summary"],
+        cfg.GEOMETRY_CSV,
+    ]
+    if not all(path.exists() for path in required):
+        return False
+
+    meta = _read_selected_metadata(cfg, None)
+    section_ids = meta["section_id"].astype(str).tolist()
+    summary = json.loads(paths["summary"].read_text())
+    sources = [
+        {
+            "section_id": str(row.section_id),
+            "size": Path(row.h5ad_path_abs).stat().st_size,
+            "mtime_ns": Path(row.h5ad_path_abs).stat().st_mtime_ns,
+        }
+        for row in meta.itertuples(index=False)
+    ]
+    expected = {
+        "schema_version": 2,
+        "complete": True,
+        "species": cfg.PANEL_KEY,
+        "section_ids": section_ids,
+        "source_h5ad": sources,
+        "gene_qc_sha256": hashlib.sha256(paths["gene_qc"].read_bytes()).hexdigest(),
+        "bin_size_um": C.BIN_SIZE_UM,
+        "annotation_col": cfg.ANNOTATION_COL,
+    }
+    if any(summary.get(key) != value for key, value in expected.items()):
+        return False
+
+    for path in (
+        paths["section_qc"],
+        cfg.GEOMETRY_CSV,
+    ):
+        table = pd.read_csv(path)
+        if (
+            "section_id" not in table
+            or table["section_id"].duplicated().any()
+            or set(table["section_id"].astype(str)) != set(section_ids)
+        ):
+            return False
+    for row in meta.itertuples(index=False):
+        if not _gene_summary_cache_is_current(
+            _gene_summary_cache_path(paths["gene_summary_cache"], str(row.section_id)),
+            Path(row.h5ad_path_abs),
+        ):
+            return False
+        if not (cfg.SDATA_DIR / f"{row.section_id}.zarr").is_dir():
+            return False
+    return True
 
 
 def _gene_summary_cache_path(cache_dir: Path, section_id: str) -> Path:
@@ -673,8 +746,23 @@ def run_preprocessing(
     )
     gene_qc.to_csv(paths["gene_qc"], index=False)
     section_qc.to_csv(paths["section_qc"], index=False)
+    source_h5ad = [
+        {
+            "section_id": str(row.section_id),
+            "size": Path(row.h5ad_path_abs).stat().st_size,
+            "mtime_ns": Path(row.h5ad_path_abs).stat().st_mtime_ns,
+        }
+        for row in meta.itertuples(index=False)
+    ]
     summary = {
+        "schema_version": 2,
+        "complete": False,
         "species": cfg.PANEL_KEY,
+        "section_ids": meta["section_id"].astype(str).tolist(),
+        "source_h5ad": source_h5ad,
+        "gene_qc_sha256": hashlib.sha256(paths["gene_qc"].read_bytes()).hexdigest(),
+        "bin_size_um": C.BIN_SIZE_UM,
+        "annotation_col": annotation_col or cfg.ANNOTATION_COL,
         "n_sections": int(len(meta)),
         "n_common_genes": int(len(gene_qc)),
         "n_selected_genes": int(len(prepared_genes)),
@@ -682,7 +770,6 @@ def run_preprocessing(
         "gene_summary_cache_dir": str(paths["gene_summary_cache"]),
         "bin_geometry_rule": "observed_bin50_bins_only_no_fill_drop_or_aggregation",
     }
-    paths["summary"].write_text(json.dumps(summary, indent=2) + "\n")
     logger.info(
         "%s prepared genes: %d/%d common genes detected in every section; wrote %s",
         cfg.PANEL_KEY,
@@ -691,6 +778,7 @@ def run_preprocessing(
         paths["gene_qc"],
     )
     if dry_run:
+        paths["summary"].write_text(json.dumps(summary, indent=2) + "\n")
         logger.info("dry-run requested; zarr conversion skipped.")
         return 0
 
@@ -737,6 +825,8 @@ def run_preprocessing(
     ]
     geom = geom[[c for c in cols if c in geom]].pipe(lambda df: _sort_by_stage(cfg, df))
     geom.to_csv(cfg.GEOMETRY_CSV, index=False)
+    summary["complete"] = True
+    paths["summary"].write_text(json.dumps(summary, indent=2) + "\n")
     logger.info("Wrote %s (%d sections).", cfg.GEOMETRY_CSV, len(geom))
 
     print("\n=== per-stage geometry (bin50) ===")

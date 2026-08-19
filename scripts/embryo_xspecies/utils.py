@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import hashlib
 import json
 import logging
 import re
@@ -16,6 +17,26 @@ import scipy.sparse as sp
 from . import config as C
 
 logger = logging.getLogger("embryo_xspecies.utils")
+
+
+def cache_signature(paths: list[Path], arrays: list[np.ndarray] | None = None) -> str:
+    """Hash file inventories and small arrays used to validate derived caches."""
+    digest = hashlib.sha256()
+    for path in sorted(set(paths)):
+        if not path.exists():
+            raise FileNotFoundError(path)
+        stat = path.stat()
+        try:
+            label = path.relative_to(C.PROJECT_ROOT)
+        except ValueError:
+            label = path
+        digest.update(f"{label}\0{stat.st_size}\0{stat.st_mtime_ns}\n".encode())
+    for array in arrays or []:
+        value = np.ascontiguousarray(array)
+        digest.update(str(value.shape).encode())
+        digest.update(value.dtype.str.encode())
+        digest.update(value.tobytes())
+    return digest.hexdigest()
 
 
 def require_current_bin_size(table: Any, *, label: str = "prepared zarr") -> None:

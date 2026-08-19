@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,13 +20,26 @@ from scipy.stats import false_discovery_control, hypergeom, spearmanr
 from sklearn.cluster import MiniBatchKMeans
 
 from . import config as C
-from . import embeddings, orthology, sv
+from . import orthology, sv, utils
 
 LOGGER = logging.getLogger("embryo_xspecies.embedding_metrics")
 
 # Unified cache location and PCA coordinate contract.
 RESULT_DIR = C.COMPARISON_RESULT_DIR / "embedding_metrics"
 PC_COLUMNS = [f"PC{index}" for index in range(1, C.N_PC + 1)]
+_CACHE_ARTIFACTS = (
+    "cluster_go_enrichment.csv.gz",
+    "cluster_go_enrichment_manifest.json",
+    "cluster_summary.csv",
+    "gene_stage_cluster_membership.csv.gz",
+    "local_mixing_by_section.csv",
+    "ortholog_temporal_conservation.csv.gz",
+    "selected_genes.csv",
+    "temporal_gene_statistics.csv.gz",
+    "temporal_go_enrichment.csv.gz",
+    "temporal_go_enrichment_manifest.json",
+    "manifest.json",
+)
 
 # Technical families are retained in metrics but not chosen as figure examples.
 EXAMPLE_GENE_EXCLUDED_PREFIXES = (
@@ -796,6 +810,44 @@ def summarize_local_mixing(
 # ---------------------------------------------------------------------------
 # Cache orchestration
 # ---------------------------------------------------------------------------
+def _input_signature(embedding: dict[str, Any]) -> str:
+    """Return the signature of every input consumed by embedding metrics."""
+    paths = [Path(__file__), Path(C.__file__), orthology.ORTHO_TSV]
+    for cfg in C.SPECIES_CONFIGS.values():
+        metadata = utils.filtered_metadata(cfg)
+        paths.extend(
+            [
+                Path(cfg.RESULT_DIR) / "gene_qc.csv",
+                cfg.GEOMETRY_CSV,
+                cfg.SV_MANIFEST_JSON,
+            ]
+        )
+        for section_id in metadata["section_id"].astype(str):
+            paths.extend(
+                [
+                    cfg.SPECTRA_RESULT_DIR / f"{section_id}.npz",
+                    cfg.SV_RESULT_DIR / f"{section_id}.csv.gz",
+                    Path(cfg.RESULT_DIR) / "gene_qc_cache" / f"{section_id}.npz",
+                ]
+            )
+    pca = embedding["pca"]
+    arrays = [
+        embedding["freq_edges"],
+        pca.components_,
+        pca.mean_,
+        pca.explained_variance_ratio_,
+    ]
+    return utils.cache_signature(paths, arrays)
+
+
+def _load_current_manifest(signature: str) -> dict[str, Any] | None:
+    """Load the manifest only when every owned artifact matches current inputs."""
+    if not all((RESULT_DIR / name).exists() for name in _CACHE_ARTIFACTS):
+        return None
+    manifest = json.loads((RESULT_DIR / "manifest.json").read_text())
+    return manifest if manifest.get("cache_signature") == signature else None
+
+
 def _cache_temporal_metrics(
     embedding: dict[str, Any],
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -957,8 +1009,14 @@ def _cache_temporal_metrics(
     return selected, manifest
 
 
-def run(embedding: dict[str, Any]) -> dict[str, Any]:
-    """Compute and cache all joint-embedding analysis metrics."""
+def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
+    """Compute or load all joint-embedding analysis metrics."""
+    signature = _input_signature(embedding)
+    if not force and (manifest := _load_current_manifest(signature)) is not None:
+        LOGGER.info("Embedding metrics cache is current: %s", RESULT_DIR)
+        return manifest
+    if force and RESULT_DIR.exists():
+        shutil.rmtree(RESULT_DIR)
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     selected, temporal_manifest = _cache_temporal_metrics(embedding)
     points = embedding_points(embedding)
@@ -1051,6 +1109,8 @@ def run(embedding: dict[str, Any]) -> dict[str, Any]:
         ],
     }
     manifest = {
+        "cache_signature": signature,
+        "artifacts": list(_CACHE_ARTIFACTS),
         "embedding": embedding_manifest,
         "temporal": temporal_manifest,
         "local_mixing": mixing_manifest,
@@ -1069,13 +1129,3 @@ def run(embedding: dict[str, Any]) -> dict[str, Any]:
     (RESULT_DIR / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     LOGGER.info("Wrote embedding metrics to %s", RESULT_DIR)
     return manifest
-
-
-def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    run(embeddings.load_spectra_and_fit_joint_embedding())
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

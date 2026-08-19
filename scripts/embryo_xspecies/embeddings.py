@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from sklearn.decomposition import PCA
 
 from . import config as C
@@ -29,6 +30,7 @@ from . import utils
 
 LOGGER = logging.getLogger("embryo_xspecies.embeddings")
 _EPS = 1e-12
+_QUERY_INDEX_KEY = "_gene_section_query_index"
 _CACHE_KEYS = {
     "manifest_json",
     "spectra",
@@ -520,6 +522,120 @@ def load_spectra_and_fit_joint_embedding(
         "transform": transform,
         "freq_edges": freq_edges,
     }
+
+
+def _resolve_query_coordinate(
+    bundle: dict[str, Any],
+    gene: str,
+    section_id: str,
+) -> tuple[np.ndarray, str]:
+    if gene not in bundle["name_to_col"]:
+        raise KeyError(f"{gene!r} is absent from the gene panel.")
+    metadata = bundle["meta"].reset_index(drop=True)
+    query_indices = np.flatnonzero(np.asarray(bundle["section_ids"]) == str(section_id))
+    if len(query_indices) != 1:
+        raise KeyError(
+            f"Expected one section {section_id!r}; found {len(query_indices)}."
+        )
+    query_index = int(query_indices[0])
+    timepoint = str(metadata.iloc[query_index]["timepoint"])
+    coordinate = bundle["coords"][query_index, bundle["name_to_col"][gene], :]
+    return coordinate, timepoint
+
+
+def _gene_section_query_index(embedding: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Build an exact gene-section coordinate index for repeated queries."""
+    cached = embedding.get(_QUERY_INDEX_KEY)
+    if cached is not None:
+        return cached
+
+    index = {}
+    for species, bundle in embedding["species"].items():
+        metadata = bundle["meta"].reset_index(drop=True)
+        index[species] = {
+            "coordinates": bundle["coords"][:, bundle["gene_cols"], :],
+            "gene_names": np.asarray(bundle["gene_names"], dtype=str),
+            "stage_names": metadata["timepoint"].astype(str).to_numpy(),
+            "section_ids": metadata["section_id"].astype(str).to_numpy(),
+        }
+    embedding[_QUERY_INDEX_KEY] = index
+    return index
+
+
+def query_nearest_gene_stages(
+    query_gene: str,
+    query_species: str,
+    *,
+    query_section_id: str,
+    embedding: dict[str, Any] | None = None,
+    top_n: int | None = None,
+) -> pd.DataFrame:
+    """Rank exact non-self ``(gene, section)`` patterns by PCA distance.
+
+    ``query_section_id`` identifies the exact query slide. Every candidate is
+    also an exact gene-slide pattern, and its developmental stage is returned
+    in ``target_stage``. When ``embedding`` is omitted, the joint PCA is
+    refitted from the validated per-section spectral caches. ``top_n``
+    optionally limits the ranked output to that many hits per species; the
+    complete ranking is returned by default. The exact gene-section coordinate
+    index is cached on ``embedding`` for fast repeated queries.
+    """
+    if top_n is not None and (
+        isinstance(top_n, bool) or not isinstance(top_n, (int, np.integer)) or top_n < 1
+    ):
+        raise ValueError("top_n must be a positive integer or None.")
+    if embedding is None:
+        embedding = load_spectra_and_fit_joint_embedding()
+    species = embedding["species"]
+    if query_species not in species:
+        raise KeyError(f"Unknown query species {query_species!r}.")
+
+    query_coordinate, query_timepoint = _resolve_query_coordinate(
+        species[query_species], query_gene, query_section_id
+    )
+    query_index = _gene_section_query_index(embedding)
+    frames = []
+    for target_species, bundle in species.items():
+        target = query_index[target_species]
+        gene_names = target["gene_names"]
+        difference = target["coordinates"] - query_coordinate
+        distances = np.sqrt(np.einsum("sgp,sgp->sg", difference, difference))
+        if target_species == query_species:
+            query_section_index = np.flatnonzero(
+                target["section_ids"] == query_section_id
+            ).item()
+            distances[query_section_index, bundle["name_to_col"][query_gene]] = np.inf
+
+        flat_distances = distances.ravel()
+        n_finite = int(np.isfinite(flat_distances).sum())
+        if not n_finite:
+            raise RuntimeError(f"No finite target found for {target_species}.")
+        if top_n is None:
+            order = np.argsort(flat_distances, kind="stable")[:n_finite]
+        else:
+            n_hits = min(int(top_n), n_finite)
+            order = np.argpartition(flat_distances, n_hits - 1)[:n_hits]
+            order = order[np.argsort(flat_distances[order], kind="stable")]
+        stage_indices, gene_indices = np.divmod(order, len(gene_names))
+        frames.append(
+            pd.DataFrame(
+                {
+                    "rank": np.arange(1, len(order) + 1),
+                    "target_species": target_species,
+                    "target_gene": gene_names[gene_indices],
+                    "target_stage": target["stage_names"][stage_indices],
+                    "target_section_id": target["section_ids"][stage_indices],
+                    "distance": flat_distances[order],
+                }
+            )
+        )
+
+    result = pd.concat(frames, ignore_index=True)
+    result.insert(0, "query_section_id", query_section_id)
+    result.insert(0, "query_stage", query_timepoint)
+    result.insert(0, "query_gene", query_gene)
+    result.insert(0, "query_species", query_species)
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -5,7 +5,9 @@ from __future__ import annotations
 import gc
 import json
 import logging
+import shutil
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -17,6 +19,46 @@ from . import embedding_metrics, embeddings, utils
 LOGGER = logging.getLogger("embryo_xspecies.transitions")
 RESULT_DIR = C.COMPARISON_RESULT_DIR / "stage_transitions"
 _EPS = 1e-12
+_CACHE_ARTIFACTS = (
+    "go_enrichment.csv.gz",
+    "go_enrichment_manifest.json",
+    "manifest.json",
+    "metrics.csv.gz",
+    "summary.csv",
+)
+
+
+def _input_signature(embedding: dict[str, Any]) -> str:
+    """Return the signature of inputs consumed by transition metrics."""
+    paths = [
+        Path(__file__),
+        Path(C.__file__),
+        Path(embedding_metrics.__file__),
+        C.PROJECT_ROOT / "scripts" / "run_clusterprofiler.R",
+    ]
+    for cfg in C.SPECIES_CONFIGS.values():
+        metadata = utils.filtered_metadata(cfg)
+        paths.extend(
+            cfg.SPECTRA_RESULT_DIR / f"{section_id}.npz"
+            for section_id in metadata["section_id"].astype(str)
+        )
+    pca = embedding["pca"]
+    return utils.cache_signature(
+        paths,
+        [
+            embedding["freq_edges"],
+            pca.components_,
+            pca.mean_,
+            pca.explained_variance_ratio_,
+        ],
+    )
+
+
+def _load_current_manifest(signature: str) -> dict[str, Any] | None:
+    if not all((RESULT_DIR / name).exists() for name in _CACHE_ARTIFACTS):
+        return None
+    manifest = json.loads((RESULT_DIR / "manifest.json").read_text())
+    return manifest if manifest.get("cache_signature") == signature else None
 
 
 def quantify_stage_movements(
@@ -192,8 +234,14 @@ def _summarize(
     return pd.DataFrame(rows)
 
 
-def run(embedding: dict[str, Any]) -> dict[str, Any]:
-    """Compute each species' consecutive-stage transition statistics."""
+def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
+    """Compute or load each species' consecutive-stage transition statistics."""
+    signature = _input_signature(embedding)
+    if not force and (manifest := _load_current_manifest(signature)) is not None:
+        LOGGER.info("Stage-transition cache is current: %s", RESULT_DIR)
+        return manifest
+    if force and RESULT_DIR.exists():
+        shutil.rmtree(RESULT_DIR)
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     stages_by_species = {
         species: list(C.SPECIES_CONFIGS[species].KEPT_TIMEPOINTS)
@@ -319,6 +367,7 @@ def run(embedding: dict[str, Any]) -> dict[str, Any]:
     )
 
     manifest = {
+        "cache_signature": signature,
         "stage_pairs": {
             species: [list(pair) for pair in zip(stages[:-1], stages[1:], strict=True)]
             for species, stages in stages_by_species.items()
@@ -348,24 +397,8 @@ def run(embedding: dict[str, Any]) -> dict[str, Any]:
             "active genes with significant shape-only DF-norm test "
             f"(FDR <= {C.TRANSITION_FDR_THRESHOLD})"
         ),
-        "artifacts": [
-            "metrics.csv.gz",
-            "summary.csv",
-            "go_enrichment.csv.gz",
-            "go_enrichment_manifest.json",
-            "manifest.json",
-        ],
+        "artifacts": list(_CACHE_ARTIFACTS),
     }
     (RESULT_DIR / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     LOGGER.info("Wrote stage-transition metrics to %s", RESULT_DIR)
     return manifest
-
-
-def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    run(embeddings.load_spectra_and_fit_joint_embedding())
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

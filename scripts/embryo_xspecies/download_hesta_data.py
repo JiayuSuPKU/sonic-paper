@@ -61,7 +61,9 @@ import time
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from . import config as CFG
@@ -182,6 +184,43 @@ def _configured_section_ids(*, representative: bool = False) -> list[str]:
     for cs in C.KEPT_TIMEPOINTS:
         out.extend(sections_by_stage.get(cs, []))
     return out
+
+
+def download_is_current() -> bool:
+    """Return whether every configured HESTA h5ad and metadata row is present."""
+    if not C.META_CSV.exists():
+        return False
+    metadata = pd.read_csv(C.META_CSV)
+    required = {"section_id", "timepoint", "h5ad_path", "source_url", "bin_size_um"}
+    if missing := required - set(metadata):
+        raise ValueError(f"{C.META_CSV} is missing columns: {sorted(missing)}")
+
+    configured = {
+        section_id: timepoint
+        for timepoint in C.KEPT_TIMEPOINTS
+        for section_id in C.ALL_SECTIONS[timepoint]
+    }
+    selected = metadata[metadata["section_id"].isin(configured)]
+    if selected["section_id"].duplicated().any() or len(selected) != len(configured):
+        return False
+    rows = selected.set_index("section_id")
+    for section_id, timepoint in configured.items():
+        if section_id not in rows.index:
+            return False
+        row = rows.loc[section_id]
+        path = Path(str(row["h5ad_path"]))
+        path = path if path.is_absolute() else CFG.PROJECT_ROOT / path
+        expected_path = C.RAW_DIR / f"{section_id}_HESTA.h5ad"
+        if (
+            str(row["timepoint"]) != timepoint
+            or path != expected_path
+            or not str(row["source_url"]).startswith(("https://", "ftp://"))
+            or not np.isclose(float(row["bin_size_um"]), CFG.BIN_SIZE_UM)
+            or not path.is_file()
+            or path.stat().st_size == 0
+        ):
+            return False
+    return True
 
 
 def _matches(section_id: str, patterns: list[str]) -> bool:
@@ -306,37 +345,16 @@ def _dry_run(chosen: list[_Section], *, force: bool, workers: int) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    p.add_argument(
-        "--sections",
-        nargs="+",
-        default=None,
-        metavar="PATTERN",
-        help="Download section IDs matching any exact name, substring, or glob.",
-    )
-    p.add_argument(
-        "--representative", action="store_true", help="Download one section per stage."
-    )
-    p.add_argument(
-        "--force", action="store_true", help="Re-download even if present + size-sane."
-    )
-    p.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Report planned files and transfer size without writing anything.",
-    )
-    p.add_argument(
-        "--workers", type=int, default=6, help="Parallel download workers (default 6)."
-    )
-    p.add_argument(
-        "--max-attempts", type=int, default=8, help="Per-section retry budget."
-    )
-    args = p.parse_args(argv)
-
+def run(
+    *,
+    sections: list[str] | None = None,
+    representative: bool = False,
+    force: bool = False,
+    dry_run: bool = False,
+    workers: int = 6,
+    max_attempts: int = 8,
+) -> int:
+    """Download selected HESTA sections and update the local metadata cache."""
     catalog = _discover_catalog()
     if not catalog:
         logger.error("Empty catalog — could not discover sections from GEO.")
@@ -346,31 +364,31 @@ def main(argv: list[str] | None = None) -> int:
     )
     chosen = _select(
         catalog,
-        patterns=args.sections,
-        representative=args.representative,
+        patterns=sections,
+        representative=representative,
     )
     if not chosen:
         logger.error("No sections selected — check --sections patterns.")
         return 1
-    workers = max(1, int(args.workers))
-    max_attempts = max(1, int(args.max_attempts))
+    workers = max(1, int(workers))
+    max_attempts = max(1, int(max_attempts))
     logger.info(
         "Selected %d section(s) → %s  (workers=%d)", len(chosen), C.RAW_DIR, workers
     )
 
-    if args.dry_run:
-        return _dry_run(chosen, force=args.force, workers=workers)
+    if dry_run:
+        return _dry_run(chosen, force=force, workers=workers)
 
     ensure_species_output_dirs(C)
     t0 = time.time()
     if workers == 1:
         results = [
-            _fetch_one(s, force=args.force, max_attempts=max_attempts) for s in chosen
+            _fetch_one(s, force=force, max_attempts=max_attempts) for s in chosen
         ]
     else:
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futs = {
-                ex.submit(_fetch_one, s, force=args.force, max_attempts=max_attempts): s
+                ex.submit(_fetch_one, s, force=force, max_attempts=max_attempts): s
                 for s in chosen
             }
             results = [fut.result() for fut in as_completed(futs)]
@@ -429,6 +447,46 @@ def main(argv: list[str] | None = None) -> int:
         elapsed / 60,
     )
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument(
+        "--sections",
+        nargs="+",
+        default=None,
+        metavar="PATTERN",
+        help="Download section IDs matching any exact name, substring, or glob.",
+    )
+    p.add_argument(
+        "--representative", action="store_true", help="Download one section per stage."
+    )
+    p.add_argument(
+        "--force", action="store_true", help="Re-download even if present + size-sane."
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report planned files and transfer size without writing anything.",
+    )
+    p.add_argument(
+        "--workers", type=int, default=6, help="Parallel download workers (default 6)."
+    )
+    p.add_argument(
+        "--max-attempts", type=int, default=8, help="Per-section retry budget."
+    )
+    args = p.parse_args(argv)
+    return run(
+        sections=args.sections,
+        representative=args.representative,
+        force=args.force,
+        dry_run=args.dry_run,
+        workers=args.workers,
+        max_attempts=args.max_attempts,
+    )
 
 
 if __name__ == "__main__":
