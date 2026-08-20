@@ -53,7 +53,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import http.client
 import logging
 import re
@@ -69,7 +68,13 @@ import pandas as pd
 from . import config as CFG
 from .config import HUMAN as C
 from .config import ensure_species_output_dirs
-from .download_utils import download, open_url, remote_size, repo_relative_path
+from .download_utils import (
+    download,
+    matches_section,
+    open_url,
+    remote_size,
+    repo_relative_path,
+)
 
 logger = logging.getLogger("embryo_xspecies.download")
 
@@ -182,7 +187,7 @@ def _configured_section_ids(*, representative: bool = False) -> list[str]:
     sections_by_stage = C.REPRESENTATIVE_SECTIONS if representative else C.ALL_SECTIONS
     out: list[str] = []
     for cs in C.KEPT_TIMEPOINTS:
-        out.extend(sections_by_stage.get(cs, []))
+        out.extend(sections_by_stage[cs])
     return out
 
 
@@ -223,13 +228,6 @@ def download_is_current() -> bool:
     return True
 
 
-def _matches(section_id: str, patterns: list[str]) -> bool:
-    return any(
-        p == section_id or p in section_id or fnmatch.fnmatchcase(section_id, p)
-        for p in patterns
-    )
-
-
 def _select(
     catalog: list[_Section],
     *,
@@ -246,11 +244,11 @@ def _select(
     )
     missing = sorted(want - {s.section_id for s in pool})
     if missing:
-        logger.warning(
-            "Configured HESTA section ids missing from GEO catalog: %s", missing
+        raise RuntimeError(
+            f"Configured HESTA section ids missing from GEO catalog: {missing}"
         )
     if patterns:
-        return [s for s in pool if _matches(s.section_id, patterns)]
+        return [s for s in pool if matches_section(s.section_id, patterns)]
     return pool
 
 
@@ -395,6 +393,7 @@ def run(
 
     rows: list[dict] = []
     total_bytes = 0
+    failed = any(status.startswith("skip-") for _, _, status in results)
     for s, n, status in results:
         total_bytes += n
         if status.startswith("skip-"):
@@ -446,7 +445,7 @@ def run(
         total_bytes / 1e9,
         elapsed / 60,
     )
-    return 0
+    return int(failed)
 
 
 def main(argv: list[str] | None = None) -> int:

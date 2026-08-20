@@ -16,16 +16,16 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
-from scipy.stats import false_discovery_control, hypergeom, spearmanr
+from scipy.stats import false_discovery_control, hypergeom
 from sklearn.cluster import MiniBatchKMeans
 
 from . import config as C
 from . import orthology, sv, utils
 
-LOGGER = logging.getLogger("embryo_xspecies.embedding_metrics")
+LOGGER = logging.getLogger("embryo_xspecies.metrics")
 
 # Unified cache location and PCA coordinate contract.
-RESULT_DIR = C.COMPARISON_RESULT_DIR / "embedding_metrics"
+RESULT_DIR = C.COMPARISON_RESULT_DIR / "metrics"
 PC_COLUMNS = [f"PC{index}" for index in range(1, C.N_PC + 1)]
 _CACHE_ARTIFACTS = (
     "cluster_go_enrichment.csv.gz",
@@ -33,24 +33,7 @@ _CACHE_ARTIFACTS = (
     "cluster_summary.csv",
     "gene_stage_cluster_membership.csv.gz",
     "local_mixing_by_section.csv",
-    "ortholog_temporal_conservation.csv.gz",
-    "selected_genes.csv",
-    "temporal_gene_statistics.csv.gz",
-    "temporal_go_enrichment.csv.gz",
-    "temporal_go_enrichment_manifest.json",
     "manifest.json",
-)
-
-# Technical families are retained in metrics but not chosen as figure examples.
-EXAMPLE_GENE_EXCLUDED_PREFIXES = (
-    "MALAT1",
-    "RPL",
-    "RPS",
-    "MRPL",
-    "MRPS",
-    "HBA",
-    "HBB",
-    "HIST",
 )
 
 # Concise figure labels curated from GO terms significantly enriched in both
@@ -194,203 +177,6 @@ def select_go_terms(
         .head(C.GO_DISPLAY_TERMS_PER_GROUP)
         .reset_index(drop=True)
     )
-
-
-# ---------------------------------------------------------------------------
-# Temporal variation
-# ---------------------------------------------------------------------------
-def quantify_temporal_variation(
-    embedding: np.ndarray,
-    stage_labels: Sequence[str],
-    *,
-    feature_names: Sequence[str],
-    stage_order: Sequence[str],
-) -> pd.DataFrame:
-    """Quantify within- and between-stage variation for replicated embeddings.
-
-    ``embedding`` must have shape ``(replicates, features, dimensions)``.
-    Replicates sharing a stage label form one group. The returned mean squares
-    sum variation over all embedding dimensions. For stage ``s``, replicate
-    ``r``, ``N`` total replicates, and ``S`` stages, each feature uses
-
-    ``within = sum_s sum_r ||x_sr - mean_s||^2 / (N - S)``
-
-    ``between = sum_s n_s ||mean_s - grand_mean||^2 / (S - 1)``.
-    """
-    coordinates = np.asarray(embedding, dtype=np.float64)
-    labels = np.asarray(stage_labels, dtype=str)
-    features = np.asarray(feature_names, dtype=str)
-    stages = list(map(str, stage_order))
-    if coordinates.ndim != 3:
-        raise ValueError(
-            "embedding must have shape (replicates, features, dimensions)."
-        )
-    if labels.shape != (coordinates.shape[0],):
-        raise ValueError("stage_labels must contain one label per replicate.")
-    if features.shape != (coordinates.shape[1],):
-        raise ValueError("feature_names must contain one name per feature.")
-    if not stages or len(stages) != len(set(stages)):
-        raise ValueError("stage_order must contain unique stages.")
-    if set(labels) != set(stages):
-        raise ValueError("stage_labels and stage_order contain different stages.")
-    if not np.isfinite(coordinates).all():
-        raise ValueError("embedding contains non-finite coordinates.")
-
-    # Create per-stage indices and separate within- and between-stage variation.
-    indices = [np.flatnonzero(labels == stage) for stage in stages]
-    if any(len(index) < 2 for index in indices):
-        raise ValueError("Each stage requires at least two replicates.")
-    grand_mean = coordinates.mean(axis=0)
-    total_ss = np.square(coordinates - grand_mean).sum(axis=(0, 2))
-    within_ss = np.zeros(len(features), dtype=np.float64)
-    for index in indices:
-        values = coordinates[index]
-        mean = values.mean(axis=0)
-        within_ss += np.square(values - mean).sum(axis=(0, 2))
-
-    n_replicates = len(coordinates)
-    n_stages = len(stages)
-    return pd.DataFrame(
-        {
-            "feature": features,
-            "within_stage_variance": within_ss / (n_replicates - n_stages),
-            "between_stage_variance": np.maximum(total_ss - within_ss, 0)
-            / (n_stages - 1),
-        }
-    )
-
-
-def _temporal_conservation(
-    mouse: pd.DataFrame,
-    human: pd.DataFrame,
-) -> tuple[pd.DataFrame, dict[str, float]]:
-    mouse = mouse[mouse["passes_within_stage_filter"]]
-    human = human[human["passes_within_stage_filter"]]
-    orthologs = orthology.load_orthologs()
-    table = (
-        orthologs.merge(mouse, left_on="mouse_symbol", right_on="gene")
-        .drop(columns="gene")
-        .merge(
-            human,
-            left_on="human_symbol",
-            right_on="gene",
-            suffixes=("_mouse", "_human"),
-        )
-        .drop(columns="gene")
-    )
-    table["mouse_dynamic_percentile"] = table["between_stage_variance_mouse"].rank(
-        pct=True
-    )
-    table["human_dynamic_percentile"] = table["between_stage_variance_human"].rank(
-        pct=True
-    )
-
-    mouse_top = table["mouse_dynamic_percentile"].ge(
-        C.TEMPORAL_DYNAMIC_PERCENTILE_THRESHOLD
-    )
-    human_top = table["human_dynamic_percentile"].ge(
-        C.TEMPORAL_DYNAMIC_PERCENTILE_THRESHOLD
-    )
-    table["dynamic_group"] = "not top-decile"
-    table.loc[mouse_top & ~human_top, "dynamic_group"] = "mouse-specific dynamic"
-    table.loc[~mouse_top & human_top, "dynamic_group"] = "human-specific dynamic"
-    table.loc[mouse_top & human_top, "dynamic_group"] = "conserved dynamic"
-    overlap = int((mouse_top & human_top).sum())
-    expected = int(mouse_top.sum()) * int(human_top.sum()) / len(table)
-    rho, rho_p = spearmanr(
-        table["between_stage_variance_mouse"],
-        table["between_stage_variance_human"],
-    )
-    summary = {
-        "n_orthologs": len(table),
-        "between_stage_variance_spearman": float(rho),
-        "between_stage_variance_spearman_p": float(rho_p),
-        "top_decile_overlap": overlap,
-        "mouse_specific_top_decile": int((mouse_top & ~human_top).sum()),
-        "human_specific_top_decile": int((~mouse_top & human_top).sum()),
-        "top_decile_expected": expected,
-        "top_decile_fold_enrichment": overlap / expected,
-        "top_decile_hypergeom_p": float(
-            hypergeom.sf(
-                overlap - 1,
-                len(table),
-                int(mouse_top.sum()),
-                int(human_top.sum()),
-            )
-        ),
-    }
-    return table, summary
-
-
-def _select_temporal_examples(
-    conservation: pd.DataFrame,
-    displayed_terms: pd.DataFrame,
-) -> pd.DataFrame:
-    conservation = conservation[
-        conservation["mouse_protein_coding"] & conservation["human_protein_coding"]
-    ]
-    excluded_from_display = conservation["mouse_symbol"].str.upper().str.startswith(
-        EXAMPLE_GENE_EXCLUDED_PREFIXES
-    ) | conservation["human_symbol"].str.upper().str.startswith(
-        EXAMPLE_GENE_EXCLUDED_PREFIXES
-    )
-    conservation = conservation[~excluded_from_display]
-    selected = []
-    ranking = {
-        "conserved dynamic": (
-            ["mouse_dynamic_percentile", "human_dynamic_percentile"],
-            [False, False],
-        ),
-        "mouse-specific dynamic": (
-            ["mouse_dynamic_percentile", "human_dynamic_percentile"],
-            [False, True],
-        ),
-        "human-specific dynamic": (
-            ["human_dynamic_percentile", "mouse_dynamic_percentile"],
-            [False, True],
-        ),
-    }
-    for category, (columns, ascending) in ranking.items():
-        ranked = conservation[conservation["dynamic_group"].eq(category)].sort_values(
-            columns, ascending=ascending
-        )
-        group_terms = displayed_terms[displayed_terms["query_group"].eq(category)]
-        symbol_column = (
-            "human_symbol" if category == "human-specific dynamic" else "mouse_symbol"
-        )
-        if group_terms.empty:
-            selection_basis = "temporal variation percentile; no specific GO term"
-            pathway_terms = ""
-        else:
-            hit_genes = set(
-                "/".join(group_terms["hit_genes"].dropna().astype(str)).split("/")
-            )
-            ranked = ranked[ranked[symbol_column].isin(hit_genes)]
-            selection_basis = "highest focal temporal variation percentile among displayed GO term genes"
-        row = ranked.iloc[0]
-        if not group_terms.empty:
-            selected_symbol = str(row[symbol_column])
-            pathway_terms = "; ".join(
-                group_terms.loc[
-                    group_terms["hit_genes"]
-                    .fillna("")
-                    .str.split("/")
-                    .map(lambda genes, symbol=selected_symbol: symbol in genes),
-                    "display_name",
-                ].head(2)
-            )
-        selected.append(
-            {
-                "category": category,
-                "mouse_symbol": row["mouse_symbol"],
-                "human_symbol": row["human_symbol"],
-                "mouse_dynamic_percentile": row["mouse_dynamic_percentile"],
-                "human_dynamic_percentile": row["human_dynamic_percentile"],
-                "selection_basis": selection_basis,
-                "pathway_terms": pathway_terms,
-            }
-        )
-    return pd.DataFrame(selected)
 
 
 # ---------------------------------------------------------------------------
@@ -840,185 +626,23 @@ def _input_signature(embedding: dict[str, Any]) -> str:
     return utils.cache_signature(paths, arrays)
 
 
-def _load_current_manifest(signature: str) -> dict[str, Any] | None:
-    """Load the manifest only when every owned artifact matches current inputs."""
-    if not all((RESULT_DIR / name).exists() for name in _CACHE_ARTIFACTS):
-        return None
-    manifest = json.loads((RESULT_DIR / "manifest.json").read_text())
-    return manifest if manifest.get("cache_signature") == signature else None
-
-
-def _cache_temporal_metrics(
-    embedding: dict[str, Any],
-) -> tuple[pd.DataFrame, dict[str, Any]]:
-    statistics: dict[str, pd.DataFrame] = {}
-    embedding_dimensions: int | None = None
-
-    # For each species, quantify temporal variation and filter by within-stage variance.
-    for species in ("mouse", "human"):
-        bundle = embedding["species"][species]
-        if bundle["label"] != species:
-            raise ValueError(
-                f"Expected {species!r} embedding, got {bundle['label']!r}."
-            )
-        gene_columns = np.asarray(bundle["gene_cols"], dtype=int)
-        coordinates = np.asarray(bundle["coords"][:, gene_columns, :])
-        dimensions = coordinates.shape[2]
-        if embedding_dimensions is not None and dimensions != embedding_dimensions:
-            raise ValueError("Mouse and human embeddings have different dimensions.")
-        embedding_dimensions = dimensions
-        metrics = quantify_temporal_variation(
-            coordinates,
-            bundle["meta"]["timepoint"].astype(str),
-            feature_names=bundle["gene_names"],
-            stage_order=C.SPECIES_CONFIGS[species].KEPT_TIMEPOINTS,
-        ).rename(columns={"feature": "gene"})
-
-        # Remove genes with excessive within-stage variance.
-        cutoff = metrics["within_stage_variance"].quantile(
-            C.TEMPORAL_MAX_WITHIN_STAGE_PERCENTILE
-        )
-        metrics["passes_within_stage_filter"] = metrics["within_stage_variance"].le(
-            cutoff
-        )
-        statistics[species] = metrics
-
-    if embedding_dimensions is None:
-        raise RuntimeError("No species embeddings were quantified.")
-    mouse = statistics["mouse"]
-    human = statistics["human"]
-
-    # Check human/mouse between-stage variance ranking agreement.
-    conservation, summary = _temporal_conservation(mouse, human)
-    coding = conservation[
-        conservation["mouse_protein_coding"] & conservation["human_protein_coding"]
-    ]
-    mouse_universe = coding["mouse_symbol"].tolist()
-    human_universe = coding["human_symbol"].tolist()
-    enrichment = cached_go_enrichment(
-        {
-            "mouse-specific dynamic": (
-                coding.loc[
-                    coding["dynamic_group"].eq("mouse-specific dynamic"),
-                    "mouse_symbol",
-                ],
-                mouse_universe,
-                C.GO_ORGDB["mouse"],
-            ),
-            "human-specific dynamic": (
-                coding.loc[
-                    coding["dynamic_group"].eq("human-specific dynamic"),
-                    "human_symbol",
-                ],
-                human_universe,
-                C.GO_ORGDB["human"],
-            ),
-            "conserved dynamic": (
-                coding.loc[
-                    coding["dynamic_group"].eq("conserved dynamic"),
-                    "mouse_symbol",
-                ],
-                mouse_universe,
-                C.GO_ORGDB["mouse"],
-            ),
-        },
-        cache_name="temporal_go_enrichment",
-        panel="embryo_temporal",
-        variant="disjoint_top_decile",
-    )
-    displayed_terms = select_go_terms(
-        enrichment,
-        group_columns=["query_group"],
-        fdr_column="p_adjust",
-    )
-    selected = _select_temporal_examples(conservation, displayed_terms)
-
-    metric_columns = [
-        "gene",
-        "within_stage_variance",
-        "between_stage_variance",
-        "passes_within_stage_filter",
-    ]
-    pd.concat(
-        [
-            mouse[metric_columns].assign(species="mouse"),
-            human[metric_columns].assign(species="human"),
-        ],
-        ignore_index=True,
-    )[["species", *metric_columns]].to_csv(
-        RESULT_DIR / "temporal_gene_statistics.csv.gz", index=False
-    )
-    conservation[
-        [
-            "human_symbol",
-            "mouse_symbol",
-            "mouse_dynamic_percentile",
-            "human_dynamic_percentile",
-            "dynamic_group",
-        ]
-    ].to_csv(RESULT_DIR / "ortholog_temporal_conservation.csv.gz", index=False)
-    selected.to_csv(RESULT_DIR / "selected_genes.csv", index=False)
-
-    manifest = {
-        "method": (
-            "one-way stage mean squares summed over joint-embedding dimensions; "
-            "genes above the within-stage variance 95th percentile are excluded, "
-            "then ranked by between-stage variance"
-        ),
-        "embedding_dimensions": embedding_dimensions,
-        "dynamic_score": "between_stage_variance",
-        "maximum_within_stage_percentile": C.TEMPORAL_MAX_WITHIN_STAGE_PERCENTILE,
-        "within_stage_variance_cutoffs": {
-            species: float(
-                metrics.loc[
-                    metrics["passes_within_stage_filter"], "within_stage_variance"
-                ].max()
-            )
-            for species, metrics in statistics.items()
-        },
-        "interpreted_genes": {
-            species: int(metrics["passes_within_stage_filter"].sum())
-            for species, metrics in statistics.items()
-        },
-        "same_stage_slides_are_replicates": True,
-        "stage_replicates": {
-            species: {
-                stage: int(bundle["meta"]["timepoint"].astype(str).eq(stage).sum())
-                for stage in C.SPECIES_CONFIGS[species].KEPT_TIMEPOINTS
-            }
-            for species, bundle in embedding["species"].items()
-        },
-        "within_stage_variation_interpretation": (
-            "combined section-plane, embryo, and measurement nuisance baseline"
-        ),
-        "genes": {species: len(metrics) for species, metrics in statistics.items()},
-        "orthology_cache": str(orthology.ORTHO_TSV.relative_to(C.PROJECT_ROOT)),
-        "go_and_example_gene_filter": (
-            "protein-coding in both species according to cached orthology flags"
-        ),
-        **summary,
-        "technical_families_excluded_from_display_only": list(
-            EXAMPLE_GENE_EXCLUDED_PREFIXES
-        ),
-        "go_gene_sets": (
-            "mutually exclusive conserved, mouse-specific, and human-specific "
-            "top-decile dynamic orthologs"
-        ),
-        "dynamic_percentile_threshold": C.TEMPORAL_DYNAMIC_PERCENTILE_THRESHOLD,
-    }
-    return selected, manifest
-
-
 def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
     """Compute or load all joint-embedding analysis metrics."""
     signature = _input_signature(embedding)
-    if not force and (manifest := _load_current_manifest(signature)) is not None:
+    if (
+        not force
+        and (
+            manifest := utils.current_cache_manifest(
+                RESULT_DIR, _CACHE_ARTIFACTS, signature
+            )
+        )
+        is not None
+    ):
         LOGGER.info("Embedding metrics cache is current: %s", RESULT_DIR)
         return manifest
     if force and RESULT_DIR.exists():
         shutil.rmtree(RESULT_DIR)
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    selected, temporal_manifest = _cache_temporal_metrics(embedding)
     points = embedding_points(embedding)
 
     # Cluster all section-level patterns, then collapse slide replicates to one
@@ -1046,9 +670,11 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
     groups = enrichment["query_group"].str.split(":", expand=True)
     enrichment["species"] = groups[0]
     enrichment["cluster"] = groups[1].astype(int)
+    # Apply global FDR correction within each species, combining all cluster-specific tests.
     enrichment["global_qvalue"] = enrichment.groupby("species")["p_raw"].transform(
         lambda values: false_discovery_control(values.fillna(1).to_numpy(float))
     )
+    # Compute fold enrichment relative to the species-specific background genes (effective_domain_size).
     enrichment["fold_enrichment"] = (
         enrichment["intersection_size"] / enrichment["query_size"]
     ) / (enrichment["term_size"] / enrichment["effective_domain_size"])
@@ -1079,8 +705,6 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
             species: int(group.gt(1).sum())
             for species, group in clusters_per_gene.groupby(level="species")
         },
-        "n_strict_orthologs": temporal_manifest["n_orthologs"],
-        "temporal_example_genes": selected["mouse_symbol"].astype(str).tolist(),
         "pca_explained_variance_ratio": embedding[
             "pca"
         ].explained_variance_ratio_.tolist(),
@@ -1112,7 +736,6 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
         "cache_signature": signature,
         "artifacts": list(_CACHE_ARTIFACTS),
         "embedding": embedding_manifest,
-        "temporal": temporal_manifest,
         "local_mixing": mixing_manifest,
         "go": {
             "source": C.GO_SOURCE,

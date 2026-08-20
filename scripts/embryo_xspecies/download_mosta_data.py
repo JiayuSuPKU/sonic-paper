@@ -21,8 +21,8 @@ Idempotent download pipeline:
 3. Download missing or stale files to ``<name>.part`` with HTTP ``Range`` resume,
    verify the final byte count when known, then atomically rename into place.
    Downloads are parallelised across sections (``--workers N``, default 6).
-4. Merge completed/kept rows into ``metadata.csv`` with repo-relative
-   ``h5ad_path`` and explicit ``source_url``.
+4. Merge completed/kept rows into ``metadata.csv``, retain only the current
+   configured panel, and record repo-relative ``h5ad_path`` plus ``source_url``.
 
 Usage::
 
@@ -39,7 +39,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import logging
 import time
 import urllib.error
@@ -52,7 +51,7 @@ import pandas as pd
 from . import config as CFG
 from .config import MOUSE as C
 from .config import ensure_species_output_dirs
-from .download_utils import download, remote_size, repo_relative_path
+from .download_utils import download, matches_section, remote_size, repo_relative_path
 
 logger = logging.getLogger("embryo_xspecies.download")
 
@@ -65,15 +64,8 @@ def _configured_sections(*, representative: bool = False) -> list[tuple[str, str
     sections_by_stage = C.REPRESENTATIVE_SECTIONS if representative else C.ALL_SECTIONS
     out: list[tuple[str, str]] = []
     for tp in C.KEPT_TIMEPOINTS:
-        out.extend((tp, sid) for sid in sections_by_stage.get(tp, []))
+        out.extend((tp, sid) for sid in sections_by_stage[tp])
     return out
-
-
-def _matches(section_id: str, patterns: list[str]) -> bool:
-    return any(
-        p == section_id or p in section_id or fnmatch.fnmatchcase(section_id, p)
-        for p in patterns
-    )
 
 
 def _resolve_sections(
@@ -84,7 +76,7 @@ def _resolve_sections(
     )
     if not patterns:
         return sections
-    return [(tp, sid) for tp, sid in sections if _matches(sid, patterns)]
+    return [(tp, sid) for tp, sid in sections if matches_section(sid, patterns)]
 
 
 def download_is_current() -> bool:
@@ -246,12 +238,13 @@ def run(
             {
                 "section_id": sid,
                 "timepoint": tp,
-                "day": C.STAGE_TO_DAY.get(tp, float("nan")),
+                "day": C.STAGE_TO_DAY[tp],
                 "h5ad_path": _metadata_path(dest),
                 "source_url": f"{C.MOSTA_BASE_URL}/{sid}.MOSTA.h5ad",
                 "bin_size_um": CFG.BIN_SIZE_UM,
             }
         )
+    failed = any(status.startswith("skip-") for *_, status in results)
     elapsed = time.time() - t0
     if total_bytes > 0:
         logger.info(
@@ -268,14 +261,11 @@ def run(
     # Merge into any existing metadata.csv rather than overwriting it. Rows for
     # sections handled this run take priority.
     if C.META_CSV.exists():
-        try:
-            old = pd.read_csv(C.META_CSV)
-            old = old[~old["section_id"].isin(new["section_id"])]
-            new = pd.concat([old, new], ignore_index=True)
-        except (OSError, ValueError, KeyError) as exc:
-            logger.warning(
-                "Could not merge existing %s (%s) — writing fresh.", C.META_CSV, exc
-            )
+        old = pd.read_csv(C.META_CSV)
+        old = old[~old["section_id"].isin(new["section_id"])]
+        new = pd.concat([old, new], ignore_index=True)
+    configured = {section_id for _, section_id in _configured_sections()}
+    new = new[new["section_id"].isin(configured)]
     meta = new.sort_values(["day", "section_id"]).reset_index(drop=True)
     meta.to_csv(C.META_CSV, index=False)
     logger.info(
@@ -284,7 +274,7 @@ def run(
         len(meta),
         total_bytes / 1e9,
     )
-    return 0
+    return int(failed)
 
 
 def main(argv: list[str] | None = None) -> int:

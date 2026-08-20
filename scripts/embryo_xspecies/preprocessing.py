@@ -3,7 +3,7 @@
 Builds bin50 SpatialData zarr stores from the downloaded per-section h5ad files,
 records section geometry/QC, aligns samples to the shared Carnegie-stage axis,
 and writes one species-level prepared gene set: genes present in and detected
-in every selected section. Prepared zarr stores contain only observed bins:
+in every configured section. Prepared zarr stores contain only observed bins:
 missing lattice positions are not filled, dropped, or aggregated here.
 """
 
@@ -52,11 +52,11 @@ def _trim_heavy(adata: Any, *, drop_raw: bool = False) -> None:
     for key in list(adata.obsm.keys()):
         if key != "spatial":
             del adata.obsm[key]
-    for key in list(getattr(adata, "obsp", {}).keys()):
+    for key in list(adata.obsp.keys()):
         del adata.obsp[key]
-    if getattr(adata, "layers", None):
+    if adata.layers:
         adata.layers.clear()
-    for key in list(getattr(adata, "varm", {}).keys()):
+    for key in list(adata.varm.keys()):
         del adata.varm[key]
     if drop_raw:
         adata.raw = None
@@ -77,8 +77,6 @@ def _annotation_col(adata: Any, *, cfg: Any, override: str | None) -> str:
 
 def _domains_of_table(table: Any) -> list[str]:
     """Return non-empty organ/domain labels from a prepared AnnData table."""
-    if "annotation" not in table.obs.columns:
-        return []
     vals = table.obs["annotation"].astype("string")
     vals = vals[vals.notna() & (vals != "")]
     return sorted(map(str, vals.unique()))
@@ -113,7 +111,7 @@ def _count_matrix(adata: Any, *, cfg: Any) -> Any:
     universe.
     """
     if cfg.PANEL_KEY == "human":
-        if "counts" not in getattr(adata, "layers", {}):
+        if "counts" not in adata.layers:
             raise KeyError("HESTA h5ad is missing layers['counts'].")
         return adata.layers["counts"]
     return adata.X
@@ -262,28 +260,28 @@ def _binned_adata_to_spatialdata(
     )
     table.uns["bin_size_um"] = float(bin_size_um)
     table.uns["coordinate_unit"] = "um"
-    if "spatial" in getattr(adata_binned, "obsm", {}):
+    if "spatial" in adata_binned.obsm:
         table.obsm["spatial"] = np.asarray(adata_binned.obsm["spatial"], dtype=float)
     return sd.SpatialData(
         shapes={region_name: shapes}, tables={f"{region_name}_table": table}
     )
 
 
-def _read_selected_metadata(cfg: Any, stages: list[str] | None) -> pd.DataFrame:
-    """Load downloaded-section metadata and attach absolute paths/Carnegie values."""
+def _read_configured_metadata(cfg: Any) -> pd.DataFrame:
+    """Load configured-section metadata and attach paths and Carnegie values."""
     if not cfg.META_CSV.exists():
         raise FileNotFoundError(
             f"Missing {cfg.META_CSV} - run the {cfg.PANEL_KEY} download step first."
         )
     meta = pd.read_csv(cfg.META_CSV)
-    selected_stages = list(stages) if stages else list(cfg.KEPT_TIMEPOINTS)
+    configured_stages = list(cfg.KEPT_TIMEPOINTS)
     configured = {
         section_id
-        for stage in selected_stages
-        for section_id in cfg.ALL_SECTIONS.get(stage, [])
+        for stage in configured_stages
+        for section_id in cfg.ALL_SECTIONS[stage]
     }
     meta = meta[
-        meta["timepoint"].isin(selected_stages)
+        meta["timepoint"].isin(configured_stages)
         & meta["section_id"].astype(str).isin(configured)
     ].copy()
     if meta["section_id"].duplicated().any():
@@ -293,7 +291,7 @@ def _read_selected_metadata(cfg: Any, stages: list[str] | None) -> pd.DataFrame:
             f"{cfg.PANEL_KEY} metadata is missing configured sections: {sorted(missing)[:10]}"
         )
     if meta.empty:
-        raise RuntimeError("No sections in metadata.csv match the requested stages.")
+        raise RuntimeError("No configured sections are present in metadata.csv.")
     meta = _sort_by_stage(cfg, meta).copy()
     meta["h5ad_path_abs"] = [
         p if (p := Path(str(v))).is_absolute() else C.PROJECT_ROOT / p
@@ -329,7 +327,7 @@ def preprocessing_is_current(cfg: Any) -> bool:
     if not all(path.exists() for path in required):
         return False
 
-    meta = _read_selected_metadata(cfg, None)
+    meta = _read_configured_metadata(cfg)
     section_ids = meta["section_id"].astype(str).tolist()
     summary = json.loads(paths["summary"].read_text())
     sources = [
@@ -372,6 +370,11 @@ def preprocessing_is_current(cfg: Any) -> bool:
             return False
         if not (cfg.SDATA_DIR / f"{row.section_id}.zarr").is_dir():
             return False
+    expected = set(section_ids)
+    if {path.stem for path in paths["gene_summary_cache"].glob("*.npz")} != expected:
+        return False
+    if {path.stem for path in cfg.SDATA_DIR.glob("*.zarr")} != expected:
+        return False
     return True
 
 
@@ -477,7 +480,7 @@ def _build_prepared_genes(
     *,
     cache_dir: Path,
 ) -> tuple[list[str], pd.DataFrame, pd.DataFrame]:
-    """Return genes common to and detected in every selected section.
+    """Return genes common to and detected in every configured section.
 
     The QC table also carries pooled counts and detection totals used by
     downstream ``utils.select_gene_panel``. Matrix reads stay sparse; only 1D summaries are
@@ -506,7 +509,7 @@ def _build_prepared_genes(
     common_genes = sorted(common or set())
     if not common_genes:
         raise RuntimeError(
-            f"No genes are common to all selected {cfg.PANEL_KEY} sections."
+            f"No genes are common to all configured {cfg.PANEL_KEY} sections."
         )
 
     total = np.zeros(len(common_genes), dtype=np.float64)
@@ -583,7 +586,7 @@ def _prepare_human_adata(
     prepared_genes: list[str],
 ) -> Any:
     """Convert one HESTA h5ad section into the prepared binned AnnData form."""
-    if "counts" not in getattr(adata, "layers", {}):
+    if "counts" not in adata.layers:
         raise KeyError("HESTA h5ad is missing layers['counts'].")
     adata.X = _as_csr(adata.layers["counts"])
     adata.var_names_make_unique()
@@ -708,11 +711,8 @@ def _convert_one_section(
 
 def _stage_order(cfg: Any, values: pd.Series) -> list[str]:
     """Return configured stage order restricted to observed values."""
-    if hasattr(cfg, "ALL_TIMEPOINTS"):
-        return [t for t in cfg.ALL_TIMEPOINTS if t in set(values)]
-    if hasattr(cfg, "ALL_CARNEGIE_STAGES"):
-        return [t for t in cfg.ALL_CARNEGIE_STAGES if t in set(values)]
-    return sorted(map(str, values.unique()))
+    observed = set(map(str, values))
+    return [stage for stage in cfg.KEPT_TIMEPOINTS if stage in observed]
 
 
 def _sort_by_stage(cfg: Any, df: pd.DataFrame) -> pd.DataFrame:
@@ -729,7 +729,6 @@ def _sort_by_stage(cfg: Any, df: pd.DataFrame) -> pd.DataFrame:
 def run_preprocessing(
     cfg: Any,
     *,
-    stages: list[str] | None = None,
     annotation_col: str | None = None,
     force: bool = False,
     dry_run: bool = False,
@@ -738,9 +737,17 @@ def run_preprocessing(
     # Create output directories and load per-section metadata.
     ensure_species_output_dirs(cfg)
     paths = _preprocessing_paths(cfg)
-    meta = _read_selected_metadata(cfg, stages)
+    meta = _read_configured_metadata(cfg)
+    # Preprocessing owns exactly the currently configured derived sections.
+    configured = set(meta["section_id"].astype(str))
+    for path in paths["gene_summary_cache"].glob("*.npz"):
+        if path.stem not in configured:
+            path.unlink()
+    for path in cfg.SDATA_DIR.glob("*.zarr"):
+        if path.stem not in configured:
+            shutil.rmtree(path)
 
-    # Compute detected genes common to all selected sections and write QC tables.
+    # Compute detected genes common to all configured sections and write QC tables.
     prepared_genes, gene_qc, section_qc = _build_prepared_genes(
         cfg, meta, cache_dir=paths["gene_summary_cache"]
     )
@@ -858,12 +865,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Species to preprocess (default: both).",
     )
     p.add_argument(
-        "--stages",
-        nargs="+",
-        default=None,
-        help="Restrict to these timepoints/Carnegie stages.",
-    )
-    p.add_argument(
         "--annotation-col",
         default=None,
         help="Override the configured organ/domain .obs column.",
@@ -892,7 +893,6 @@ def main(argv: list[str] | None = None) -> int:
     statuses = [
         run_preprocessing(
             cfg,
-            stages=args.stages,
             annotation_col=args.annotation_col,
             force=args.force,
             dry_run=args.dry_run,

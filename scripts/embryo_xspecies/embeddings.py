@@ -30,7 +30,6 @@ from . import utils
 
 LOGGER = logging.getLogger("embryo_xspecies.embeddings")
 _EPS = 1e-12
-_QUERY_INDEX_KEY = "_gene_section_query_index"
 _CACHE_KEYS = {
     "manifest_json",
     "spectra",
@@ -524,115 +523,87 @@ def load_spectra_and_fit_joint_embedding(
     }
 
 
-def _resolve_query_coordinate(
-    bundle: dict[str, Any],
-    gene: str,
-    section_id: str,
-) -> tuple[np.ndarray, str]:
-    if gene not in bundle["name_to_col"]:
-        raise KeyError(f"{gene!r} is absent from the gene panel.")
-    metadata = bundle["meta"].reset_index(drop=True)
-    query_indices = np.flatnonzero(np.asarray(bundle["section_ids"]) == str(section_id))
-    if len(query_indices) != 1:
-        raise KeyError(
-            f"Expected one section {section_id!r}; found {len(query_indices)}."
-        )
-    query_index = int(query_indices[0])
-    timepoint = str(metadata.iloc[query_index]["timepoint"])
-    coordinate = bundle["coords"][query_index, bundle["name_to_col"][gene], :]
-    return coordinate, timepoint
-
-
-def _gene_section_query_index(embedding: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Build an exact gene-section coordinate index for repeated queries."""
-    cached = embedding.get(_QUERY_INDEX_KEY)
-    if cached is not None:
-        return cached
-
-    index = {}
-    for species, bundle in embedding["species"].items():
-        metadata = bundle["meta"].reset_index(drop=True)
-        index[species] = {
-            "coordinates": bundle["coords"][:, bundle["gene_cols"], :],
-            "gene_names": np.asarray(bundle["gene_names"], dtype=str),
-            "stage_names": metadata["timepoint"].astype(str).to_numpy(),
-            "section_ids": metadata["section_id"].astype(str).to_numpy(),
-        }
-    embedding[_QUERY_INDEX_KEY] = index
-    return index
-
-
 def query_nearest_gene_stages(
     query_gene: str,
     query_species: str,
     *,
     query_section_id: str,
     embedding: dict[str, Any] | None = None,
-    top_n: int | None = None,
+    top_n: int = 30,
 ) -> pd.DataFrame:
-    """Rank exact non-self ``(gene, section)`` patterns by PCA distance.
+    """Return the nearest exact gene-section patterns in the joint PCA space.
 
-    ``query_section_id`` identifies the exact query slide. Every candidate is
-    also an exact gene-slide pattern, and its developmental stage is returned
-    in ``target_stage``. When ``embedding`` is omitted, the joint PCA is
-    refitted from the validated per-section spectral caches. ``top_n``
-    optionally limits the ranked output to that many hits per species; the
-    complete ranking is returned by default. The exact gene-section coordinate
-    index is cached on ``embedding`` for fast repeated queries.
+    The exact query pattern is excluded. ``top_n`` is the total number of
+    neighbors across both species, not a per-species limit.
     """
-    if top_n is not None and (
-        isinstance(top_n, bool) or not isinstance(top_n, (int, np.integer)) or top_n < 1
-    ):
-        raise ValueError("top_n must be a positive integer or None.")
+    if isinstance(top_n, bool) or not isinstance(top_n, (int, np.integer)) or top_n < 1:
+        raise ValueError("top_n must be a positive integer.")
     if embedding is None:
         embedding = load_spectra_and_fit_joint_embedding()
-    species = embedding["species"]
-    if query_species not in species:
+    if query_species not in embedding["species"]:
         raise KeyError(f"Unknown query species {query_species!r}.")
 
-    query_coordinate, query_timepoint = _resolve_query_coordinate(
-        species[query_species], query_gene, query_section_id
-    )
-    query_index = _gene_section_query_index(embedding)
-    frames = []
-    for target_species, bundle in species.items():
-        target = query_index[target_species]
-        gene_names = target["gene_names"]
-        difference = target["coordinates"] - query_coordinate
-        distances = np.sqrt(np.einsum("sgp,sgp->sg", difference, difference))
-        if target_species == query_species:
-            query_section_index = np.flatnonzero(
-                target["section_ids"] == query_section_id
-            ).item()
-            distances[query_section_index, bundle["name_to_col"][query_gene]] = np.inf
+    query_bundle = embedding["species"][query_species]
+    if query_gene not in query_bundle["name_to_col"]:
+        raise KeyError(f"{query_gene!r} is absent from the {query_species} gene panel.")
+    query_sections = np.asarray(query_bundle["section_ids"], dtype=str)
+    section_indices = np.flatnonzero(query_sections == str(query_section_id))
+    if len(section_indices) != 1:
+        raise KeyError(
+            f"Expected one {query_species} section {query_section_id!r}; "
+            f"found {len(section_indices)}."
+        )
+    query_section_index = int(section_indices[0])
+    query_coordinate = query_bundle["coords"][
+        query_section_index, query_bundle["name_to_col"][query_gene], :
+    ]
+    query_stage = str(query_bundle["meta"].iloc[query_section_index]["timepoint"])
 
-        flat_distances = distances.ravel()
-        n_finite = int(np.isfinite(flat_distances).sum())
-        if not n_finite:
-            raise RuntimeError(f"No finite target found for {target_species}.")
-        if top_n is None:
-            order = np.argsort(flat_distances, kind="stable")[:n_finite]
-        else:
-            n_hits = min(int(top_n), n_finite)
-            order = np.argpartition(flat_distances, n_hits - 1)[:n_hits]
-            order = order[np.argsort(flat_distances[order], kind="stable")]
-        stage_indices, gene_indices = np.divmod(order, len(gene_names))
-        frames.append(
+    candidates = []
+    for target_species, bundle in embedding["species"].items():
+        gene_names = np.asarray(bundle["gene_names"], dtype=str)
+        coordinates = bundle["coords"][:, bundle["gene_cols"], :]
+        distances = np.linalg.norm(coordinates - query_coordinate, axis=2)
+        if target_species == query_species:
+            query_gene_index = np.flatnonzero(gene_names == query_gene)
+            if len(query_gene_index) != 1:
+                raise RuntimeError(
+                    f"Expected one {query_gene!r} entry in the {query_species} panel."
+                )
+            distances[query_section_index, int(query_gene_index[0])] = np.inf
+
+        flat = distances.ravel()
+        n_hits = min(top_n, int(np.isfinite(flat).sum()))
+        order = np.argpartition(flat, n_hits - 1)[:n_hits]
+        order = order[np.argsort(flat[order], kind="stable")]
+        section_index, gene_index = np.divmod(order, len(gene_names))
+        candidates.append(
             pd.DataFrame(
                 {
-                    "rank": np.arange(1, len(order) + 1),
                     "target_species": target_species,
-                    "target_gene": gene_names[gene_indices],
-                    "target_stage": target["stage_names"][stage_indices],
-                    "target_section_id": target["section_ids"][stage_indices],
-                    "distance": flat_distances[order],
+                    "target_gene": gene_names[gene_index],
+                    "target_stage": np.asarray(bundle["meta"]["timepoint"], dtype=str)[
+                        section_index
+                    ],
+                    "target_section_id": np.asarray(bundle["section_ids"], dtype=str)[
+                        section_index
+                    ],
+                    "distance": flat[order],
                 }
             )
         )
-
-    result = pd.concat(frames, ignore_index=True)
+    result = (
+        pd.concat(candidates, ignore_index=True)
+        .sort_values(
+            ["distance", "target_species", "target_gene", "target_section_id"],
+            kind="stable",
+        )
+        .head(top_n)
+        .reset_index(drop=True)
+    )
+    result.insert(0, "rank", np.arange(1, len(result) + 1))
     result.insert(0, "query_section_id", query_section_id)
-    result.insert(0, "query_stage", query_timepoint)
+    result.insert(0, "query_stage", query_stage)
     result.insert(0, "query_gene", query_gene)
     result.insert(0, "query_species", query_species)
     return result

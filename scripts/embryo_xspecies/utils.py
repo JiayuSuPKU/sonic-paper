@@ -39,6 +39,18 @@ def cache_signature(paths: list[Path], arrays: list[np.ndarray] | None = None) -
     return digest.hexdigest()
 
 
+def current_cache_manifest(
+    result_dir: Path,
+    artifacts: tuple[str, ...],
+    signature: str,
+) -> dict[str, Any] | None:
+    """Return the manifest only when every owned artifact matches current inputs."""
+    if not all((result_dir / name).exists() for name in artifacts):
+        return None
+    manifest = json.loads((result_dir / "manifest.json").read_text())
+    return manifest if manifest.get("cache_signature") == signature else None
+
+
 def require_current_bin_size(table: Any, *, label: str = "prepared zarr") -> None:
     """Fail if a prepared table was built with an older physical bin size."""
     got = table.uns.get("bin_size_um", None)
@@ -69,7 +81,7 @@ def filtered_metadata(
 
     # Make sure requested stages and section_ids are configured for this species.
     configured = {
-        section_id for stage in stages for section_id in cfg.ALL_SECTIONS.get(stage, [])
+        section_id for stage in stages for section_id in cfg.ALL_SECTIONS[stage]
     }
     meta = meta[
         meta["timepoint"].isin(stages) & meta["section_id"].astype(str).isin(configured)
@@ -369,13 +381,9 @@ def _table_with_domain_channels(
     )
     # Keep only the obs columns the comparator + figure need (region/instance_id
     # are re-created inside parse_bins_table).
-    obs_keep = [
-        c for c in ("array_row", "array_col", "annotation") if c in table.obs.columns
-    ]
-    obs = table.obs[obs_keep].copy()
+    obs = table.obs[["array_row", "array_col", "annotation"]].copy()
     new = parse_bins_table(x_all, obs, var)
-    if "spatial" in getattr(table, "obsm", {}):
-        new.obsm["spatial"] = np.asarray(table.obsm["spatial"], dtype=float)
+    new.obsm["spatial"] = np.asarray(table.obsm["spatial"], dtype=float)
     return new
 
 
@@ -424,12 +432,6 @@ def build_comparator(
         ),
         adaptive_freq_edges=adaptive_freq_edges,
     )
-
-
-def comparator_bin_centres(cmp: Any) -> np.ndarray:
-    """Centre frequency of the bins retained on a fitted ComparatorGrid."""
-    intervals = np.asarray(cmp.frequency_bin_intervals_, dtype=float)
-    return 0.5 * (intervals[:, 0] + intervals[:, 1])
 
 
 def load_prepared_sections(
@@ -623,7 +625,6 @@ def shared_supported_freq_edges(
 # Source: https://embryology.med.unsw.edu.au/embryology/index.php/Carnegie_Stage_Comparison
 _MOUSE_E_MIN = 9.0
 _MOUSE_E_MAX = 16.0
-CARNEGIE_MAX = 23.0
 
 
 def mouse_e_to_carnegie(e_day: float | np.ndarray) -> float | np.ndarray:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import http.client
 import logging
 import re
@@ -15,6 +16,16 @@ from . import config as C
 logger = logging.getLogger("embryo_xspecies.download")
 
 _HEADERS = {"User-Agent": "quadsv-paper-embryo-xspecies/1.0"}
+
+
+def matches_section(section_id: str, patterns: list[str]) -> bool:
+    """Match a section by exact ID, substring, or shell-style glob."""
+    return any(
+        pattern == section_id
+        or pattern in section_id
+        or fnmatch.fnmatchcase(section_id, pattern)
+        for pattern in patterns
+    )
 
 
 def repo_relative_path(path: Path) -> str:

@@ -2,7 +2,7 @@
 
 The workflow downloads configured MOSTA/HESTA sections, prepares SpatialData,
 builds strict orthology, computes per-section SV and radial spectra, fits the
-joint PCA, and caches embedding and transition metrics. Current stages are
+joint PCA, and caches embedding and temporal metrics. Current stages are
 skipped; ``--force`` rebuilds derived caches and ``--force-download`` also
 refreshes raw data. Figures are rendered separately by ``visualization.ipynb``.
 """
@@ -16,12 +16,12 @@ from . import config as C
 from . import (
     download_hesta_data,
     download_mosta_data,
-    embedding_metrics,
     embeddings,
+    metrics,
     orthology,
     preprocessing,
     sv,
-    transitions,
+    temporal,
 )
 
 LOGGER = logging.getLogger("embryo_xspecies.workflow")
@@ -75,13 +75,13 @@ def run(
     )
 
     LOGGER.info("Step 6/7: embedding metrics")
-    embedding_manifest = embedding_metrics.run(embedding, force=rebuild_derived)
+    metrics_manifest = metrics.run(embedding, force=rebuild_derived)
 
-    LOGGER.info("Step 7/7: species-specific transition metrics")
-    transition_manifest = transitions.run(embedding, force=rebuild_derived)
+    LOGGER.info("Step 7/7: global temporal variation and stage transitions")
+    temporal_manifest = temporal.run(embedding, force=rebuild_derived)
     return {
-        "embedding_metrics": embedding_manifest,
-        "stage_transitions": transition_manifest,
+        "metrics": metrics_manifest,
+        "temporal": temporal_manifest,
     }
 
 
@@ -107,12 +107,13 @@ def main(argv: list[str] | None = None) -> int:
         progress=args.progress,
         download_workers=max(1, args.download_workers),
     )
-    embedding = manifests["embedding_metrics"]["embedding"]
+    embedding = manifests["metrics"]["embedding"]
+    temporal = manifests["temporal"]["global_variation"]
     LOGGER.info(
         "Complete: %d patterns, %d gene-stage memberships, temporal examples %s",
         embedding["n_gene_section_patterns"],
         embedding["n_gene_stage_memberships"],
-        ", ".join(embedding["temporal_example_genes"]),
+        ", ".join(temporal["example_genes"]),
     )
     return 0
 

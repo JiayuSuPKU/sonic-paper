@@ -24,7 +24,6 @@ FIGURE_DIR = PROJECT_ROOT / "figures" / "embryo_xspecies"
 COMPARISON_RESULT_DIR = RESULT_DIR / "comparison"
 MOUSE_ONLY_RESULT_DIR = RESULT_DIR / "mouse_only"
 HUMAN_ONLY_RESULT_DIR = RESULT_DIR / "human_only"
-COMPARISON_FIGURE_DIR = FIGURE_DIR / "comparison"
 
 # --- shared spatial-pattern analysis ----------------------------------------
 # Use library-size-normalized log1p expression over every configured slide.
@@ -135,7 +134,6 @@ STAGE_TO_DAY: dict[str, float] = {
     "E15.5": 15.5,
     "E16.5": 16.5,
 }
-ALL_TIMEPOINTS: list[str] = list(STAGE_TO_DAY)
 MOUSE_KEPT_TIMEPOINTS: list[str] = [
     "E10.5",
     "E11.5",
@@ -179,7 +177,6 @@ MOUSE = _species_config(
     result_dir=MOUSE_ONLY_RESULT_DIR,
     annotation_col="annotation",
     STAGE_TO_DAY=STAGE_TO_DAY,
-    ALL_TIMEPOINTS=ALL_TIMEPOINTS,
     KEPT_TIMEPOINTS=MOUSE_KEPT_TIMEPOINTS,
     MOSTA_BASE_URL=MOSTA_BASE_URL,
     ALL_SECTIONS=ALL_SECTIONS,
@@ -274,7 +271,6 @@ CS_TO_DAY: dict[str, float] = {
     cs: sum(HESTA_SECTION_DAYS[section] for section in sections) / len(sections)
     for cs, sections in HUMAN_ALL_SECTIONS.items()
 }
-ALL_CARNEGIE_STAGES: list[str] = list(CS_TO_DAY)
 GEO_SERIES = "GSE326326"
 GEO_BRIEF_URL = f"https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={GEO_SERIES}&targ=gsm&form=text&view=brief"
 
@@ -285,7 +281,6 @@ HUMAN = _species_config(
     result_dir=HUMAN_ONLY_RESULT_DIR,
     annotation_col="celltype",
     CS_TO_DAY=CS_TO_DAY,
-    ALL_CARNEGIE_STAGES=ALL_CARNEGIE_STAGES,
     KEPT_TIMEPOINTS=list(CS_TO_DAY),
     ALL_SECTIONS=HUMAN_ALL_SECTIONS,
     REPRESENTATIVE_SECTIONS=HUMAN_REPRESENTATIVE_SECTIONS,
@@ -301,14 +296,12 @@ SPECIES_CONFIGS = {"mouse": MOUSE, "human": HUMAN}
 
 
 def ensure_output_dirs() -> None:
-    """Create all embryo_xspecies output directories."""
+    """Create workflow-owned embryo_xspecies result directories."""
     for d in (
         RESULT_DIR,
-        FIGURE_DIR,
         COMPARISON_RESULT_DIR,
         MOUSE_ONLY_RESULT_DIR,
         HUMAN_ONLY_RESULT_DIR,
-        COMPARISON_FIGURE_DIR,
     ):
         d.mkdir(parents=True, exist_ok=True)
     for cfg in SPECIES_CONFIGS.values():
