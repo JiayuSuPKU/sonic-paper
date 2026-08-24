@@ -1,0 +1,77 @@
+"""Shared paths and numerical analysis configuration."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_DIR = PROJECT_ROOT / "data" / "qtest_benchmark"
+RESULT_DIR = PROJECT_ROOT / "results" / "qtest_benchmark"
+FIGURE_DIR = PROJECT_ROOT / "figures" / "qtest_benchmark"
+
+# Runtime and implementation benchmark files
+BENCHMARK_SCALING_FILE = RESULT_DIR / "benchmark_scaling.csv"
+BENCHMARK_PROJECTION_FILE = RESULT_DIR / "benchmark_projection.csv"
+VALIDATION_RESULT_DIR = RESULT_DIR / "validation"
+
+# Small intestine illustration input and output files
+RAW_SPATIALDATA = DATA_DIR / "visium_hd_mouse_intestine.zarr"
+SMALL_INTESTINE_SCORES_FILE = RESULT_DIR / "small_intestine_scores.csv"
+SMALL_INTESTINE_PATTERN_RANKS_FILE = RESULT_DIR / "small_intestine_pattern_ranks.csv"
+
+# Lineage tracing benchmark input and output files
+LINEAGE_DATA_DIR = DATA_DIR / "lineage_tracing"
+LINEAGE_TARGET_DATA_FILE = LINEAGE_DATA_DIR / "target_tumors.h5ad"
+LINEAGE_TREE_DIR = LINEAGE_DATA_DIR / "trees"
+
+LINEAGE_RESULT_DIR = RESULT_DIR / "lineage_tracing"
+LINEAGE_CLUSTER_SUMMARY_FILE = LINEAGE_RESULT_DIR / "cluster_summary.csv"
+LINEAGE_CLUSTER_SCORES_FILE = LINEAGE_RESULT_DIR / "cluster_scores.csv.gz"
+LINEAGE_GENE_SUMMARY_FILE = LINEAGE_RESULT_DIR / "gene_summary.csv"
+LINEAGE_GENE_SCORES_FILE = LINEAGE_RESULT_DIR / "gene_scores.csv.gz"
+LINEAGE_RECOVERY_FILE = LINEAGE_RESULT_DIR / "gene_recovery.csv.gz"
+LINEAGE_GENE_RANK_CONCORDANCE_FILE = LINEAGE_RESULT_DIR / "gene_rank_concordance.csv"
+LINEAGE_GENE_CANCELLATION_FILE = (
+    LINEAGE_RESULT_DIR / "gene_spectral_cancellation.csv.gz"
+)
+LINEAGE_GENE_SPECTRAL_FILE = LINEAGE_RESULT_DIR / "gene_spectral_diagnostics.npz"
+LINEAGE_BIVARIATE_SUMMARY_FILE = LINEAGE_RESULT_DIR / "bivariate_summary.csv"
+LINEAGE_BIVARIATE_FILE = LINEAGE_RESULT_DIR / "target_bivariate.npz"
+LINEAGE_TARGET_METADATA_FILE = LINEAGE_RESULT_DIR / "target_metadata.csv.gz"
+LINEAGE_TREE_LAYOUT_FILE = LINEAGE_RESULT_DIR / "tree_layouts.npz"
+LINEAGE_SPECTRAL_FILE = LINEAGE_RESULT_DIR / "target_spectral.npz"
+
+# PDF figure files
+FRAMEWORK_FIGURE_FILE = FIGURE_DIR / "qtest_framework.pdf"
+COMBINED_FIGURE_FILE = FIGURE_DIR / "qtest_runtime_small_intestine_kernel.pdf"
+SUPPLEMENTARY_FIGURE_FILE = FIGURE_DIR / "qtest_validation_supplementary.pdf"
+LINEAGE_MAIN_FIGURE_FILE = FIGURE_DIR / "qtest_lineage_tracing.pdf"
+LINEAGE_SUPPLEMENTARY_FIGURE_FILE = (
+    FIGURE_DIR / "qtest_lineage_tracing_supplementary.pdf"
+)
+
+# Small intestine example genes and config parameters
+ARTIFACT_GENES = ("Reg3b", "Fabp6", "Fabp2", "Krt19")
+IMMUNE_GENES = ("Coro1a", "Ptprc", "Cd37", "Ms4a1")
+
+CAR_K_NEIGHBORS = 4
+CAR_RHOS = (0.10, 0.30, 0.50, 0.70, 0.90, 0.95)
+SLOW_DECAY_RHO = 0.70
+FAST_DECAY_RHO = 0.95
+PIXEL_SIZE_UM = 16.0
+
+# Runtime benchmark parameters
+M_FEATURES = 10_000
+BENCHMARK_TARGETS = (
+    ("Visium", 5_000, "regular"),
+    ("Slide-seqV2", 50_000, "irregular"),
+    ("Visium HD 16µm", 100_000, "regular"),
+    ("Xenium", 200_000, "irregular"),
+    ("Visium HD 2µm", 6_000_000, "regular"),
+)
+
+
+def ensure_output_dirs() -> None:
+    """Create ignored result and figure directories."""
+    for path in (RESULT_DIR, FIGURE_DIR):
+        path.mkdir(parents=True, exist_ok=True)
