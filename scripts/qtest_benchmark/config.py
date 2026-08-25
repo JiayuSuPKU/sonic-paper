@@ -21,25 +21,16 @@ SMALL_INTESTINE_PATTERN_RANKS_FILE = RESULT_DIR / "small_intestine_pattern_ranks
 
 # Lineage tracing benchmark input and output files
 LINEAGE_DATA_DIR = DATA_DIR / "lineage_tracing"
-LINEAGE_TARGET_DATA_FILE = LINEAGE_DATA_DIR / "target_tumors.h5ad"
+LINEAGE_ANALYSIS_DATA_FILE = LINEAGE_DATA_DIR / "analysis_tumors.h5ad"
 LINEAGE_TREE_DIR = LINEAGE_DATA_DIR / "trees"
 
 LINEAGE_RESULT_DIR = RESULT_DIR / "lineage_tracing"
-LINEAGE_CLUSTER_SUMMARY_FILE = LINEAGE_RESULT_DIR / "cluster_summary.csv"
 LINEAGE_CLUSTER_SCORES_FILE = LINEAGE_RESULT_DIR / "cluster_scores.csv.gz"
-LINEAGE_GENE_SUMMARY_FILE = LINEAGE_RESULT_DIR / "gene_summary.csv"
 LINEAGE_GENE_SCORES_FILE = LINEAGE_RESULT_DIR / "gene_scores.csv.gz"
-LINEAGE_RECOVERY_FILE = LINEAGE_RESULT_DIR / "gene_recovery.csv.gz"
-LINEAGE_GENE_RANK_CONCORDANCE_FILE = LINEAGE_RESULT_DIR / "gene_rank_concordance.csv"
-LINEAGE_GENE_CANCELLATION_FILE = (
-    LINEAGE_RESULT_DIR / "gene_spectral_cancellation.csv.gz"
-)
-LINEAGE_GENE_SPECTRAL_FILE = LINEAGE_RESULT_DIR / "gene_spectral_diagnostics.npz"
 LINEAGE_BIVARIATE_SUMMARY_FILE = LINEAGE_RESULT_DIR / "bivariate_summary.csv"
-LINEAGE_BIVARIATE_FILE = LINEAGE_RESULT_DIR / "target_bivariate.npz"
+LINEAGE_GENE_DIAGNOSTICS_FILE = LINEAGE_RESULT_DIR / "gene_diagnostics.npz"
+LINEAGE_BIVARIATE_DIAGNOSTICS_FILE = LINEAGE_RESULT_DIR / "bivariate_diagnostics.npz"
 LINEAGE_TARGET_METADATA_FILE = LINEAGE_RESULT_DIR / "target_metadata.csv.gz"
-LINEAGE_TREE_LAYOUT_FILE = LINEAGE_RESULT_DIR / "tree_layouts.npz"
-LINEAGE_SPECTRAL_FILE = LINEAGE_RESULT_DIR / "target_spectral.npz"
 
 # PDF figure files
 FRAMEWORK_FIGURE_FILE = FIGURE_DIR / "qtest_framework.pdf"

@@ -13,6 +13,7 @@ if __package__ in {None, ""}:
 
 from .benchmark import cache_runtime_scaling_results, cache_validation_benchmark_results
 from .config import RAW_SPATIALDATA
+from .lineage import cache_lineage_results
 from .small_intestine import cache_small_intestine_kernel_results
 
 LOGGER = logging.getLogger(__name__)
@@ -25,13 +26,16 @@ def generate_analysis_caches(
     force: bool = False,
 ) -> None:
     """Generate one analysis cache group or all default cache groups."""
-    if analysis in {"all", "small-intestine"}:
-        LOGGER.info("Running small-intestine analysis")
-        cache_small_intestine_kernel_results(source or RAW_SPATIALDATA, force=force)
     if analysis in {"all", "synthetic"}:
         LOGGER.info("Running synthetic-data analyses")
         cache_runtime_scaling_results(force=force)
         cache_validation_benchmark_results(force=force)
+    if analysis in {"all", "small-intestine"}:
+        LOGGER.info("Running small-intestine analysis")
+        cache_small_intestine_kernel_results(source or RAW_SPATIALDATA, force=force)
+    if analysis in {"all", "lineage"}:
+        LOGGER.info("Running lineage analysis")
+        cache_lineage_results(force=force)
 
 
 def main() -> None:
@@ -39,7 +43,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--analysis",
-        choices=("all", "synthetic", "small-intestine"),
+        choices=("all", "synthetic", "small-intestine", "lineage"),
         default="all",
     )
     parser.add_argument(

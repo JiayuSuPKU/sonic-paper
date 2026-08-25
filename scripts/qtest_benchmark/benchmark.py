@@ -148,14 +148,15 @@ def cache_runtime_scaling_results(
     """Measure runtime/memory scaling and cache transcriptome projections."""
     ensure_output_dirs()
     runtime_outputs = (BENCHMARK_SCALING_FILE, BENCHMARK_PROJECTION_FILE)
-    if cache_is_reusable(*runtime_outputs, force=force):
-        LOGGER.info("Runtime benchmark: using existing cache")
+    if cache_is_reusable(
+        *runtime_outputs,
+        force=force,
+        logger=LOGGER,
+        label="Runtime benchmark",
+    ):
         return pd.read_csv(BENCHMARK_SCALING_FILE), pd.read_csv(
             BENCHMARK_PROJECTION_FILE
         )
-    missing = sum(not path.exists() for path in runtime_outputs)
-    reason = "--force" if force else f"{missing}/{len(runtime_outputs)} outputs missing"
-    LOGGER.info("Runtime benchmark: refreshing cache (%s)", reason)
 
     rows: list[dict] = []
     rng = np.random.default_rng(42)
@@ -704,12 +705,13 @@ def cache_validation_benchmark_results(
         paths = [VALIDATION_RESULT_DIR / VALIDATION_CACHE_FILES[key] for key in keys]
         # Recompute a whole stage if any member is absent, keeping related tables
         # on the same simulation seed and parameter set.
-        if cache_is_reusable(*paths, force=force):
-            LOGGER.info("Validation %s: using existing cache", label)
+        if cache_is_reusable(
+            *paths,
+            force=force,
+            logger=LOGGER,
+            label=f"Validation {label}",
+        ):
             continue
-        missing = sum(not path.exists() for path in paths)
-        reason = "--force" if force else f"{missing}/{len(paths)} outputs missing"
-        LOGGER.info("Validation %s: refreshing cache (%s)", label, reason)
         tables = compute()
         if set(tables) != set(keys):
             raise RuntimeError(

@@ -108,12 +108,14 @@ def cache_small_intestine_kernel_results(
         raise ValueError("chunk_size must be positive")
     ensure_output_dirs()
     outputs = (SMALL_INTESTINE_SCORES_FILE, SMALL_INTESTINE_PATTERN_RANKS_FILE)
-    if cache_is_reusable(*outputs, force=force):
-        LOGGER.info("Small-intestine analysis: using existing cache")
+    if cache_is_reusable(
+        *outputs,
+        force=force,
+        inputs=(source,),
+        logger=LOGGER,
+        label="Small-intestine analysis",
+    ):
         return pd.read_csv(SMALL_INTESTINE_SCORES_FILE)
-    missing = sum(not path.exists() for path in outputs)
-    reason = "--force" if force else f"{missing}/{len(outputs)} outputs missing"
-    LOGGER.info("Small-intestine analysis: refreshing cache (%s)", reason)
     if not source.exists():
         raise FileNotFoundError(
             f"SpatialData source not found: {source}. It is required once to build "
