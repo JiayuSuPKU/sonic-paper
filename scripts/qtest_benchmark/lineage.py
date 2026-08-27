@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 import anndata as ad
@@ -25,6 +26,7 @@ from .config import (
 from .utils import cache_is_reusable, parse_newick
 
 LOGGER = logging.getLogger(__name__)
+CACHE_INPUTS = (Path(__file__), Path(__file__).with_name("config.py"))
 
 EXAMPLE_TUMORS = ("3430_NT_T2", "3730_NT_T2")
 GENE_PANEL = ("Rgs4", "Col4a2", "Tmem37", "Cd200")
@@ -35,9 +37,9 @@ EXAMPLE_TREE_FILES = tuple(
 )
 LINEAGE_INPUTS = (LINEAGE_ANALYSIS_DATA_FILE, *EXAMPLE_TREE_FILES)
 MIN_TUMOR_CELLS = 300
+MAX_GENE_ANALYSIS_CELLS = 3_000
 FDR_CUTOFF = 0.05
 CAR_RHO = 0.9
-GENE_ANALYSIS_EXCLUSIONS = frozenset({"3724_NT_T1"})
 
 
 def _ancestral_connectivity(
@@ -194,7 +196,7 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
     if cache_is_reusable(
         *outputs,
         force=force,
-        inputs=(LINEAGE_ANALYSIS_DATA_FILE, *tree_files),
+        inputs=(*CACHE_INPUTS, LINEAGE_ANALYSIS_DATA_FILE, *tree_files),
         logger=LOGGER,
         label="Lineage cross-tumor statistics",
     ):
@@ -249,7 +251,13 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
                 clusters[["Tumor", "Cluster", "I_moran", "Q_car", "Z_score_car"]]
             )
 
-            if tumor in GENE_ANALYSIS_EXCLUSIONS:
+            if tumor_data.n_obs > MAX_GENE_ANALYSIS_CELLS:
+                LOGGER.info(
+                    "Lineage %s: skipping gene/R tests (%d cells exceed %d-cell cap)",
+                    tumor,
+                    tumor_data.n_obs,
+                    MAX_GENE_ANALYSIS_CELLS,
+                )
                 continue
 
             # Gene tests use the original 5% expression-support filter.
@@ -319,7 +327,7 @@ def _cache_gene_diagnostics(*, force: bool) -> None:
     if cache_is_reusable(
         LINEAGE_GENE_DIAGNOSTICS_FILE,
         force=force,
-        inputs=(LINEAGE_GENE_SCORES_FILE, *LINEAGE_INPUTS),
+        inputs=(*CACHE_INPUTS, LINEAGE_GENE_SCORES_FILE, *LINEAGE_INPUTS),
         logger=LOGGER,
         label="Lineage gene cancellation",
     ):
@@ -405,13 +413,6 @@ def _cache_gene_diagnostics(*, force: bool) -> None:
         markers |= stats.false_discovery_control(p_values, method="bh") < FDR_CUTOFF
     diagnostics["Small_state_marker"] = markers
 
-    # Quantify whether CAR-only calls carry more opposing signed Moran mass.
-    car_only = diagnostics.loc[
-        diagnostics["Call"].eq("CAR only"), "Cancellation_fraction"
-    ]
-    both = diagnostics.loc[diagnostics["Call"].eq("Both"), "Cancellation_fraction"]
-    test = stats.mannwhitneyu(car_only, both, alternative="two-sided")
-    cliffs_delta = 2 * test.statistic / (len(car_only) * len(both)) - 1
     example_gene = "Rgs4"
     example_index = features.get_loc(example_gene)
     np.savez_compressed(
@@ -427,8 +428,6 @@ def _cache_gene_diagnostics(*, force: bool) -> None:
         eigenvalues=eigenvalues,
         moran_contributions=eigenvalues * coefficients[:, example_index] ** 2,
         effective_support=1 / (eigenvectors**4).sum(axis=0),
-        p_car_only_vs_both=np.asarray(test.pvalue),
-        cliffs_delta_car_only_vs_both=np.asarray(cliffs_delta),
     )
     LOGGER.info("Lineage gene cancellation: cached %d genes", len(diagnostics))
 
@@ -437,7 +436,7 @@ def _cache_target_metadata(*, force: bool) -> None:
     if cache_is_reusable(
         LINEAGE_TARGET_METADATA_FILE,
         force=force,
-        inputs=LINEAGE_INPUTS,
+        inputs=(*CACHE_INPUTS, *LINEAGE_INPUTS),
         logger=LOGGER,
         label="Lineage target metadata",
     ):
@@ -480,6 +479,7 @@ def _cache_bivariate_diagnostics(*, force: bool) -> None:  # noqa: C901
         LINEAGE_BIVARIATE_DIAGNOSTICS_FILE,
         force=force,
         inputs=(
+            *CACHE_INPUTS,
             LINEAGE_GENE_SCORES_FILE,
             LINEAGE_ANALYSIS_DATA_FILE,
             LINEAGE_TREE_DIR / "3730_NT_T2.newick",

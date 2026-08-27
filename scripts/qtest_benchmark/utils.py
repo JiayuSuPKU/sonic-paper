@@ -31,12 +31,18 @@ def cache_is_reusable(
         if reusable:
             logger.info("%s: using existing cache", label)
         else:
-            missing = sum(not path.exists() for path in outputs)
-            reason = (
-                "--force"
-                if force
-                else f"{missing}/{len(outputs)} outputs missing or stale"
+            invalid_outputs = sum(
+                not path.is_file() or path.stat().st_size == 0 for path in outputs
             )
+            missing_inputs = sum(not path.exists() for path in inputs)
+            if force:
+                reason = "--force"
+            elif invalid_outputs:
+                reason = f"{invalid_outputs}/{len(outputs)} outputs missing or empty"
+            elif missing_inputs:
+                reason = f"{missing_inputs}/{len(inputs)} inputs missing"
+            else:
+                reason = "inputs are newer than outputs"
             logger.info("%s: refreshing cache (%s)", label, reason)
     return reusable
 
@@ -105,8 +111,15 @@ def configure_matplotlib() -> None:
 
     mpl.rcParams.update(
         {
-            "font.family": "sans-serif",
-            "font.sans-serif": ["Arial", "DejaVu Sans"],
+            "font.family": "Arial",
+            "font.sans-serif": ["Arial"],
+            "font.serif": ["Arial"],
+            "font.monospace": ["Arial"],
+            "font.cursive": ["Arial"],
+            "font.fantasy": ["Arial"],
+            "mathtext.fontset": "cm",
+            "mathtext.default": "it",
+            "mathtext.fallback": "cm",
             "font.size": 6.0,
             "axes.titlesize": FONT_CONFIG["title"],
             "axes.labelsize": FONT_CONFIG["label"],

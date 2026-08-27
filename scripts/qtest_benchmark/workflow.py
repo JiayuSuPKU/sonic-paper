@@ -4,12 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sys
 from pathlib import Path
-
-if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    __package__ = "scripts.qtest_benchmark"
 
 from .benchmark import cache_runtime_scaling_results, cache_validation_benchmark_results
 from .config import RAW_SPATIALDATA
@@ -26,13 +21,23 @@ def generate_analysis_caches(
     force: bool = False,
 ) -> None:
     """Generate one analysis cache group or all default cache groups."""
+    valid_analyses = {"all", "synthetic", "small-intestine", "lineage"}
+    if analysis not in valid_analyses:
+        raise ValueError(
+            f"Unknown analysis {analysis!r}; choose from {sorted(valid_analyses)}"
+        )
+    if source is not None and analysis not in {"all", "small-intestine"}:
+        raise ValueError("source applies only to the small-intestine analysis")
+
     if analysis in {"all", "synthetic"}:
         LOGGER.info("Running synthetic-data analyses")
         cache_runtime_scaling_results(force=force)
         cache_validation_benchmark_results(force=force)
     if analysis in {"all", "small-intestine"}:
         LOGGER.info("Running small-intestine analysis")
-        cache_small_intestine_kernel_results(source or RAW_SPATIALDATA, force=force)
+        cache_small_intestine_kernel_results(
+            source if source is not None else RAW_SPATIALDATA, force=force
+        )
     if analysis in {"all", "lineage"}:
         LOGGER.info("Running lineage analysis")
         cache_lineage_results(force=force)

@@ -7,6 +7,7 @@ import logging
 import time
 import tracemalloc
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -25,12 +26,14 @@ from .config import (
     BENCHMARK_SCALING_FILE,
     BENCHMARK_TARGETS,
     M_FEATURES,
+    RUNTIME_MEMORY_BUDGET_MB,
     VALIDATION_RESULT_DIR,
     ensure_output_dirs,
 )
 from .utils import cache_is_reusable
 
 LOGGER = logging.getLogger(__name__)
+CACHE_INPUTS = (Path(__file__), Path(__file__).with_name("config.py"))
 
 VALIDATION_CACHE_FILES = {
     "torus_agreement": "agreement_torus.csv",
@@ -151,6 +154,7 @@ def cache_runtime_scaling_results(
     if cache_is_reusable(
         *runtime_outputs,
         force=force,
+        inputs=CACHE_INPUTS,
         logger=LOGGER,
         label="Runtime benchmark",
     ):
@@ -215,6 +219,13 @@ def cache_runtime_scaling_results(
             except (MemoryError, RuntimeError, ValueError) as exc:
                 if tracemalloc.is_tracing():
                     tracemalloc.stop()
+                LOGGER.warning(
+                    "%s benchmark failed at n=%d: %s: %s",
+                    spec.name,
+                    n,
+                    type(exc).__name__,
+                    exc,
+                )
                 rows.append(
                     {
                         "impl": spec.name,
@@ -258,7 +269,10 @@ def _project_transcriptome_runtime(benchmark: pd.DataFrame) -> pd.DataFrame:
         )
         for target, n, geometry in BENCHMARK_TARGETS:
             geometry_ok = not (geometry == "irregular" and spec.kind == "fft")
-            supported = geometry_ok and n <= spec.max_n
+            peak_mb = _loglog_predict(n, sub["n"].to_numpy(), sub["peak_mb"].to_numpy())
+            supported = (
+                geometry_ok and n <= spec.max_n and peak_mb <= RUNTIME_MEMORY_BUDGET_MB
+            )
             build_s = _loglog_predict(n, sub["n"].to_numpy(), sub["build_s"].to_numpy())
             per_feature_s = _loglog_predict(
                 n, sub["n"].to_numpy(), sub["per_feature_s"].to_numpy()
@@ -273,6 +287,7 @@ def _project_transcriptome_runtime(benchmark: pd.DataFrame) -> pd.DataFrame:
                     "supported": supported,
                     "build_s": build_s if supported else np.nan,
                     "per_feature_s": per_feature_s if supported else np.nan,
+                    "peak_mb": peak_mb,
                     "total_s": total_s,
                 }
             )
@@ -461,7 +476,6 @@ def _compute_null_calibration_tables() -> dict[str, pd.DataFrame]:
                 "null": null,
                 "fpr": rate,
                 "se": error,
-                "n_reps": len(pvalues),
             }
         )
 
@@ -628,7 +642,6 @@ def _compute_hyperparameter_power_table(
                 rows.append(
                     {
                         "method": method,
-                        "null": null,
                         "hp_name": parameter,
                         "hp_value": value,
                         "snr": snr,
@@ -708,6 +721,7 @@ def cache_validation_benchmark_results(
         if cache_is_reusable(
             *paths,
             force=force,
+            inputs=CACHE_INPUTS,
             logger=LOGGER,
             label=f"Validation {label}",
         ):

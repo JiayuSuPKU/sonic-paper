@@ -28,6 +28,7 @@ from .config import (
 from .utils import cache_is_reusable
 
 LOGGER = logging.getLogger(__name__)
+CACHE_INPUTS = (Path(__file__), Path(__file__).with_name("config.py"))
 
 
 def _gene_indices(table, genes: tuple[str, ...]) -> np.ndarray:
@@ -111,7 +112,7 @@ def cache_small_intestine_kernel_results(
     if cache_is_reusable(
         *outputs,
         force=force,
-        inputs=(source,),
+        inputs=(*CACHE_INPUTS, source),
         logger=LOGGER,
         label="Small-intestine analysis",
     ):
@@ -175,7 +176,7 @@ def cache_small_intestine_kernel_results(
         ("Swiss-roll artifact", "Immune cluster"),
         ("Immune cluster", "Swiss-roll artifact"),
     ):
-        # Search for kernel spectrum that prioritizes one pattern over the other.
+        # Retain frequencies enriched in the target relative to the contrast.
         key = "fit_artifact" if target == "Swiss-roll artifact" else "fit_immune"
         kernel, fit_seconds = design_contrastive_pattern_kernel(
             pattern_templates[target], pattern_templates[contrast], mask
@@ -240,7 +241,7 @@ def design_contrastive_pattern_kernel(
     """Fit a PSD spectrum to frequencies enriched in one pattern versus another."""
     start = time.perf_counter()
 
-    # Compute normalized power spectra for both target and contrast patterns, filling off-tissue bins.
+    # Compare normalized power spectra after mean-filling off-tissue bins.
     powers = []
     for pattern in (target, contrast):
         filled = pattern.astype(float).copy()

@@ -33,13 +33,11 @@ LINEAGE_BIVARIATE_DIAGNOSTICS_FILE = LINEAGE_RESULT_DIR / "bivariate_diagnostics
 LINEAGE_TARGET_METADATA_FILE = LINEAGE_RESULT_DIR / "target_metadata.csv.gz"
 
 # PDF figure files
-FRAMEWORK_FIGURE_FILE = FIGURE_DIR / "qtest_framework.pdf"
-COMBINED_FIGURE_FILE = FIGURE_DIR / "qtest_runtime_small_intestine_kernel.pdf"
-SUPPLEMENTARY_FIGURE_FILE = FIGURE_DIR / "qtest_validation_supplementary.pdf"
-LINEAGE_MAIN_FIGURE_FILE = FIGURE_DIR / "qtest_lineage_tracing.pdf"
-LINEAGE_SUPPLEMENTARY_FIGURE_FILE = (
-    FIGURE_DIR / "qtest_lineage_tracing_supplementary.pdf"
-)
+FRAMEWORK_FIGURE_FILE = FIGURE_DIR / "main_framework.pdf"
+RUNTIME_MAIN_FIGURE_FILE = FIGURE_DIR / "main_runtime.pdf"
+VALIDATION_SUPPLEMENTARY_FIGURE_FILE = FIGURE_DIR / "supp_validation.pdf"
+LINEAGE_MAIN_FIGURE_FILE = FIGURE_DIR / "main_lineage.pdf"
+LINEAGE_SUPPLEMENTARY_FIGURE_FILE = FIGURE_DIR / "supp_lineage.pdf"
 
 # Small intestine example genes and config parameters
 ARTIFACT_GENES = ("Reg3b", "Fabp6", "Fabp2", "Krt19")
@@ -53,6 +51,7 @@ PIXEL_SIZE_UM = 16.0
 
 # Runtime benchmark parameters
 M_FEATURES = 10_000
+RUNTIME_MEMORY_BUDGET_MB = 8_000
 BENCHMARK_TARGETS = (
     ("Visium", 5_000, "regular"),
     ("Slide-seqV2", 50_000, "irregular"),
