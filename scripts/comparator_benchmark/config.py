@@ -1,6 +1,6 @@
 """Static configuration for the comparator benchmark scripts.
 
-Mirrors the structure of ``scripts/visiumhd_mouse_cbs/config.py``: top-level
+Mirrors the structure of ``scripts/splisosm_visiumhd_cbs/config.py``: top-level
 path constants first, then magic thresholds, then a per-panel dataclass with
 all dataset-specific paths / GEO accessions / curated gene lists, and finally
 panel-specific download metadata (sample lists, GSM dictionaries) used by
@@ -14,10 +14,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scripts.paper_utils import PROJECT_ROOT
-
-# ---------------------------------------------------------------------------
-# Roots — mirror visiumhd_mouse_cbs/config.py:7-14
-# ---------------------------------------------------------------------------
 
 DATA_ROOT = PROJECT_ROOT / "data"
 
@@ -332,7 +328,6 @@ BRAIN_DEV_CELL_TYPE_LABELS: dict[str, str] = {
 
 # ---------------------------------------------------------------------------
 # PanelConfig — per-panel paths + GEO accession + curated genes.
-# Mirrors `DatasetConfig` in visiumhd_mouse_cbs/config.py:38-101.
 # ---------------------------------------------------------------------------
 
 

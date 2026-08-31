@@ -32,7 +32,6 @@ from .config import (
     RESOLUTION_UM,
     RESULT_DIR,
     RHO,
-    SCRIPT_DIR,
     DatasetConfig,
 )
 
@@ -41,7 +40,7 @@ __all__ = ["log", "max_rss_gb", "normalize_gene_symbol", "time_call"]
 
 def ensure_dirs() -> None:
     """Create the workflow output directories."""
-    ensure_directories(RESULT_DIR, FIGURE_DIR, SCRIPT_DIR)
+    ensure_directories(RESULT_DIR, FIGURE_DIR)
 
 
 def save_csv(df: pd.DataFrame, path: Path, index: bool = False) -> None:

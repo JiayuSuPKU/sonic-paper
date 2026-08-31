@@ -15,9 +15,8 @@ ANKRD30A_TRPS1_PROSEQ_DATA_DIR = DATA_ROOT / "ankrd30a_trps1_proseq"
 
 # Script-owned caches are flat under the Atera result root unless they are
 # large raw/source files, which live under DATA_ROOT.
-SCRIPT_DIR = PROJECT_ROOT / "scripts" / "atera_ffpe_human_brca"
-RESULT_DIR = PROJECT_ROOT / "results" / "atera_ffpe_human_brca"
-FIGURE_DIR = PROJECT_ROOT / "figures" / "atera_ffpe_human_brca"
+RESULT_DIR = PROJECT_ROOT / "results" / "splisosm_atera_brca"
+FIGURE_DIR = PROJECT_ROOT / "figures" / "splisosm_atera_brca"
 TOP20_FIGURE_DIR = FIGURE_DIR / "top20_svp_probe_transcript_panels"
 TOP20_RESULT_DIR = RESULT_DIR / "top20_svp_probe_transcript_panels"
 SVP_PROBE_RESULT_DIR = RESULT_DIR / "svp_probe_transcript_cache"

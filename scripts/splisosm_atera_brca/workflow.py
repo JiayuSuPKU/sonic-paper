@@ -9,7 +9,7 @@ from typing import Any
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    __package__ = "scripts.atera_ffpe_human_brca"
+    __package__ = "scripts.splisosm_atera_brca"
 
 import pandas as pd
 
@@ -94,7 +94,7 @@ def run_workflow(
     # One JSON summary records the knobs and generated cache roots consumed by
     # downstream notebooks/scripts.
     summary = {
-        "analysis": "atera_ffpe_human_brca",
+        "analysis": "splisosm_atera_brca",
         "sv_method": SV_METHOD,
         "du_method": DU_METHOD,
         "du_gpr_backend": DU_GPR_BACKEND,
@@ -137,7 +137,7 @@ def run_workflow(
     }
     save_json(summary, RESULT_DIR / "summary.json")
     manifest_path = write_workflow_manifest(
-        "atera_ffpe_human_brca",
+        "splisosm_atera_brca",
         RESULT_DIR,
         started_at=started_at,
         parameters={

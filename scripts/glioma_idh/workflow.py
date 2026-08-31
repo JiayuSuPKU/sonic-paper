@@ -18,7 +18,7 @@ import pandas as pd
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    __package__ = "scripts.visium_human_glioma"
+    __package__ = "scripts.glioma_idh"
 
 from scripts.paper_utils import (
     CLUSTERPROFILER_SCRIPT,
@@ -588,8 +588,8 @@ def run_enrichment_cache(
             job_rows.extend(
                 {
                     "job_path": str(job_path),
-                    "job_id": f"visium_glioma_idh_status:{gene_set}:top{top_n}",
-                    "panel": "visium_glioma_idh_status",
+                    "job_id": f"glioma_idh:{gene_set}:top{top_n}",
+                    "panel": "glioma_idh",
                     "test": gene_set,
                     "variant": f"top{top_n}",
                     "rank": rank,
@@ -988,7 +988,7 @@ def run_workflow(
         outputs.update(run_metaprogram_gene_map_cache())
     outputs["cache_summary"] = project_relative(CACHE_SUMMARY_FILE)
     manifest_path = write_workflow_manifest(
-        "visium_human_glioma",
+        "glioma_idh",
         CACHE_SUMMARY_FILE.parent,
         started_at=started_at,
         parameters={

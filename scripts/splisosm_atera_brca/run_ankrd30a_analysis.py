@@ -8,7 +8,7 @@ from pathlib import Path
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    __package__ = "scripts.atera_ffpe_human_brca"
+    __package__ = "scripts.splisosm_atera_brca"
 
 import pandas as pd
 

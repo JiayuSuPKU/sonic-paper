@@ -372,7 +372,7 @@ def load_ankrd30a_visualization_cache() -> dict[str, pd.DataFrame]:
         missing_text = ", ".join(project_path(path) for path in missing)
         raise FileNotFoundError(
             f"Missing ANKRD30A visualization cache file(s): {missing_text}. "
-            "Run scripts/atera_ffpe_human_brca/workflow.py before rendering figures."
+            "Run scripts/splisosm_atera_brca/workflow.py before rendering figures."
         )
     cache = {
         "transcript_annotations": pd.read_csv(ANKRD30A_TRANSCRIPT_ANNOTATIONS_CSV),

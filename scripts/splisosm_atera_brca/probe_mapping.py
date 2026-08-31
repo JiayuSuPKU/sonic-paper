@@ -54,7 +54,7 @@ Idempotent pipeline:
 3. Map probe oligo sequences to spliced transcripts and hg38 gene loci.
 4. Cache probe mappings, GENCODE/PacBio exon overlaps, transcript
    compatibility tables, and a per-gene inventory under
-   ``results/atera_ffpe_human_brca/svp_probe_transcript_cache/``.
+   ``results/splisosm_atera_brca/svp_probe_transcript_cache/``.
 
 Reruns skip all work when every expected cache file exists, unless ``force`` is
 set. This module owns the all-SVP mapping cache; plotting scripts should only

@@ -14,7 +14,7 @@ import pandas as pd
 import splisosm
 
 from scripts.paper_utils import write_workflow_manifest
-from scripts.visiumhd_mouse_cbs.config import (
+from scripts.splisosm_visiumhd_cbs.config import (
     DATASETS,
     DU_COVARIATE_MIN_BIN_PCT,
     DU_COVARIATE_MIN_COUNTS,
@@ -29,16 +29,16 @@ from scripts.visiumhd_mouse_cbs.config import (
     RHO,
     SV_GENE_SUBSET,
 )
-from scripts.visiumhd_mouse_cbs.du import (
+from scripts.splisosm_visiumhd_cbs.du import (
     du_shared_associations,
     run_du_suite,
     subset_du_results_by_class,
 )
-from scripts.visiumhd_mouse_cbs.sv import (
+from scripts.splisosm_visiumhd_cbs.sv import (
     prioritize_shared_hits,
     run_sv_suite,
 )
-from scripts.visiumhd_mouse_cbs.utils import (
+from scripts.splisosm_visiumhd_cbs.utils import (
     ensure_dirs,
     log,
     neighbor_degrees_by_res,
@@ -132,7 +132,7 @@ def run_workflow(*, force: bool = False, n_jobs: int = 8) -> dict[str, Any]:
     }
     save_json(summary, RESULT_DIR / "summary.json")
     manifest_path = write_workflow_manifest(
-        "visiumhd_mouse_cbs",
+        "splisosm_visiumhd_cbs",
         RESULT_DIR,
         started_at=started_at,
         parameters={"force": force, "n_jobs": n_jobs},

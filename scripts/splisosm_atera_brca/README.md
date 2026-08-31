@@ -15,7 +15,7 @@ matrix containing configured POSTAR3 RBPs and ReMap human TF-ChIP covariates
 ## Minimal Dependencies
 
 The full workflow can run from the same shared `sonic_paper_splisosm` conda environment as
-the [Visium HD analysis](../visiumhd_mouse_cbs/README.md):
+the [Visium HD analysis](../splisosm_visiumhd_cbs/README.md):
 
 ```bash
 mamba create -y -n sonic_paper_splisosm -c conda-forge -c bioconda \
@@ -45,13 +45,13 @@ with `NUMBA_DISABLE_JIT=1`.
 All commands assume the repository root is the current working directory.
 
 ```bash
-conda run -n sonic_paper_splisosm python scripts/atera_ffpe_human_brca/workflow.py --n-jobs 8
+conda run -n sonic_paper_splisosm python scripts/splisosm_atera_brca/workflow.py --n-jobs 8
 ```
 
 Use `--force` to recompute cached outputs:
 
 ```bash
-conda run -n sonic_paper_splisosm python scripts/atera_ffpe_human_brca/workflow.py --force --n-jobs 8
+conda run -n sonic_paper_splisosm python scripts/splisosm_atera_brca/workflow.py --force --n-jobs 8
 ```
 
 By default, `workflow.py` runs SV, all-SVP DU, all-SVP probe genome/transcript
@@ -66,8 +66,8 @@ figure-specific panel code and reads only workflow-generated caches.
 Standalone downstream entry points:
 
 ```bash
-conda run -n sonic_paper_splisosm python scripts/atera_ffpe_human_brca/plot_top20_svp_probe_transcript_panels.py --render
-conda run -n sonic_paper_splisosm python scripts/atera_ffpe_human_brca/run_ankrd30a_analysis.py
+conda run -n sonic_paper_splisosm python scripts/splisosm_atera_brca/plot_top20_svp_probe_transcript_panels.py --render
+conda run -n sonic_paper_splisosm python scripts/splisosm_atera_brca/run_ankrd30a_analysis.py
 ```
 
 The standalone `run_ankrd30a_analysis.py` file wraps the ANKRD30A-specific analysis, which lives in the `ankrd30a/` subfolder:
@@ -117,9 +117,9 @@ Reference inputs live under `~/reference/`:
 Download helpers are intentionally small and idempotent:
 
 ```bash
-conda run -n sonic_paper_splisosm python scripts/atera_ffpe_human_brca/download_pb_brca.py
-conda run -n sonic_paper_splisosm python scripts/atera_ffpe_human_brca/ankrd30a/download_tcga_brca_ankrd30a.py --token-file /path/to/gdc-token.txt --threads 8
-conda run -n sonic_paper_splisosm python scripts/atera_ffpe_human_brca/ankrd30a/download_tcga_brca_clinical_expression.py
+conda run -n sonic_paper_splisosm python scripts/splisosm_atera_brca/download_pb_brca.py
+conda run -n sonic_paper_splisosm python scripts/splisosm_atera_brca/ankrd30a/download_tcga_brca_ankrd30a.py --token-file /path/to/gdc-token.txt --threads 8
+conda run -n sonic_paper_splisosm python scripts/splisosm_atera_brca/ankrd30a/download_tcga_brca_clinical_expression.py
 ```
 
 Runtime settings, regulator lists, and output folders live in `config.py`.
@@ -129,7 +129,7 @@ Runtime settings, regulator lists, and output folders live in `config.py`.
 Results are written under:
 
 ```text
-results/atera_ffpe_human_brca/
+results/splisosm_atera_brca/
 ```
 
 Main cached files:
@@ -150,14 +150,14 @@ Main cached files:
 - `ankrd30a_trps1_proseq/ankrd30a_proseq_signal_windows.csv`
 - `ankrd30a_trps1_proseq/ankrd30a_proseq_signal_changes.csv`
 
-The workflow treats `results/atera_ffpe_human_brca/` as a generated cache.
+The workflow treats `results/splisosm_atera_brca/` as a generated cache.
 The all-SVP probe mapping cache includes metadata that records the requested SVP
 gene set, source-file fingerprints, and mapping parameters before cache reuse.
 
 Figures are written by `visualization.ipynb` under:
 
 ```text
-figures/atera_ffpe_human_brca/
+figures/splisosm_atera_brca/
 ```
 
 Publishable PDFs:
@@ -168,15 +168,15 @@ Publishable PDFs:
 Top-20 SVP inspection PNGs are kept separate under:
 
 ```text
-figures/atera_ffpe_human_brca/top20_svp_probe_transcript_panels/
+figures/splisosm_atera_brca/top20_svp_probe_transcript_panels/
 ```
 
 ## Code Checks
 
 ```bash
-conda run -n sonic_paper_splisosm python -m ruff check scripts/atera_ffpe_human_brca/*.py scripts/atera_ffpe_human_brca/ankrd30a
-conda run -n sonic_paper_splisosm python -m black --check scripts/atera_ffpe_human_brca/*.py scripts/atera_ffpe_human_brca/ankrd30a
-conda run -n sonic_paper_splisosm python -m compileall -q scripts/atera_ffpe_human_brca
+conda run -n sonic_paper_splisosm python -m ruff check scripts/splisosm_atera_brca/*.py scripts/splisosm_atera_brca/ankrd30a
+conda run -n sonic_paper_splisosm python -m black --check scripts/splisosm_atera_brca/*.py scripts/splisosm_atera_brca/ankrd30a
+conda run -n sonic_paper_splisosm python -m compileall -q scripts/splisosm_atera_brca
 ```
 
 The notebook is intentionally excluded from ruff/black because it is the manual

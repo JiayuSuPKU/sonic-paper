@@ -45,7 +45,7 @@ from pathlib import Path
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-    __package__ = "scripts.atera_ffpe_human_brca.ankrd30a"
+    __package__ = "scripts.splisosm_atera_brca.ankrd30a"
 
 from scripts.paper_utils import log
 

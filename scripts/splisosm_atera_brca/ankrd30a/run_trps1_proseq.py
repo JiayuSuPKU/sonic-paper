@@ -10,7 +10,7 @@ Idempotent pipeline:
 1. Load PB84, PB2, PB56, and PB107 transcript/TSS coordinates from the
    workflow-generated ANKRD30A transcript visualization cache.
 2. Write the sample manifest to
-   ``results/atera_ffpe_human_brca/ankrd30a_trps1_proseq/``.
+   ``results/splisosm_atera_brca/ankrd30a_trps1_proseq/``.
 3. Download only the required ANKRD30A genomic interval from each remote GEO
    bigWig into ``data/atera_ffpe_human_brca/ankrd30a_trps1_proseq/``.
 4. Quantify summed signal in +/-1 kb TSS windows and the fixed ANKRD30A gene
@@ -31,7 +31,7 @@ from typing import Any
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-    __package__ = "scripts.atera_ffpe_human_brca.ankrd30a"
+    __package__ = "scripts.splisosm_atera_brca.ankrd30a"
 
 import numpy as np
 import pandas as pd

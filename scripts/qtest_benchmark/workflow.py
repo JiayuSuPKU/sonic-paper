@@ -19,13 +19,23 @@ from scripts.paper_utils import (
 )
 
 from .benchmark import (
+    BENCHMARK_SAMPLE_SIZES,
+    POWER_SIGNAL_TO_NOISE_RATIOS,
+    RUNTIME_IMPLEMENTATIONS,
     VALIDATION_CACHE_FILES,
+    VALIDATION_KERNEL_PARAMETERS,
     cache_runtime_scaling_results,
     cache_validation_benchmark_results,
 )
 from .config import (
+    ARTIFACT_GENES,
     BENCHMARK_PROJECTION_FILE,
     BENCHMARK_SCALING_FILE,
+    BENCHMARK_TARGETS,
+    CAR_K_NEIGHBORS,
+    CAR_RHOS,
+    FAST_DECAY_RHO,
+    IMMUNE_GENES,
     LINEAGE_ANALYSIS_DATA_FILE,
     LINEAGE_BIVARIATE_DIAGNOSTICS_FILE,
     LINEAGE_BIVARIATE_SUMMARY_FILE,
@@ -34,28 +44,112 @@ from .config import (
     LINEAGE_GENE_SCORES_FILE,
     LINEAGE_TARGET_METADATA_FILE,
     LINEAGE_TREE_DIR,
+    M_FEATURES,
+    PIXEL_SIZE_UM,
     RAW_SPATIALDATA,
     RESULT_DIR,
+    RUNTIME_MEMORY_BUDGET_MB,
+    SLOW_DECAY_RHO,
     SMALL_INTESTINE_PATTERN_RANKS_FILE,
     SMALL_INTESTINE_SCORES_FILE,
     VALIDATION_RESULT_DIR,
 )
-from .lineage import cache_lineage_results
-from .small_intestine import cache_small_intestine_kernel_results
+from .lineage import (
+    ANCESTRY_WEIGHTS,
+    BIVARIATE_MIN_PAIRS,
+    BIVARIATE_SIGMA_THRESHOLDS,
+    CAR_RHO,
+    CLUSTER_MIN_CELLS,
+    EXAMPLE_TUMORS,
+    FDR_CUTOFF,
+    GENE_MIN_CELLS_FRAC,
+    GENE_PANEL,
+    MAX_GENE_ANALYSIS_CELLS,
+    MIN_TUMOR_CELLS,
+    PAIR_GENES,
+    cache_lineage_results,
+)
+from .small_intestine import (
+    DEFAULT_CHUNK_SIZE,
+    MIN_TOTAL_COUNTS,
+    PATTERN_SMOOTHING_SIGMA,
+    cache_small_intestine_kernel_results,
+)
 
 LOGGER = logging.getLogger(__name__)
-SCRIPT_DIR = Path(__file__).resolve().parent
+
+# Bump a section revision only when computation changes outside its explicit parameters.
+CACHE_REVISIONS = {"synthetic": 1, "small-intestine": 1, "lineage": 1}
+
+SYNTHETIC_CACHE_PARAMETERS = {
+    "runtime": {
+        "implementations": [
+            {
+                "name": implementation.name,
+                "max_n": implementation.max_n,
+                "null_method": implementation.null_method,
+                "kind": implementation.kind,
+            }
+            for implementation in RUNTIME_IMPLEMENTATIONS
+        ],
+        "m_features": M_FEATURES,
+        "memory_budget_mb": RUNTIME_MEMORY_BUDGET_MB,
+        "sample_sizes": BENCHMARK_SAMPLE_SIZES,
+        "targets": BENCHMARK_TARGETS,
+    },
+    "validation": {
+        "kernel_parameters": VALIDATION_KERNEL_PARAMETERS,
+        "power_signal_to_noise_ratios": POWER_SIGNAL_TO_NOISE_RATIOS,
+    },
+}
+
+SMALL_INTESTINE_CACHE_PARAMETERS = {
+    "artifact_genes": ARTIFACT_GENES,
+    "car_k_neighbors": CAR_K_NEIGHBORS,
+    "car_rhos": CAR_RHOS,
+    "chunk_size": DEFAULT_CHUNK_SIZE,
+    "fast_decay_rho": FAST_DECAY_RHO,
+    "fft_solver": "fft2",
+    "immune_genes": IMMUNE_GENES,
+    "min_total_counts": MIN_TOTAL_COUNTS,
+    "pattern_smoothing_sigma": PATTERN_SMOOTHING_SIGMA,
+    "pixel_size_um": PIXEL_SIZE_UM,
+    "slow_decay_rho": SLOW_DECAY_RHO,
+    "workers": 1,
+}
+
+LINEAGE_CACHE_PARAMETERS = {
+    "ancestry_weights": ANCESTRY_WEIGHTS,
+    "backend": "matrix",
+    "bivariate_min_pairs": BIVARIATE_MIN_PAIRS,
+    "bivariate_sigma_thresholds": BIVARIATE_SIGMA_THRESHOLDS,
+    "car_rho": CAR_RHO,
+    "cluster_min_cells": CLUSTER_MIN_CELLS,
+    "example_tumors": EXAMPLE_TUMORS,
+    "fdr_cutoff": FDR_CUTOFF,
+    "gene_min_cells_frac": GENE_MIN_CELLS_FRAC,
+    "gene_panel": GENE_PANEL,
+    "max_gene_analysis_cells": MAX_GENE_ANALYSIS_CELLS,
+    "min_tumor_cells": MIN_TUMOR_CELLS,
+    "n_jobs": 1,
+    "pair_genes": PAIR_GENES,
+}
 
 
-def _group_signature(group: str, *inputs: Path, recursive: tuple[Path, ...] = ()) -> str:
-    return cache_signature(
-        {
-            "group": group,
-            "inputs": [path_fingerprint(path) for path in inputs]
-            + [path_fingerprint(path, recursive=True) for path in recursive],
-            "sonic_version": installed_version("sonic-spatial"),
-        }
-    )
+def _group_signature_data(
+    group: str,
+    parameters: dict[str, Any],
+    *inputs: Path,
+    recursive: tuple[Path, ...] = (),
+) -> dict[str, Any]:
+    return {
+        "cache_revision": CACHE_REVISIONS[group],
+        "dependencies": {"sonic-spatial": installed_version("sonic-spatial")},
+        "inputs": [path_fingerprint(path) for path in inputs]
+        + [path_fingerprint(path, recursive=True) for path in recursive],
+        "parameters": parameters,
+        "section": group,
+    }
 
 
 def generate_analysis_caches(
@@ -81,12 +175,11 @@ def generate_analysis_caches(
             BENCHMARK_PROJECTION_FILE,
             *(VALIDATION_RESULT_DIR / name for name in VALIDATION_CACHE_FILES.values()),
         )
-        signature = _group_signature(
+        signature_data = _group_signature_data(
             "synthetic",
-            SCRIPT_DIR / "benchmark.py",
-            SCRIPT_DIR / "config.py",
-            SCRIPT_DIR / "utils.py",
+            SYNTHETIC_CACHE_PARAMETERS,
         )
+        signature = cache_signature(signature_data)
         refresh = force or not cache_entry_is_current(
             RESULT_DIR,
             "synthetic",
@@ -96,7 +189,13 @@ def generate_analysis_caches(
         cache_runtime_scaling_results(force=refresh)
         cache_validation_benchmark_results(force=refresh)
         if refresh:
-            update_cache_entry(RESULT_DIR, "synthetic", signature, synthetic_outputs)
+            update_cache_entry(
+                RESULT_DIR,
+                "synthetic",
+                signature,
+                synthetic_outputs,
+                signature_data=signature_data,
+            )
         cache_groups.append("synthetic")
         outputs.update(
             {
@@ -112,13 +211,12 @@ def generate_analysis_caches(
             SMALL_INTESTINE_SCORES_FILE,
             SMALL_INTESTINE_PATTERN_RANKS_FILE,
         )
-        signature = _group_signature(
+        signature_data = _group_signature_data(
             "small-intestine",
-            SCRIPT_DIR / "small_intestine.py",
-            SCRIPT_DIR / "config.py",
-            SCRIPT_DIR / "utils.py",
+            SMALL_INTESTINE_CACHE_PARAMETERS,
             effective_source,
         )
+        signature = cache_signature(signature_data)
         refresh = force or not cache_entry_is_current(
             RESULT_DIR,
             "small-intestine",
@@ -132,6 +230,7 @@ def generate_analysis_caches(
                 "small-intestine",
                 signature,
                 small_intestine_outputs,
+                signature_data=signature_data,
             )
         cache_groups.append("small-intestine")
         outputs.update(
@@ -152,14 +251,13 @@ def generate_analysis_caches(
             LINEAGE_BIVARIATE_DIAGNOSTICS_FILE,
             LINEAGE_TARGET_METADATA_FILE,
         )
-        signature = _group_signature(
+        signature_data = _group_signature_data(
             "lineage",
-            SCRIPT_DIR / "lineage.py",
-            SCRIPT_DIR / "config.py",
-            SCRIPT_DIR / "utils.py",
+            LINEAGE_CACHE_PARAMETERS,
             LINEAGE_ANALYSIS_DATA_FILE,
             recursive=(LINEAGE_TREE_DIR,),
         )
+        signature = cache_signature(signature_data)
         refresh = force or not cache_entry_is_current(
             RESULT_DIR,
             "lineage",
@@ -168,7 +266,13 @@ def generate_analysis_caches(
         )
         cache_lineage_results(force=refresh)
         if refresh:
-            update_cache_entry(RESULT_DIR, "lineage", signature, lineage_outputs)
+            update_cache_entry(
+                RESULT_DIR,
+                "lineage",
+                signature,
+                lineage_outputs,
+                signature_data=signature_data,
+            )
         cache_groups.append("lineage")
         outputs.update(
             {

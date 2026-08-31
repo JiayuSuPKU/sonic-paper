@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from scripts.paper_utils import PROJECT_ROOT
 
-ANALYSIS_SLUG = "visium_glioma_idh_status"
-DATA_ROOT = PROJECT_ROOT / "data" / ANALYSIS_SLUG
+ANALYSIS_SLUG = "glioma_idh"
+DATA_ROOT = PROJECT_ROOT / "data" / "visium_glioma_idh_status"
 
 RESULT_DIR = PROJECT_ROOT / "results" / ANALYSIS_SLUG
 FIGURE_DIR = PROJECT_ROOT / "figures" / ANALYSIS_SLUG

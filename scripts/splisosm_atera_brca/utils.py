@@ -40,7 +40,6 @@ from .config import (
     REMAP_NR_HG38_URLS,
     REMAP_TF_TARGETS_HG38,
     RESULT_DIR,
-    SCRIPT_DIR,
     SDATA_ZARR,
     TCGA_ANALYSIS_DIR,
     TCGA_DATA_DIR,
@@ -53,7 +52,6 @@ def ensure_dirs() -> None:
     ensure_directories(
         RESULT_DIR,
         FIGURE_DIR,
-        SCRIPT_DIR,
         ATERA_DATA_DIR,
         TCGA_DATA_DIR,
         TCGA_ANALYSIS_DIR,

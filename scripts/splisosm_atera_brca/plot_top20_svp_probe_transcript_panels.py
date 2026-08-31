@@ -18,9 +18,9 @@ Idempotent pipeline:
 2. Load cached all-SVP probe mappings and transcript compatibility tables.
 3. Normalize only the selected Atera codeword columns for spatial thumbnails.
 4. Write lightweight renderer summaries under
-   ``results/atera_ffpe_human_brca/top20_svp_probe_transcript_panels/``.
+   ``results/splisosm_atera_brca/top20_svp_probe_transcript_panels/``.
 5. With ``--render``, write per-gene inspection PNGs under
-   ``figures/atera_ffpe_human_brca/top20_svp_probe_transcript_panels/``.
+   ``figures/splisosm_atera_brca/top20_svp_probe_transcript_panels/``.
 
 Reruns are cheap: existing summaries and PNGs are reused unless ``--force`` is
 provided.
@@ -45,7 +45,7 @@ from matplotlib.patches import Rectangle
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    __package__ = "scripts.atera_ffpe_human_brca"
+    __package__ = "scripts.splisosm_atera_brca"
 
 from scripts.paper_utils import (
     FONT_CONFIG,
@@ -680,7 +680,7 @@ def _load_svp_probe_cache(
         missing_text = "\n".join(f"- {project_path(path)}" for path in missing)
         raise FileNotFoundError(
             "Missing all-SVP probe mapping cache. Run "
-            "`python scripts/atera_ffpe_human_brca/workflow.py --n-jobs 8` first.\n"
+            "`python scripts/splisosm_atera_brca/workflow.py --n-jobs 8` first.\n"
             f"{missing_text}"
         )
     return (

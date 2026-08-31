@@ -32,7 +32,7 @@ from scripts.paper_utils import (
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    __package__ = "scripts.visium_human_glioma"
+    __package__ = "scripts.glioma_idh"
 
 from .config import (  # noqa: E402
     FIGURE_DIR,

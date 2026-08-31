@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from pathlib import Path
 from typing import Any
 
 import anndata as ad
@@ -26,7 +25,6 @@ from .config import (
 from .utils import cache_is_reusable, parse_newick
 
 LOGGER = logging.getLogger(__name__)
-CACHE_INPUTS = (Path(__file__), Path(__file__).with_name("config.py"))
 
 EXAMPLE_TUMORS = ("3430_NT_T2", "3730_NT_T2")
 GENE_PANEL = ("Rgs4", "Col4a2", "Tmem37", "Cd200")
@@ -38,6 +36,10 @@ MIN_TUMOR_CELLS = 300
 MAX_GENE_ANALYSIS_CELLS = 3_000
 FDR_CUTOFF = 0.05
 CAR_RHO = 0.9
+CLUSTER_MIN_CELLS = 10
+GENE_MIN_CELLS_FRAC = 0.05
+BIVARIATE_MIN_PAIRS = 10
+BIVARIATE_SIGMA_THRESHOLDS = tuple(range(1, 11))
 
 
 def _ancestral_connectivity(parent: dict[str, str], leaves: list[str]) -> sparse.csr_matrix:
@@ -145,7 +147,7 @@ def _bivariate_disagreement(
         show_progress=False,
     )
     pairs = _canonical_pairs(r_moran, "Z_Moran").join(_canonical_pairs(r_car, "Z_CAR"), how="inner")
-    if len(pairs) < 10:
+    if len(pairs) < BIVARIATE_MIN_PAIRS:
         LOGGER.info("Lineage %s: skipping R statistics (<10 gene pairs)", tumor)
         return []
 
@@ -153,7 +155,7 @@ def _bivariate_disagreement(
     residual = pairs["Z_CAR"] - (regression.intercept + regression.slope * pairs["Z_Moran"])
     deviation = residual / residual.std()
     records = []
-    for threshold in range(1, 11):
+    for threshold in BIVARIATE_SIGMA_THRESHOLDS:
         for group, mask in (
             ("Moran dominant", deviation < -threshold),
             ("CAR dominant", deviation > threshold),
@@ -180,7 +182,7 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
     if cache_is_reusable(
         *outputs,
         force=force,
-        inputs=(*CACHE_INPUTS, LINEAGE_ANALYSIS_DATA_FILE, *tree_files),
+        inputs=(LINEAGE_ANALYSIS_DATA_FILE, *tree_files),
         logger=LOGGER,
         label="Lineage cross-tumor statistics",
     ):
@@ -223,7 +225,7 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
                 connectivity,
                 source="obs",
                 features=["Cluster-Name"],
-                min_cells=10,
+                min_cells=CLUSTER_MIN_CELLS,
             )
             clusters = _merge_q_results(cluster_results)
             clusters["Tumor"] = tumor
@@ -245,7 +247,7 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
                 tumor_data,
                 connectivity,
                 source="var",
-                min_cells_frac=0.05,
+                min_cells_frac=GENE_MIN_CELLS_FRAC,
             )
             genes = _merge_q_results(gene_results)
             genes["Tumor"] = tumor
@@ -297,7 +299,7 @@ def _cache_gene_diagnostics(*, force: bool) -> None:
     if cache_is_reusable(
         LINEAGE_GENE_DIAGNOSTICS_FILE,
         force=force,
-        inputs=(*CACHE_INPUTS, LINEAGE_GENE_SCORES_FILE, *LINEAGE_INPUTS),
+        inputs=(LINEAGE_GENE_SCORES_FILE, *LINEAGE_INPUTS),
         logger=LOGGER,
         label="Lineage gene cancellation",
     ):
@@ -398,7 +400,7 @@ def _cache_target_metadata(*, force: bool) -> None:
     if cache_is_reusable(
         LINEAGE_TARGET_METADATA_FILE,
         force=force,
-        inputs=(*CACHE_INPUTS, *LINEAGE_INPUTS),
+        inputs=LINEAGE_INPUTS,
         logger=LOGGER,
         label="Lineage target metadata",
     ):
@@ -441,7 +443,6 @@ def _cache_bivariate_diagnostics(*, force: bool) -> None:  # noqa: C901
         LINEAGE_BIVARIATE_DIAGNOSTICS_FILE,
         force=force,
         inputs=(
-            *CACHE_INPUTS,
             LINEAGE_GENE_SCORES_FILE,
             LINEAGE_ANALYSIS_DATA_FILE,
             LINEAGE_TREE_DIR / "3730_NT_T2.newick",
@@ -478,7 +479,7 @@ def _cache_bivariate_diagnostics(*, force: bool) -> None:  # noqa: C901
             tumor_data.copy(),
             obsp_key="lineage",
             is_distance=False,
-            min_cells_frac=0.05,
+            min_cells_frac=GENE_MIN_CELLS_FRAC,
         )
         detectors[method] = detector
     r_moran = detectors["moran"].compute_rstat(

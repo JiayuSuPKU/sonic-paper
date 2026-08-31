@@ -17,7 +17,7 @@ containing both RBP and TF-ChIP covariates. The workflow is supported by the
 ## Minimal Dependencies
 
 This workflow can run from the same shared `sonic_paper_splisosm` conda environment as
-the [Atera analysis](../atera_ffpe_human_brca/README.md):
+the [Atera analysis](../splisosm_atera_brca/README.md):
 
 ```bash
 mamba create -y -n sonic_paper_splisosm -c conda-forge -c bioconda \
@@ -31,7 +31,7 @@ Python requirements used directly by these scripts are `splisosm`, `numpy`,
 `pandas`, `scipy`, `matplotlib`, `anndata`, and `spatialdata`. The notebook also
 uses `jupyter`, `nbconvert`, and `ipykernel`. `black` and `ruff` are only needed
 for code checks. The Visium HD CBS workflow itself does not require the [Atera
-TCGA command-line tools](../atera_ffpe_human_brca/ankrd30a/tcga.py), but they are included in `sonic_paper_splisosm` so both
+TCGA command-line tools](../splisosm_atera_brca/ankrd30a/tcga.py), but they are included in `sonic_paper_splisosm` so both
 analysis folders can share one environment.
 
 If importing `spatialdata` raises a Numba cache error on this machine, rerun
@@ -45,13 +45,13 @@ for interactive plotting surface.
 All commands assume the repository root is the current working directory.
 
 ```bash
-conda run -n sonic_paper_splisosm python scripts/visiumhd_mouse_cbs/workflow.py --n-jobs 8
+conda run -n sonic_paper_splisosm python scripts/splisosm_visiumhd_cbs/workflow.py --n-jobs 8
 ```
 
 Use `--force` to recompute cached outputs:
 
 ```bash
-conda run -n sonic_paper_splisosm python scripts/visiumhd_mouse_cbs/workflow.py --force --n-jobs 8
+conda run -n sonic_paper_splisosm python scripts/splisosm_visiumhd_cbs/workflow.py --force --n-jobs 8
 ```
 
 Runtime settings, data paths, fixed kernel degrees, optional gene/RBP/TF
@@ -62,7 +62,7 @@ subsets, and output folders live in `config.py`.
 Results are written under:
 
 ```text
-results/visiumhd_mouse_cbs/
+results/splisosm_visiumhd_cbs/
 ```
 
 This results directory is treated as a generated cache. It intentionally has no
@@ -120,8 +120,8 @@ target list under `~/reference/ReMap2022/`.
 `plotting.py` contains notebook-friendly plotting helpers:
 
 ```python
-from scripts.visiumhd_mouse_cbs.reference_annotations import load_reference_feature_cache
-from scripts.visiumhd_mouse_cbs.plotting import plot_feature_structure
+from scripts.splisosm_visiumhd_cbs.reference_annotations import load_reference_feature_cache
+from scripts.splisosm_visiumhd_cbs.plotting import plot_feature_structure
 
 ref_cache = load_reference_feature_cache()
 
@@ -151,9 +151,9 @@ Empty lists suppress that feature class.
 ## Code Checks
 
 ```bash
-conda run -n sonic_paper_splisosm python -m ruff check scripts/visiumhd_mouse_cbs/*.py
-conda run -n sonic_paper_splisosm python -m black --check scripts/visiumhd_mouse_cbs/*.py
-conda run -n sonic_paper_splisosm python -m compileall -q scripts/visiumhd_mouse_cbs
+conda run -n sonic_paper_splisosm python -m ruff check scripts/splisosm_visiumhd_cbs/*.py
+conda run -n sonic_paper_splisosm python -m black --check scripts/splisosm_visiumhd_cbs/*.py
+conda run -n sonic_paper_splisosm python -m compileall -q scripts/splisosm_visiumhd_cbs
 ```
 
 The notebook is intentionally excluded from the ruff command because it

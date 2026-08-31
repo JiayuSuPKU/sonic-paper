@@ -10,17 +10,17 @@ import subprocess
 from scripts.paper_utils import PROJECT_ROOT
 
 WORKFLOWS = {
-    "atera_ffpe_human_brca": (
+    "splisosm_atera_brca": (
         "sonic_paper_splisosm",
-        "scripts.atera_ffpe_human_brca.workflow",
+        "scripts.splisosm_atera_brca.workflow",
     ),
-    "visiumhd_mouse_cbs": (
+    "splisosm_visiumhd_cbs": (
         "sonic_paper_splisosm",
-        "scripts.visiumhd_mouse_cbs.workflow",
+        "scripts.splisosm_visiumhd_cbs.workflow",
     ),
     "qtest_benchmark": ("sonic_paper", "scripts.qtest_benchmark.workflow"),
     "comparator_benchmark": ("sonic_paper", "scripts.comparator_benchmark.workflow"),
-    "visium_human_glioma": ("sonic_paper", "scripts.visium_human_glioma.workflow"),
+    "glioma_idh": ("sonic_paper", "scripts.glioma_idh.workflow"),
     "embryo_xspecies": ("sonic_paper", "scripts.embryo_xspecies.workflow"),
 }
 

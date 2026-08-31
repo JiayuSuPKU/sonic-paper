@@ -153,7 +153,7 @@ def _ankrd30a_probe_region_table() -> pd.DataFrame:
     mapping_path = SVP_PROBE_RESULT_DIR / "svp_probe_mappings.csv"
     if not mapping_path.exists():
         raise FileNotFoundError(
-            f"Missing {project_path(mapping_path)}. Run scripts/atera_ffpe_human_brca/workflow.py "
+            f"Missing {project_path(mapping_path)}. Run scripts/splisosm_atera_brca/workflow.py "
             "to build the all-SVP probe mapping cache before TCGA probe quantification."
         )
     mappings = pd.read_csv(mapping_path)

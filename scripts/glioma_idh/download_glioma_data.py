@@ -18,9 +18,9 @@ have been validated.
 
 Typical invocation::
 
-    python -m scripts.visium_human_glioma.download_glioma_data
+    python -m scripts.glioma_idh.download_glioma_data
     # or with a custom location:
-    python -m scripts.visium_human_glioma.download_glioma_data --data-root /elsewhere/visium_glioma_idh_status
+    python -m scripts.glioma_idh.download_glioma_data --data-root /elsewhere/visium_glioma_idh_status
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from pathlib import Path
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    __package__ = "scripts.visium_human_glioma"
+    __package__ = "scripts.glioma_idh"
 
 from .config import (
     DATA_ROOT,

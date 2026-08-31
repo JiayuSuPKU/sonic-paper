@@ -28,7 +28,9 @@ from .config import (
 from .utils import cache_is_reusable
 
 LOGGER = logging.getLogger(__name__)
-CACHE_INPUTS = (Path(__file__), Path(__file__).with_name("config.py"))
+DEFAULT_CHUNK_SIZE = 64
+MIN_TOTAL_COUNTS = 10
+PATTERN_SMOOTHING_SIGMA = 1.25
 
 
 def _gene_indices(table, genes: tuple[str, ...]) -> np.ndarray:
@@ -100,7 +102,7 @@ def cache_small_intestine_kernel_results(
     source: Path,
     *,
     force: bool = False,
-    chunk_size: int = 64,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> pd.DataFrame:
     """Cache transcriptome-wide scores and pattern ranks across kernel choices."""
     if chunk_size < 1:
@@ -110,7 +112,7 @@ def cache_small_intestine_kernel_results(
     if cache_is_reusable(
         *outputs,
         force=force,
-        inputs=(*CACHE_INPUTS, source),
+        inputs=(source,),
         logger=LOGGER,
         label="Small-intestine analysis",
     ):
@@ -127,7 +129,7 @@ def cache_small_intestine_kernel_results(
     table = sd.read_zarr(source).tables["square_016um"]
     panel_genes = ARTIFACT_GENES + IMMUNE_GENES
     totals = np.asarray(table.X.sum(axis=0)).ravel()
-    keep = np.flatnonzero(totals >= 10)
+    keep = np.flatnonzero(totals >= MIN_TOTAL_COUNTS)
     genes = table.var_names[keep].astype(str).to_numpy()
 
     rows_raw = table.obs["array_row"].to_numpy(dtype=int)
@@ -240,7 +242,9 @@ def design_contrastive_pattern_kernel(
         filled[~mask] = float(pattern[mask].mean())
         filled -= filled.mean()
         filled /= filled.std(ddof=1) + np.finfo(float).eps
-        power = gaussian_filter(np.abs(scipy.fft.fft2(filled, workers=1)) ** 2, 1.25, mode="wrap")
+        power = gaussian_filter(
+            np.abs(scipy.fft.fft2(filled, workers=1)) ** 2, PATTERN_SMOOTHING_SIGMA, mode="wrap"
+        )
         power[0, 0] = 0.0
         power_total = power.sum()
         if not np.isfinite(power_total) or power_total <= 0:

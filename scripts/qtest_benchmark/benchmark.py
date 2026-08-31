@@ -7,7 +7,6 @@ import logging
 import time
 import tracemalloc
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -33,7 +32,6 @@ from .config import (
 from .utils import cache_is_reusable
 
 LOGGER = logging.getLogger(__name__)
-CACHE_INPUTS = (Path(__file__), Path(__file__).with_name("config.py"))
 
 VALIDATION_CACHE_FILES = {
     "torus_agreement": "agreement_torus.csv",
@@ -84,13 +82,13 @@ BENCHMARK_SAMPLE_SIZES = (
     10_000_000,
 )
 
-_VALIDATION_KERNEL_PARAMETERS = {
+VALIDATION_KERNEL_PARAMETERS = {
     "gaussian": {"bandwidth": 2.0},
     "matern": {"bandwidth": 2.0, "nu": 1.5},
     "car": {"k_neighbors": 4, "rho": 0.9},
     "moran": {"k_neighbors": 4},
 }
-_POWER_SIGNAL_TO_NOISE_RATIOS = (
+POWER_SIGNAL_TO_NOISE_RATIOS = (
     0.0,
     0.03,
     0.05,
@@ -148,7 +146,6 @@ def cache_runtime_scaling_results(*, force: bool = False) -> tuple[pd.DataFrame,
     if cache_is_reusable(
         *runtime_outputs,
         force=force,
-        inputs=CACHE_INPUTS,
         logger=LOGGER,
         label="Runtime benchmark",
     ):
@@ -376,7 +373,7 @@ def _compute_implementation_agreement_tables() -> dict[str, pd.DataFrame]:
     values = _draw_white_noise(ny * nx, 100, seed=0)
     torus, boundary = [], []
     # Compare identical toroidal operators first, then expose open-boundary error.
-    for method, parameters in _VALIDATION_KERNEL_PARAMETERS.items():
+    for method, parameters in VALIDATION_KERNEL_PARAMETERS.items():
         coords, matrix, fft = _build_matched_matrix_fft_kernels(ny, nx, method, parameters)
         q_matrix = _compute_q_scores(matrix, values, ny, nx)
         q_fft = _compute_q_scores(fft, values, ny, nx)
@@ -400,7 +397,7 @@ def _compute_implementation_agreement_tables() -> dict[str, pd.DataFrame]:
     values = _draw_white_noise(n, 80, seed=3)
     smooth, graph = [], []
     # On irregular coordinates, distance and graph kernels exercise NUFFT directly.
-    for method, parameters in _VALIDATION_KERNEL_PARAMETERS.items():
+    for method, parameters in VALIDATION_KERNEL_PARAMETERS.items():
         matrix = MatrixKernel(coords, method=method, **parameters)
         nufft = NUFFTKernel(coords, method=method, workers=1, **parameters)
         table = pd.DataFrame(
@@ -500,7 +497,7 @@ def _compute_null_calibration_tables() -> dict[str, pd.DataFrame]:
 
     # Compare matrix and FFT implementations of Moran's I.
     _, matrix, fft = _build_matched_matrix_fft_kernels(
-        ny, nx, "moran", _VALIDATION_KERNEL_PARAMETERS["moran"]
+        ny, nx, "moran", VALIDATION_KERNEL_PARAMETERS["moran"]
     )
     moran_regular = _draw_white_noise(n, n_reps, seed + 1)
     for impl, kernel in (("Matrix", matrix), ("FFT", fft)):
@@ -514,13 +511,13 @@ def _compute_null_calibration_tables() -> dict[str, pd.DataFrame]:
     matrix = MatrixKernel(
         irregular_coords,
         method="moran",
-        **_VALIDATION_KERNEL_PARAMETERS["moran"],
+        **VALIDATION_KERNEL_PARAMETERS["moran"],
     )
     nufft = NUFFTKernel(
         irregular_coords,
         method="moran",
         workers=1,
-        **_VALIDATION_KERNEL_PARAMETERS["moran"],
+        **VALIDATION_KERNEL_PARAMETERS["moran"],
     )
     for impl, kernel in (("Matrix", matrix), ("NUFFT", nufft)):
         add_fpr(
@@ -546,7 +543,7 @@ def _compute_implementation_power_table(
 ) -> pd.DataFrame:
     ny, nx = shape
     rows = []
-    for method, parameters in _VALIDATION_KERNEL_PARAMETERS.items():
+    for method, parameters in VALIDATION_KERNEL_PARAMETERS.items():
         if spectral_impl == "FFT":
             _, matrix, spectral = _build_matched_matrix_fft_kernels(ny, nx, method, parameters)
         elif spectral_impl == "NUFFT":
@@ -563,7 +560,7 @@ def _compute_implementation_power_table(
         }
 
         # Compute test power for each implementation and null method across SNRs.
-        for snr in _POWER_SIGNAL_TO_NOISE_RATIOS:
+        for snr in POWER_SIGNAL_TO_NOISE_RATIOS:
             values = snr * signal + noise
             for impl, kernel in kernels:
                 for null in nulls:
@@ -603,12 +600,12 @@ def _compute_hyperparameter_power_table(
     rows = []
     for method, (parameter, values_to_test) in sweeps.items():
         for value in values_to_test:
-            parameters = dict(_VALIDATION_KERNEL_PARAMETERS[method])
+            parameters = dict(VALIDATION_KERNEL_PARAMETERS[method])
             parameters[parameter] = value
             kernel = MatrixKernel(coords, method=method, **parameters)
             null = preferred_null[method]
             null_parameters = compute_null_params(kernel, method=null)
-            for snr in _POWER_SIGNAL_TO_NOISE_RATIOS:
+            for snr in POWER_SIGNAL_TO_NOISE_RATIOS:
                 _, pvalues = spatial_q_test(
                     snr * signal + noise,
                     kernel,
@@ -695,7 +692,6 @@ def cache_validation_benchmark_results(*, force: bool = False) -> dict[str, pd.D
         if cache_is_reusable(
             *paths,
             force=force,
-            inputs=CACHE_INPUTS,
             logger=LOGGER,
             label=f"Validation {label}",
         ):
