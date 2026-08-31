@@ -68,12 +68,8 @@ def _configured_sections(*, representative: bool = False) -> list[tuple[str, str
     return out
 
 
-def _resolve_sections(
-    patterns: list[str] | None, *, representative: bool
-) -> list[tuple[str, str]]:
-    sections = _configured_sections(
-        representative=False if patterns else representative
-    )
+def _resolve_sections(patterns: list[str] | None, *, representative: bool) -> list[tuple[str, str]]:
+    sections = _configured_sections(representative=False if patterns else representative)
     if not patterns:
         return sections
     return [(tp, sid) for tp, sid in sections if matches_section(sid, patterns)]
@@ -130,12 +126,7 @@ def _fetch_one(
     url = f"{C.MOSTA_BASE_URL}/{sid}.MOSTA.h5ad"
     dest = C.RAW_DIR / f"{sid}.MOSTA.h5ad"
     remote = remote_size(url)  # may be None if the server rejects/throttles HEAD
-    if (
-        dest.exists()
-        and not force
-        and remote is not None
-        and dest.stat().st_size == remote
-    ):
+    if dest.exists() and not force and remote is not None and dest.stat().st_size == remote:
         logger.info("[%s] already present (%.1f GB) — skip.", sid, remote / 1e9)
         return tp, sid, dest, 0, "present"
     if dest.exists() and not force and remote is None:
@@ -176,9 +167,7 @@ def _fetch_one(
                 dest.stat().st_size / 1e9,
             )
             return tp, sid, dest, 0, "present"
-        logger.warning(
-            "[%s] downloaded 0 bytes — server returned empty; skipping.", sid
-        )
+        logger.warning("[%s] downloaded 0 bytes — server returned empty; skipping.", sid)
         dest.unlink(missing_ok=True)
         return tp, sid, dest, 0, "skip-empty"
     logger.info("[%s] done (%.1f GB).", sid, n / 1e9)
@@ -219,9 +208,7 @@ def run(
     else:
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futs = {
-                ex.submit(
-                    _fetch_one, tp, sid, force=force, max_attempts=max_attempts
-                ): (
+                ex.submit(_fetch_one, tp, sid, force=force, max_attempts=max_attempts): (
                     tp,
                     sid,
                 )
@@ -289,12 +276,8 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PATTERN",
         help="Download configured section IDs matching any exact name, substring, or glob.",
     )
-    p.add_argument(
-        "--representative", action="store_true", help="Download one section per stage."
-    )
-    p.add_argument(
-        "--force", action="store_true", help="Re-download even if present + size-sane."
-    )
+    p.add_argument("--representative", action="store_true", help="Download one section per stage.")
+    p.add_argument("--force", action="store_true", help="Re-download even if present + size-sane.")
     p.add_argument(
         "--workers",
         type=int,

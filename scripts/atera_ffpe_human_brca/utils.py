@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import json
-import resource
 import shutil
-import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterable
@@ -16,6 +13,21 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+
+from scripts.paper_utils import (
+    ensure_directories,
+    log,
+    max_rss_gb,
+    normalize_gene_symbol,
+    project_relative,
+    time_call,
+)
+from scripts.paper_utils import (
+    save_csv as _save_csv,
+)
+from scripts.paper_utils import (
+    save_json as _save_json,
+)
 
 from .config import (
     ATERA_DATA_DIR,
@@ -34,14 +46,11 @@ from .config import (
     TCGA_DATA_DIR,
 )
 
-
-def log(message: str) -> None:
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+__all__ = ["log", "max_rss_gb", "normalize_gene_symbol", "time_call"]
 
 
 def ensure_dirs() -> None:
-    # Create the small fixed set of roots used by download, workflow, and plots.
-    for path in (
+    ensure_directories(
         RESULT_DIR,
         FIGURE_DIR,
         SCRIPT_DIR,
@@ -49,45 +58,25 @@ def ensure_dirs() -> None:
         TCGA_DATA_DIR,
         TCGA_ANALYSIS_DIR,
         PACBIO_DATA_DIR,
-    ):
-        path.mkdir(parents=True, exist_ok=True)
+    )
 
 
 def project_path(path: Path) -> str:
-    try:
-        return str(path.relative_to(PROJECT_ROOT))
-    except ValueError:
-        return str(path)
+    return project_relative(path, PROJECT_ROOT)
 
 
 def save_csv(df: pd.DataFrame, path: Path, *, index: bool = False) -> None:
-    # Centralize writes so every generated table is logged consistently.
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=index)
-    log(f"wrote {project_path(path)} ({df.shape[0]:,} rows)")
+    _save_csv(df, path, project_root=PROJECT_ROOT, index=index)
 
 
 def save_json(data: dict[str, Any], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
-    log(f"wrote {project_path(path)}")
-
-
-def normalize_gene_symbol(value: object) -> str:
-    return str(value).strip().casefold()
+    _save_json(data, path, project_root=PROJECT_ROOT)
 
 
 def stable_hash_values(values: Iterable[object]) -> str:
     """Return a stable SHA256 hash for an unordered collection of identity values."""
     payload = "\n".join(sorted(map(str, values))).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
-
-
-def max_rss_gb() -> float:
-    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    if rss > 10**9:
-        return rss / 1024**3
-    return rss / 1024**2
 
 
 def selected_to_dense(x: Any) -> np.ndarray:
@@ -105,17 +94,6 @@ def load_sdata():
     if not SDATA_ZARR.exists():
         raise FileNotFoundError(f"Missing SpatialData store: {SDATA_ZARR}")
     return sd.read_zarr(SDATA_ZARR)
-
-
-def time_call(label: str, fn) -> tuple[Any, float, float]:
-    # Wrap expensive SPLISOSM stages so runtime and memory end up in summaries.
-    log(f"START {label}")
-    t0 = time.perf_counter()
-    value = fn()
-    seconds = time.perf_counter() - t0
-    rss = max_rss_gb()
-    log(f"END {label}: {seconds:.2f}s, max_rss={rss:.2f} GB")
-    return value, seconds, rss
 
 
 def bh_fdr(pvalues: np.ndarray) -> np.ndarray:
@@ -184,9 +162,7 @@ def ensure_remap_hg38_bed() -> Path:
         try:
             log(f"downloading ReMap hg38 BED: {url}")
             with urllib.request.urlopen(url, timeout=120) as response:
-                with NamedTemporaryFile(
-                    "wb", delete=False, dir=str(REMAP_CACHE_DIR)
-                ) as tmp:
+                with NamedTemporaryFile("wb", delete=False, dir=str(REMAP_CACHE_DIR)) as tmp:
                     shutil.copyfileobj(response, tmp)
                     tmp_path = Path(tmp.name)
             tmp_path.replace(REMAP_NR_HG38_BED)

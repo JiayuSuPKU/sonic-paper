@@ -21,9 +21,7 @@ _HEADERS = {"User-Agent": "sonic-paper-embryo-xspecies/1.0"}
 def matches_section(section_id: str, patterns: list[str]) -> bool:
     """Match a section by exact ID, substring, or shell-style glob."""
     return any(
-        pattern == section_id
-        or pattern in section_id
-        or fnmatch.fnmatchcase(section_id, pattern)
+        pattern == section_id or pattern in section_id or fnmatch.fnmatchcase(section_id, pattern)
         for pattern in patterns
     )
 
@@ -116,11 +114,7 @@ def _attempt_one_pass(
                 if now - last_log > log_every:
                     written = start_byte + new_bytes
                     rate = new_bytes / max(now - t0, 1e-9) / 1e6
-                    pct = (
-                        f"{100.0 * written / expected_size:5.1f}%"
-                        if expected_size
-                        else "  ?  "
-                    )
+                    pct = f"{100.0 * written / expected_size:5.1f}%" if expected_size else "  ?  "
                     logger.info(
                         "%s%s  %8.1f MB  (%.1f MB/s)",
                         prefix,

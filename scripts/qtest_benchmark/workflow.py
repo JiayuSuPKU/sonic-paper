@@ -23,9 +23,7 @@ def generate_analysis_caches(
     """Generate one analysis cache group or all default cache groups."""
     valid_analyses = {"all", "synthetic", "small-intestine", "lineage"}
     if analysis not in valid_analyses:
-        raise ValueError(
-            f"Unknown analysis {analysis!r}; choose from {sorted(valid_analyses)}"
-        )
+        raise ValueError(f"Unknown analysis {analysis!r}; choose from {sorted(valid_analyses)}")
     if source is not None and analysis not in {"all", "small-intestine"}:
         raise ValueError("source applies only to the small-intestine analysis")
 
@@ -56,9 +54,7 @@ def main() -> None:
         type=Path,
         help="Optional path to the raw Visium HD SpatialData zarr.",
     )
-    parser.add_argument(
-        "--force", action="store_true", help="Recompute existing caches."
-    )
+    parser.add_argument("--force", action="store_true", help="Recompute existing caches.")
     args = parser.parse_args()
     generate_analysis_caches(
         analysis=args.analysis,

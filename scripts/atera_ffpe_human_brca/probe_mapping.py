@@ -147,9 +147,7 @@ def opposite_strand(strand: str) -> str:
 
 def format_segments(segments: list[tuple[str, int, int]]) -> str:
     """Serialize genomic segments as ``chrom:start0-end0`` chunks."""
-    return ";".join(
-        f"{chrom}:{int(start)}-{int(end)}" for chrom, start, end in segments
-    )
+    return ";".join(f"{chrom}:{int(start)}-{int(end)}" for chrom, start, end in segments)
 
 
 def parse_segments(row: pd.Series | dict[str, object]) -> list[tuple[str, int, int]]:
@@ -170,9 +168,7 @@ def parse_segments(row: pd.Series | dict[str, object]) -> list[tuple[str, int, i
             segments.append((chrom, int(float(start)), int(float(end))))
     if segments:
         return segments
-    if pd.notna(row.get("start_0based", np.nan)) and pd.notna(
-        row.get("end_0based", np.nan)
-    ):
+    if pd.notna(row.get("start_0based", np.nan)) and pd.notna(row.get("end_0based", np.nan)):
         return [
             (
                 str(row.get("chrom", "")),
@@ -228,8 +224,7 @@ def _cache_metadata_matches(path: Path, expected: dict[str, object]) -> bool:
     observed = json.loads(path.read_text())
     return (
         observed.get("schema_version") == expected.get("schema_version")
-        and observed.get("requested_gene_key_hash")
-        == expected.get("requested_gene_key_hash")
+        and observed.get("requested_gene_key_hash") == expected.get("requested_gene_key_hash")
         and observed.get("mapping_parameters") == expected.get("mapping_parameters")
         and observed.get("input_files") == expected.get("input_files")
     )
@@ -253,9 +248,7 @@ def _segment_payload(segments: list[tuple[str, int, int]]) -> dict[str, object]:
         "end_1based": max(ends) if ends else np.nan,
         "segment_count": len(segments),
         "segments_0based": format_segments(segments),
-        "segments_1based": ";".join(
-            f"{chrom}:{start + 1}-{end}" for chrom, start, end in segments
-        ),
+        "segments_1based": ";".join(f"{chrom}:{start + 1}-{end}" for chrom, start, end in segments),
         "spans_exon_junction": len(segments) > 1,
     }
 
@@ -272,9 +265,7 @@ class IndexedFasta:
         # Read the .fai index once so fetch() can jump directly to genomic bytes.
         with fai.open() as handle:
             for line in handle:
-                chrom, length, offset, line_bases, line_width = line.rstrip("\n").split(
-                    "\t"
-                )[:5]
+                chrom, length, offset, line_bases, line_width = line.rstrip("\n").split("\t")[:5]
                 rows.append(
                     {
                         "chrom": chrom,
@@ -305,18 +296,11 @@ class IndexedFasta:
         offset = int(info["offset"])
         # FASTA offsets include newline width, so byte coordinates differ from
         # genomic coordinates after every wrapped sequence line.
-        byte_start = (
-            offset + (start0 // line_bases) * line_width + (start0 % line_bases)
-        )
+        byte_start = offset + (start0 // line_bases) * line_width + (start0 % line_bases)
         byte_end = offset + (end0 // line_bases) * line_width + (end0 % line_bases)
         self._handle.seek(byte_start)
         data = self._handle.read(byte_end - byte_start + line_width)
-        return (
-            data.replace(b"\n", b"")
-            .replace(b"\r", b"")[: end0 - start0]
-            .decode("ascii")
-            .upper()
-        )
+        return data.replace(b"\n", b"").replace(b"\r", b"")[: end0 - start0].decode("ascii").upper()
 
 
 def read_probe_info(path: Path, genes: Iterable[str]) -> pd.DataFrame:
@@ -331,9 +315,7 @@ def read_probe_info(path: Path, genes: Iterable[str]) -> pd.DataFrame:
     probe = pd.read_csv(path, keep_default_na=False)
     probe = probe[probe["target_name"].astype(str).isin(genes)].copy()
     probe["codeword"] = probe["codeword"].astype(int)
-    probe["feature"] = (
-        probe["target_name"].astype(str) + "|" + probe["codeword"].astype(str)
-    )
+    probe["feature"] = probe["target_name"].astype(str) + "|" + probe["codeword"].astype(str)
     # Some codewords have multiple oligos; suffix labels (a/b/c) make split
     # probe mappings inspectable without changing the feature identity.
     probe["probe_ordinal"] = probe.groupby(["target_name", "codeword"]).cumcount() + 1
@@ -492,9 +474,7 @@ def find_all(seq: str, query: str) -> list[int]:
     return hits
 
 
-def merge_intervals(
-    intervals: list[tuple[int, int]], gap: int = 0
-) -> list[tuple[int, int]]:
+def merge_intervals(intervals: list[tuple[int, int]], gap: int = 0) -> list[tuple[int, int]]:
     """Merge sorted 0-based intervals separated by at most ``gap`` bases."""
     if not intervals:
         return []
@@ -630,16 +610,10 @@ def exact_spliced_transcript_matches(
                 "binder_reverse_complement_exact_on_spliced_transcript",
             ),
         ]:
-            mapped_strand = (
-                tx_strand if query_kind == "binder" else opposite_strand(tx_strand)
-            )
+            mapped_strand = tx_strand if query_kind == "binder" else opposite_strand(tx_strand)
             for offset in find_all(sequence, query):
-                segments = project_transcript_interval(
-                    model, offset, offset + len(query)
-                )
-                segments = sorted(
-                    segments, key=lambda item: (item[0], int(item[1]), int(item[2]))
-                )
+                segments = project_transcript_interval(model, offset, offset + len(query))
+                segments = sorted(segments, key=lambda item: (item[0], int(item[1]), int(item[2])))
                 if not segments:
                     continue
                 # Collapse identical genomic hits that are shared by multiple
@@ -670,9 +644,7 @@ def exact_spliced_transcript_matches(
         row["transcript_hit_ids"] = "|".join(sorted(set(row["transcript_hit_ids"])))  # type: ignore[arg-type]
         row["transcript_hit_names"] = "|".join(sorted(set(row["transcript_hit_names"])))  # type: ignore[arg-type]
         row["n_transcript_hits"] = (
-            len(str(row["transcript_hit_ids"]).split("|"))
-            if row["transcript_hit_ids"]
-            else 0
+            len(str(row["transcript_hit_ids"]).split("|")) if row["transcript_hit_ids"] else 0
         )
         out.append(row)
     return sorted(
@@ -782,9 +754,7 @@ def map_probes_to_gene_loci(
     for _, probe in probes.iterrows():
         gene = str(probe["target_name"])
         if gene not in locus_map:
-            rows.append(
-                {**probe.to_dict(), "mapping_status": "unmapped_no_gencode_gene_locus"}
-            )
+            rows.append({**probe.to_dict(), "mapping_status": "unmapped_no_gencode_gene_locus"})
             continue
         locus = locus_map[gene]
         chrom = str(locus["chrom"])
@@ -796,9 +766,7 @@ def map_probes_to_gene_loci(
         binder = str(probe["binder"]).upper()
         # Search order: exact spliced transcript hit, exact genomic hit, then
         # best exon-near mismatch if no exact location exists.
-        hits = exact_spliced_transcript_matches(
-            transcript_models_by_gene.get(gene, []), binder
-        )
+        hits = exact_spliced_transcript_matches(transcript_models_by_gene.get(gene, []), binder)
         mapping_status = "mapped_exact_spliced_transcript"
         if not hits:
             for strand, query, query_type in [
@@ -829,9 +797,7 @@ def map_probes_to_gene_loci(
                 binder,
                 max_mismatches=max_mismatches,
             )
-            mapping_status = (
-                "mapped_best_gene_exon_mismatch" if hits else "unmapped_gene_locus"
-            )
+            mapping_status = "mapped_best_gene_exon_mismatch" if hits else "unmapped_gene_locus"
         if not hits:
             # No exact evidence anywhere in transcript or locus space; emit a
             # fully populated unmapped row so downstream schemas stay stable.
@@ -919,9 +885,7 @@ def probe_feature_overlap(
         )
         hit_parts = []
         if not gene_exons.empty:
-            for _txid, tx_exons in gene_exons.groupby(
-                gene_exons["transcript_id"].astype(str)
-            ):
+            for _txid, tx_exons in gene_exons.groupby(gene_exons["transcript_id"].astype(str)):
                 # Require every segment of a split probe to overlap the same transcript.
                 segment_hits = []
                 for chrom, start0, end0 in segments:
@@ -942,9 +906,7 @@ def probe_feature_overlap(
             transcript_names: list[str] = []
             exon_numbers: list[str] = []
         else:
-            transcript_ids = sorted(
-                hits["transcript_id"].dropna().astype(str).unique().tolist()
-            )
+            transcript_ids = sorted(hits["transcript_id"].dropna().astype(str).unique().tolist())
             transcript_names = sorted(
                 hits.get("transcript_name", hits["transcript_id"])
                 .dropna()
@@ -953,19 +915,13 @@ def probe_feature_overlap(
                 .tolist()
             )
             exon_numbers = sorted(
-                hits.get("exon_number", pd.Series(dtype=str))
-                .dropna()
-                .astype(str)
-                .unique()
-                .tolist()
+                hits.get("exon_number", pd.Series(dtype=str)).dropna().astype(str).unique().tolist()
             )
         rows.append(
             {
                 **base,
                 "annotation_source": source_label,
-                "overlap_status": (
-                    "overlaps_exon" if transcript_ids else "mapped_no_exon_overlap"
-                ),
+                "overlap_status": ("overlaps_exon" if transcript_ids else "mapped_no_exon_overlap"),
                 "overlap_transcript_ids": "|".join(transcript_ids),
                 "overlap_transcript_names": "|".join(transcript_names),
                 "overlap_exon_numbers": "|".join(exon_numbers),
@@ -1006,9 +962,7 @@ def transcript_compatibility(  # noqa: C901
     for _, tx in transcripts.iterrows():
         txid = str(tx["transcript_id"])
         tx_exons = (
-            exons[exons["transcript_id"].astype(str).eq(txid)].copy()
-            if not exons.empty
-            else exons
+            exons[exons["transcript_id"].astype(str).eq(txid)].copy() if not exons.empty else exons
         )
         hits = []
         for _, probe in mapped[
@@ -1093,9 +1047,7 @@ def transcript_compatibility(  # noqa: C901
         .rename("n_transcripts_in_compatibility_group")
         .reset_index()
     )
-    return out.merge(
-        counts, on=["annotation_source", "gene", "compatibility_group"], how="left"
-    )
+    return out.merge(counts, on=["annotation_source", "gene", "compatibility_group"], how="left")
 
 
 def _svp_probe_cache_paths(out_dir: Path) -> dict[str, Path]:
@@ -1104,10 +1056,8 @@ def _svp_probe_cache_paths(out_dir: Path) -> dict[str, Path]:
         "mapping": out_dir / "svp_probe_mappings.csv",
         "gencode_overlaps": out_dir / "svp_probe_gencode_overlaps.csv",
         "pacbio_overlaps": out_dir / "svp_probe_pacbio_overlaps.csv",
-        "gencode_compatibility": out_dir
-        / "svp_gencode_transcript_probe_compatibility.csv",
-        "pacbio_compatibility": out_dir
-        / "svp_pacbio_transcript_probe_compatibility.csv",
+        "gencode_compatibility": out_dir / "svp_gencode_transcript_probe_compatibility.csv",
+        "pacbio_compatibility": out_dir / "svp_pacbio_transcript_probe_compatibility.csv",
         "inventory": out_dir / "svp_probe_cache_inventory.tsv",
         "metadata": out_dir / "svp_probe_cache_metadata.json",
     }
@@ -1136,21 +1086,15 @@ def _build_svp_probe_cache_inventory(
             {
                 "gene": gene,
                 "n_codeword_features": int(
-                    probe_info.loc[
-                        probe_info["target_name"].eq(gene), "feature"
-                    ].nunique()
+                    probe_info.loc[probe_info["target_name"].eq(gene), "feature"].nunique()
                 ),
                 "n_probe_oligos": int(probe_info["target_name"].eq(gene).sum()),
                 "n_mapped_probe_oligos": int(
                     gene_mappings.loc[mapped, "probe_instance_id"].nunique()
                 ),
                 "n_mapping_rows_including_ties": int(mapped.sum()),
-                "n_gencode_transcripts": int(
-                    gencode_tx["gene_name"].astype(str).eq(gene).sum()
-                ),
-                "n_pacbio_transcripts": int(
-                    pacbio_tx["gene_name"].astype(str).eq(gene).sum()
-                ),
+                "n_gencode_transcripts": int(gencode_tx["gene_name"].astype(str).eq(gene).sum()),
+                "n_pacbio_transcripts": int(pacbio_tx["gene_name"].astype(str).eq(gene).sum()),
             }
         )
     return pd.DataFrame(inventory_rows)
@@ -1202,9 +1146,7 @@ def _build_svp_probe_mapping_tables(genes: list[str]) -> dict[str, pd.DataFrame]
         source_label="PacBio QC pass",
         sqanti=sqanti,
     )
-    inventory = _build_svp_probe_cache_inventory(
-        genes, probe_info, mappings, gencode, pacbio
-    )
+    inventory = _build_svp_probe_cache_inventory(genes, probe_info, mappings, gencode, pacbio)
 
     return {
         "mapping": mappings,

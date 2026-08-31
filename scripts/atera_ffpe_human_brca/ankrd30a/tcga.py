@@ -69,14 +69,8 @@ FEATURECOUNTS_BATCH_SIZE = 100
 
 def _sample_key(row: dict[str, object]) -> str:
     """Build the stable sample key used by TCGA quantification matrices."""
-    missing = [
-        col
-        for col in ["case_submitter_id", "file_id"]
-        if not str(row.get(col, "")).strip()
-    ]
-    if not str(
-        row.get("sample_submitter_id", "") or row.get("aliquot_submitter_id", "")
-    ).strip():
+    missing = [col for col in ["case_submitter_id", "file_id"] if not str(row.get(col, "")).strip()]
+    if not str(row.get("sample_submitter_id", "") or row.get("aliquot_submitter_id", "")).strip():
         missing.append("sample_submitter_id_or_aliquot_submitter_id")
     if missing:
         raise ValueError(f"TCGA manifest row is missing sample-key columns: {missing}")
@@ -122,9 +116,7 @@ def tcga_quantification_ready() -> bool:
 def _resolve_tcga_bam_rows() -> list[dict[str, object]]:
     """Read the TCGA manifest and keep rows with a usable local ANKRD30A BAM slice."""
     if not TCGA_BAM_MANIFEST_TSV.exists():
-        raise FileNotFoundError(
-            f"Missing TCGA BAM manifest: {project_path(TCGA_BAM_MANIFEST_TSV)}"
-        )
+        raise FileNotFoundError(f"Missing TCGA BAM manifest: {project_path(TCGA_BAM_MANIFEST_TSV)}")
     manifest = pd.read_csv(TCGA_BAM_MANIFEST_TSV, sep="\t", dtype=str).fillna("")
     _require_columns(
         manifest,
@@ -176,12 +168,8 @@ def _ankrd30a_probe_region_table() -> pd.DataFrame:
         raise ValueError(f"all-SVP probe mapping cache has no {TARGET_GENE} probe rows")
 
     rows: list[dict[str, object]] = []
-    mapped = mappings[
-        mappings["mapping_status"].astype(str).str.startswith("mapped")
-    ].copy()
-    mapped = mapped[
-        pd.to_numeric(mapped["codeword"], errors="coerce").isin(PROBE_REGION_CODEWORDS)
-    ]
+    mapped = mappings[mappings["mapping_status"].astype(str).str.startswith("mapped")].copy()
+    mapped = mapped[pd.to_numeric(mapped["codeword"], errors="coerce").isin(PROBE_REGION_CODEWORDS)]
     seen: set[tuple[object, ...]] = set()
     for _, probe in mapped.iterrows():
         codeword = int(probe["codeword"])
@@ -205,20 +193,13 @@ def _ankrd30a_probe_region_table() -> pd.DataFrame:
                 }
             )
     if not rows:
-        raise ValueError(
-            f"No mapped {TARGET_GENE} probe regions found for TCGA counting"
-        )
-    out = pd.DataFrame(rows).sort_values(
-        ["codeword", "probe_oligo_label", "chrom", "start_0based"]
-    )
+        raise ValueError(f"No mapped {TARGET_GENE} probe regions found for TCGA counting")
+    out = pd.DataFrame(rows).sort_values(["codeword", "probe_oligo_label", "chrom", "start_0based"])
     missing_codewords = sorted(
-        set(PROBE_REGION_CODEWORDS)
-        - set(pd.to_numeric(out["codeword"], errors="coerce"))
+        set(PROBE_REGION_CODEWORDS) - set(pd.to_numeric(out["codeword"], errors="coerce"))
     )
     if missing_codewords:
-        raise ValueError(
-            f"Missing required ANKRD30A probe codewords: {missing_codewords}"
-        )
+        raise ValueError(f"Missing required ANKRD30A probe codewords: {missing_codewords}")
     return out
 
 
@@ -260,12 +241,9 @@ def _run_featurecounts_probe_counts(
 
     saf = work_dir / "ankrd30a_probe_regions.saf"
     _write_featurecounts_saf(saf, probe_regions)
-    probe_features = [
-        _probe_region_feature_name(codeword) for codeword in PROBE_REGION_CODEWORDS
-    ]
+    probe_features = [_probe_region_feature_name(codeword) for codeword in PROBE_REGION_CODEWORDS]
     probe_counts_by_bam: dict[str, dict[str, float]] = {
-        str(Path(str(row["local_slice_bam"]))): dict.fromkeys(probe_features, 0.0)
-        for row in rows
+        str(Path(str(row["local_slice_bam"]))): dict.fromkeys(probe_features, 0.0) for row in rows
     }
     gene_total_by_bam: dict[str, float] = {
         str(Path(str(row["local_slice_bam"]))): 0.0 for row in rows
@@ -304,9 +282,7 @@ def _run_featurecounts_probe_counts(
         completed = subprocess.run(cmd, capture_output=True, text=True)
         if completed.returncode != 0:
             detail = completed.stderr.strip() or completed.stdout.strip()
-            raise RuntimeError(
-                f"featureCounts failed with exit {completed.returncode}\n{detail}"
-            )
+            raise RuntimeError(f"featureCounts failed with exit {completed.returncode}\n{detail}")
 
         table = pd.read_csv(out, sep="\t", comment="#")
         count_cols = [
@@ -408,37 +384,27 @@ def _run_stringtie_transcript_counts(
     completed = subprocess.run(cmd, capture_output=True, text=True)
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip()
-        raise RuntimeError(
-            f"prepDE.py failed with exit {completed.returncode}\n{detail}"
-        )
+        raise RuntimeError(f"prepDE.py failed with exit {completed.returncode}\n{detail}")
 
     count_table = pd.read_csv(transcript_counts)
     if count_table.empty or "transcript_id" not in count_table:
-        raise ValueError(
-            "prepDE.py transcript count table is empty or lacks transcript_id"
-        )
+        raise ValueError("prepDE.py transcript count table is empty or lacks transcript_id")
     transcript_features = count_table["transcript_id"].astype(str).tolist()
     # All guide transcripts must be present in the raw output so downstream
     # matrices cannot silently fall back to a four-transcript reference.
     missing = sorted(set(required_transcripts) - set(transcript_features))
     if missing:
         raise RuntimeError(
-            "prepDE.py did not return all PB-QC ANKRD30A transcript counts: "
-            + ", ".join(missing)
+            "prepDE.py did not return all PB-QC ANKRD30A transcript counts: " + ", ".join(missing)
         )
     counts_by_bam = {
-        bam_key: dict.fromkeys(transcript_features, 0.0)
-        for bam_key in sample_map.values()
+        bam_key: dict.fromkeys(transcript_features, 0.0) for bam_key in sample_map.values()
     }
     for sample_key, bam_key in sample_map.items():
         if sample_key not in count_table:
-            raise ValueError(
-                f"prepDE.py transcript count table is missing sample {sample_key}"
-            )
+            raise ValueError(f"prepDE.py transcript count table is missing sample {sample_key}")
         values = (
-            pd.to_numeric(count_table[sample_key], errors="coerce")
-            .fillna(0)
-            .to_numpy(dtype=float)
+            pd.to_numeric(count_table[sample_key], errors="coerce").fillna(0).to_numpy(dtype=float)
         )
         counts_by_bam[bam_key] = dict(zip(transcript_features, values, strict=False))
     return counts_by_bam, transcript_features
@@ -448,22 +414,18 @@ def _write_tcga_quantification_matrices(rows: list[dict[str, object]]) -> None:
     """Write StringTie transcript and featureCounts probe count/usage matrices."""
     probe_regions = _ankrd30a_probe_region_table()
 
-    with tempfile.TemporaryDirectory(
-        prefix="ankrd30a_tcga_quant_", dir="/private/tmp"
-    ) as tmp:
+    with tempfile.TemporaryDirectory(prefix="ankrd30a_tcga_quant_", dir="/private/tmp") as tmp:
         work_dir = Path(tmp)
         # The two quantification backends share the same BAM slices but produce
         # different features: direct genomic probe regions and PB transcripts.
         probe_counts_by_bam, gene_total_by_bam = _run_featurecounts_probe_counts(
             rows, probe_regions, work_dir
         )
-        transcript_counts_by_bam, transcript_features = (
-            _run_stringtie_transcript_counts(rows, work_dir)
+        transcript_counts_by_bam, transcript_features = _run_stringtie_transcript_counts(
+            rows, work_dir
         )
 
-    probe_features = [
-        _probe_region_feature_name(codeword) for codeword in PROBE_REGION_CODEWORDS
-    ]
+    probe_features = [_probe_region_feature_name(codeword) for codeword in PROBE_REGION_CODEWORDS]
 
     # raw transcript counts
     _write_sample_matrix(
@@ -539,16 +501,11 @@ def _write_sample_matrix(
         normalizer = normalizer_by_bam[bam] if normalizer_by_bam else total
         for feature in features:
             value = float(values[feature])
-            out_row[feature] = (
-                (value / normalizer) if normalize and normalizer > 0 else value
-            )
+            out_row[feature] = (value / normalizer) if normalize and normalizer > 0 else value
         output_rows.append(out_row)
     extra_cols = list(extra_totals_by_bam or {})
     columns = (
-        list(QUANT_SAMPLE_COLUMNS)
-        + ["sample_matrix_key", "feature_total"]
-        + extra_cols
-        + features
+        list(QUANT_SAMPLE_COLUMNS) + ["sample_matrix_key", "feature_total"] + extra_cols + features
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(output_rows, columns=columns).to_csv(path, sep="\t", index=False)
@@ -571,15 +528,11 @@ def quantify_tcga_ankrd30a(
     # Recompute the four matrices together so count and usage outputs stay in sync.
     _write_tcga_quantification_matrices(rows)
     computed_outputs = [
-        str(_quant_path(name))
-        for name in TCGA_QUANTIFICATION_OUTPUTS
-        if _quant_path(name).exists()
+        str(_quant_path(name)) for name in TCGA_QUANTIFICATION_OUTPUTS if _quant_path(name).exists()
     ]
 
     if not tcga_quantification_ready():
-        raise RuntimeError(
-            "TCGA ANKRD30A quantification did not produce all required matrices"
-        )
+        raise RuntimeError("TCGA ANKRD30A quantification did not produce all required matrices")
     status = "computed"
     return {"status": status, "n_bams": len(rows), "outputs": computed_outputs}
 
@@ -617,9 +570,7 @@ def _load_tcga_clinical_status() -> pd.DataFrame:
     clinical["sample15"] = clinical["SAMPLE_ID"].astype(str).str.slice(0, 15)
     out = clinical[["sample15", "er_status"]].drop_duplicates("sample15")
     if not out["er_status"].isin(["Positive", "Negative"]).any():
-        raise ValueError(
-            "TCGA cBioPortal clinical sample table has no usable ER status values"
-        )
+        raise ValueError("TCGA cBioPortal clinical sample table has no usable ER status values")
     return out
 
 
@@ -628,21 +579,15 @@ def _merge_clinical_status(metrics: pd.DataFrame) -> pd.DataFrame:
     clinical = _load_tcga_clinical_status()
     _require_columns(metrics, ["sample15"], "TCGA ANKRD30A metric table")
     clinical = clinical[["sample15", "er_status"]].drop_duplicates("sample15")
-    metrics = metrics.merge(
-        clinical, on="sample15", how="left", suffixes=("", "_clinical")
-    )
+    metrics = metrics.merge(clinical, on="sample15", how="left", suffixes=("", "_clinical"))
     if "er_status_clinical" in metrics:
         if "er_status" in metrics:
-            metrics["er_status"] = metrics["er_status"].fillna(
-                metrics["er_status_clinical"]
-            )
+            metrics["er_status"] = metrics["er_status"].fillna(metrics["er_status_clinical"])
         else:
             metrics["er_status"] = metrics["er_status_clinical"]
         metrics = metrics.drop(columns="er_status_clinical")
     if not metrics["er_status"].isin(["Positive", "Negative"]).any():
-        raise ValueError(
-            "TCGA ANKRD30A metric table could not be annotated with ER status"
-        )
+        raise ValueError("TCGA ANKRD30A metric table could not be annotated with ER status")
     return metrics
 
 
@@ -678,9 +623,7 @@ def _merge_quantification_matrix(
         rename["gene_region_total"] = f"ankrd30a_gene_region_{suffix}_total"
     for feature in required_features:
         rename[feature] = f"ankrd30a_{feature_column_name(feature)}_{suffix}"
-    merged = metrics.merge(
-        table.rename(columns=rename), on="sample_matrix_key", how="left"
-    )
+    merged = metrics.merge(table.rename(columns=rename), on="sample_matrix_key", how="left")
     required_merged = [rename[col] for col in [*required_totals, *required_features]]
     missing_values = merged[required_merged].isna().any(axis=1)
     if missing_values.any():
@@ -696,12 +639,8 @@ def _add_event_fraction_metrics(metrics: pd.DataFrame) -> pd.DataFrame:
     out = metrics.copy()
 
     def fraction(numerator_cols: list[str], other_cols: list[str]) -> pd.Series:
-        _require_columns(
-            out, [*numerator_cols, *other_cols], "TCGA ANKRD30A metric table"
-        )
-        numerator = (
-            out[numerator_cols].apply(pd.to_numeric, errors="coerce").sum(axis=1)
-        )
+        _require_columns(out, [*numerator_cols, *other_cols], "TCGA ANKRD30A metric table")
+        numerator = out[numerator_cols].apply(pd.to_numeric, errors="coerce").sum(axis=1)
         other = out[other_cols].apply(pd.to_numeric, errors="coerce").sum(axis=1)
         return numerator / (numerator + other).replace(0, np.nan)
 
@@ -867,9 +806,7 @@ def _primary_tumor_metrics(metrics: pd.DataFrame) -> pd.DataFrame:
     if metrics.empty:
         raise ValueError("TCGA ANKRD30A metric table has no Primary Tumor rows")
     metrics["sample15"] = metrics["sample15"].astype(str)
-    metrics["er_status_clean"] = (
-        metrics["er_status"].fillna("Unknown").astype(str).str.lower()
-    )
+    metrics["er_status_clean"] = metrics["er_status"].fillna("Unknown").astype(str).str.lower()
     sort_cols = [
         col
         for col in [
@@ -911,18 +848,14 @@ def prepare_tcga_regulator_expression(  # noqa: C901
         "regulator_expression",
     ]
     if regulators is None:
-        raise ValueError(
-            "TCGA regulator expression requires a non-empty regulator list"
-        )
+        raise ValueError("TCGA regulator expression requires a non-empty regulator list")
     requested: dict[str, str] = {}
     for regulator in regulators:
         key = normalize_gene_symbol(regulator)
         if key and key not in requested:
             requested[key] = str(regulator)
     if not requested:
-        raise ValueError(
-            "TCGA regulator expression requires a non-empty regulator list"
-        )
+        raise ValueError("TCGA regulator expression requires a non-empty regulator list")
     if not TCGA_CBIO_RSEM_TXT.exists():
         raise FileNotFoundError(
             f"Missing TCGA cBioPortal RSEM expression matrix: {project_path(TCGA_CBIO_RSEM_TXT)}"
@@ -950,9 +883,7 @@ def prepare_tcga_regulator_expression(  # noqa: C901
             raw_values = parts[2 : 2 + len(sample_cols)]
             if len(raw_values) < len(sample_cols):
                 raw_values.extend([""] * (len(sample_cols) - len(raw_values)))
-            values = pd.to_numeric(
-                pd.Series(raw_values, index=sample_cols), errors="coerce"
-            )
+            values = pd.to_numeric(pd.Series(raw_values, index=sample_cols), errors="coerce")
             frame = pd.DataFrame(
                 {
                     "sample15": values.index.astype(str).str.slice(0, 15),
@@ -969,9 +900,7 @@ def prepare_tcga_regulator_expression(  # noqa: C901
             + ", ".join(requested.values())
         )
     expr = pd.concat(frames, ignore_index=True)
-    missing_regulators = sorted(
-        set(requested.values()) - set(expr["regulator"].astype(str))
-    )
+    missing_regulators = sorted(set(requested.values()) - set(expr["regulator"].astype(str)))
     if missing_regulators:
         raise ValueError(
             "TCGA cBioPortal RSEM expression matrix is missing requested regulators: "
@@ -999,9 +928,7 @@ def compute_regulator_correlations(  # noqa: C901
     if metrics.empty:
         raise ValueError("TCGA ANKRD30A metric table is empty")
     if not regulators:
-        raise ValueError(
-            "No prioritized regulators were selected for TCGA correlations"
-        )
+        raise ValueError("No prioritized regulators were selected for TCGA correlations")
     if expr.empty:
         raise ValueError("TCGA regulator-expression table is empty")
     _require_columns(
@@ -1016,9 +943,7 @@ def compute_regulator_correlations(  # noqa: C901
     )
     expr = expr[expr["regulator"].astype(str).isin(regulators)].copy()
     if expr.empty:
-        raise ValueError(
-            "TCGA regulator-expression table has no prioritized regulators"
-        )
+        raise ValueError("TCGA regulator-expression table has no prioritized regulators")
     er = metrics[metrics["er_status_clean"].eq("positive")].copy()
     if er.empty:
         raise ValueError("TCGA ANKRD30A metric table has no ER-positive primary tumors")
@@ -1031,9 +956,7 @@ def compute_regulator_correlations(  # noqa: C901
         merged = er.merge(g, on="sample15", how="inner")
         for metric in target_cols:
             sub = (
-                merged[["regulator_expression", metric]]
-                .replace([np.inf, -np.inf], np.nan)
-                .dropna()
+                merged[["regulator_expression", metric]].replace([np.inf, -np.inf], np.nan).dropna()
             )
             if (
                 sub.shape[0] < CORRELATION_MIN_SAMPLES
@@ -1066,6 +989,4 @@ def compute_regulator_correlations(  # noqa: C901
     out["pvalue_adj"] = bh_fdr(out["pvalue"].to_numpy())
     order = {regulator: i for i, regulator in enumerate(regulators)}
     out["_regulator_order"] = out["regulator"].map(order).fillna(999)
-    return out.sort_values(["pvalue_adj", "_regulator_order"]).drop(
-        columns="_regulator_order"
-    )
+    return out.sort_values(["pvalue_adj", "_regulator_order"]).drop(columns="_regulator_order")

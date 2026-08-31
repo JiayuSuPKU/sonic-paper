@@ -81,17 +81,13 @@ def extract_fl_counts(*, force: bool = False) -> None:
         members = [name for name in archive.namelist() if name.endswith(".tsv")]
         if not members:
             raise ValueError(f"No TSV file found in {PACBIO_FL_COUNTS_ZIP}")
-        with archive.open(members[0]) as source, PACBIO_FL_COUNTS_TSV.open(
-            "wb"
-        ) as target:
+        with archive.open(members[0]) as source, PACBIO_FL_COUNTS_TSV.open("wb") as target:
             shutil.copyfileobj(source, target)
     print(f"extracted: {PACBIO_FL_COUNTS_TSV}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Download BRCA PacBio long-read transcript files."
-    )
+    parser = argparse.ArgumentParser(description="Download BRCA PacBio long-read transcript files.")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 

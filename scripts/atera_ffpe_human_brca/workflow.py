@@ -81,9 +81,7 @@ def run_workflow(
 
     metric_parts = [df for df in [sv_metrics, du_metrics] if not df.empty]
     metrics = (
-        pd.concat(metric_parts, ignore_index=True, sort=False)
-        if metric_parts
-        else pd.DataFrame()
+        pd.concat(metric_parts, ignore_index=True, sort=False) if metric_parts else pd.DataFrame()
     )
     if not metrics.empty:
         # Combined runtime table lets the workflow summary stay compact.
@@ -112,18 +110,12 @@ def run_workflow(
         "ankrd30a_visualization_cache_status": ankrd30a_status.get(
             "visualization_cache_status", {}
         ),
-        "tcga_quantification_run": ankrd30a_status.get("quantification_status", {}).get(
-            "status"
-        )
+        "tcga_quantification_run": ankrd30a_status.get("quantification_status", {}).get("status")
         in {"cached", "computed"},
         "tcga_quantification_status": ankrd30a_status.get("quantification_status", {}),
         "trps1_proseq_status": ankrd30a_status.get("trps1_proseq_status", {}),
-        "tcga_clinical_expression_download_checked": bool(
-            ankrd30a_status.get("download_status")
-        ),
-        "tcga_clinical_expression_download_status": ankrd30a_status.get(
-            "download_status", {}
-        ),
+        "tcga_clinical_expression_download_checked": bool(ankrd30a_status.get("download_status")),
+        "tcga_clinical_expression_download_status": ankrd30a_status.get("download_status", {}),
         "n_tcga_regulator_correlations": int(tcga_correlations.shape[0]),
         "tcga_regulators": tcga_regulators,
         "outputs": {
@@ -150,15 +142,9 @@ def parse_args() -> argparse.Namespace:
             "all-SVP probe mapping, top-20 PNGs, and ANKRD30A summaries."
         )
     )
-    parser.add_argument(
-        "--force", action="store_true", help="Recompute cached outputs."
-    )
-    parser.add_argument(
-        "--n-jobs", type=int, default=int(os.environ.get("SPLISOSM_N_JOBS", "8"))
-    )
-    parser.add_argument(
-        "--skip-top20", action="store_true", help="Skip top-20 SVP PNG rendering."
-    )
+    parser.add_argument("--force", action="store_true", help="Recompute cached outputs.")
+    parser.add_argument("--n-jobs", type=int, default=int(os.environ.get("SPLISOSM_N_JOBS", "8")))
+    parser.add_argument("--skip-top20", action="store_true", help="Skip top-20 SVP PNG rendering.")
     parser.add_argument(
         "--skip-ankrd30a",
         action="store_true",

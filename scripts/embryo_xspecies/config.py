@@ -16,8 +16,9 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+from scripts.paper_utils import PROJECT_ROOT, ensure_directories
+
 # --- repo-relative roots -----------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = PROJECT_ROOT / "data" / "embryo_xspecies"
 RESULT_DIR = PROJECT_ROOT / "results" / "embryo_xspecies"
 FIGURE_DIR = PROJECT_ROOT / "figures" / "embryo_xspecies"
@@ -113,14 +114,13 @@ def _species_config(
 
 def ensure_species_output_dirs(cfg: SimpleNamespace) -> None:
     """Create one species' raw, prepared, and cached-result directories."""
-    for d in (
+    ensure_directories(
         cfg.RAW_DIR,
         cfg.SDATA_DIR,
         cfg.RESULT_DIR,
         cfg.SV_RESULT_DIR,
         cfg.SPECTRA_RESULT_DIR,
-    ):
-        d.mkdir(parents=True, exist_ok=True)
+    )
 
 
 # --- mouse: Stereo-seq MOSTA -------------------------------------------------
@@ -272,7 +272,9 @@ CS_TO_DAY: dict[str, float] = {
     for cs, sections in HUMAN_ALL_SECTIONS.items()
 }
 GEO_SERIES = "GSE326326"
-GEO_BRIEF_URL = f"https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={GEO_SERIES}&targ=gsm&form=text&view=brief"
+GEO_BRIEF_URL = (
+    f"https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={GEO_SERIES}&targ=gsm&form=text&view=brief"
+)
 
 HUMAN = _species_config(
     panel_key="human",
@@ -297,12 +299,11 @@ SPECIES_CONFIGS = {"mouse": MOUSE, "human": HUMAN}
 
 def ensure_output_dirs() -> None:
     """Create workflow-owned embryo_xspecies result directories."""
-    for d in (
+    ensure_directories(
         RESULT_DIR,
         COMPARISON_RESULT_DIR,
         MOUSE_ONLY_RESULT_DIR,
         HUMAN_ONLY_RESULT_DIR,
-    ):
-        d.mkdir(parents=True, exist_ok=True)
+    )
     for cfg in SPECIES_CONFIGS.values():
         ensure_species_output_dirs(cfg)

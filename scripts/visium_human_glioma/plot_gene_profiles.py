@@ -19,6 +19,17 @@ import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy import sparse
 
+from scripts.paper_utils import (
+    FIGURE_DPI,
+    FONT_CONFIG,
+    format_pvalue,
+    manuscript_size,
+    parse_gene_list,
+)
+from scripts.paper_utils import (
+    configure_paper_matplotlib as _configure_paper_matplotlib,
+)
+
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     __package__ = "scripts.visium_human_glioma"
@@ -36,12 +47,10 @@ from .utils import (  # noqa: E402
     project_relative,
 )
 
-FIGURE_WIDTH_MM = 185
-FIGURE_DPI = 300
-FONT_MIN = 5.0
-FONT_TICK = 5.0
-FONT_LABEL = 6.0
-FONT_TITLE = 6.5
+FONT_MIN = FONT_CONFIG["text"]
+FONT_TICK = FONT_CONFIG["tick"]
+FONT_LABEL = FONT_CONFIG["label"]
+FONT_TITLE = FONT_CONFIG["title"]
 EPS = 1e-12
 VISIUM_SPOT_DIAMETER_UM = 55.0
 SPATIAL_SPOT_RADIUS_SCALE = 1.45
@@ -50,59 +59,18 @@ REPRESENTATIVE_SAMPLES_PER_GROUP = 2
 
 def configure_matplotlib() -> None:
     """Apply the compact manuscript-scale Matplotlib style."""
-    mpl.rcParams.update(
-        {
-            "pdf.fonttype": 42,
+    _configure_paper_matplotlib(
+        fonts=FONT_CONFIG,
+        overrides={
             "pdf.compression": 9,
-            "ps.fonttype": 42,
-            "font.family": ["Arial", "DejaVu Sans"],
-            "font.size": FONT_LABEL,
-            "axes.titlesize": FONT_TITLE,
-            "axes.labelsize": FONT_LABEL,
-            "xtick.labelsize": FONT_TICK,
-            "ytick.labelsize": FONT_TICK,
-            "legend.fontsize": FONT_TICK,
-            "axes.linewidth": 0.6,
-            "xtick.major.width": 0.5,
-            "ytick.major.width": 0.5,
-            "xtick.major.size": 2.5,
-            "ytick.major.size": 2.5,
             "figure.constrained_layout.use": False,
-            "savefig.dpi": FIGURE_DPI,
-        }
+        },
     )
-
-
-def parse_gene_list(values: Sequence[str] | None) -> list[str]:
-    """Parse space/comma/semicolon-separated gene names while preserving order."""
-    out: list[str] = []
-    for value in values or []:
-        text = str(value)
-        for sep in ",;|":
-            text = text.replace(sep, " ")
-        for gene in text.split():
-            if gene and gene not in out:
-                out.append(gene)
-    return out
 
 
 def short_sample_id(sample_id: str) -> str:
     """Return the compact sample label used in figure panels."""
     return sample_id.replace("IDHm_", "").replace("GBM_", "")
-
-
-def format_pvalue(p: float) -> str:
-    """Format a p-value for compact gene-panel annotations."""
-    p = float(p)
-    if not np.isfinite(p):
-        return "NA"
-    if p <= 0:
-        return "<1e-300"
-    if p < 1e-3:
-        exp = int(math.floor(math.log10(p)))
-        mant = p / 10**exp
-        return f"{mant:.1f}e{exp}"
-    return f"{p:.3f}".rstrip("0").rstrip(".")
 
 
 def load_spectra_cache(path: Path = SPECTRA_FILE) -> dict[str, Any]:
@@ -283,25 +251,13 @@ class GliomaGeneProfilePlotter:
         selected_genes = parse_gene_list(genes)
         if not selected_genes:
             raise ValueError("No genes selected.")
-        self.spectra_data = (
-            load_spectra_cache() if spectra_data is None else spectra_data
-        )
-        tests = (
-            real_tests.copy()
-            if real_tests is not None
-            else pd.read_csv(REAL_TESTS_FILE)
-        )
-        missing = [
-            gene
-            for gene in selected_genes
-            if gene not in set(self.spectra_data["genes"])
-        ]
+        self.spectra_data = load_spectra_cache() if spectra_data is None else spectra_data
+        tests = real_tests.copy() if real_tests is not None else pd.read_csv(REAL_TESTS_FILE)
+        missing = [gene for gene in selected_genes if gene not in set(self.spectra_data["genes"])]
         if missing:
             raise KeyError(f"Genes missing from cached glioma spectra: {missing}")
         missing_tests = [
-            gene
-            for gene in selected_genes
-            if gene not in set(tests["Feature"].astype(str))
+            gene for gene in selected_genes if gene not in set(tests["Feature"].astype(str))
         ]
         if missing_tests:
             raise KeyError(f"Genes missing from cached glioma tests: {missing_tests}")
@@ -324,27 +280,17 @@ class GliomaGeneProfilePlotter:
         """Choose median-like expression samples per IDH-status group."""
         out: list[str] = []
         for group in GROUP_ORDER:
-            ids = (
-                self.meta.loc[self.meta["group"] == group, "sample_id"]
-                .astype(str)
-                .tolist()
-            )
+            ids = self.meta.loc[self.meta["group"] == group, "sample_id"].astype(str).tolist()
             if not ids:
                 raise KeyError(f"No samples found for group {group}")
-            means = np.asarray(
-                [np.nanmean(gene_values(self.samples[sid], gene)) for sid in ids]
-            )
+            means = np.asarray([np.nanmean(gene_values(self.samples[sid], gene)) for sid in ids])
             positive = means[means > 0]
-            target = (
-                float(np.median(positive)) if positive.size else float(np.median(means))
-            )
+            target = float(np.median(positive)) if positive.size else float(np.median(means))
             order = np.lexsort((np.asarray(ids, dtype=object), np.abs(means - target)))
             out.extend(ids[i] for i in order[:n_per_group])
         return out
 
-    def validate_sample_ids(
-        self, sample_ids: Sequence[str] | None, gene: str
-    ) -> list[str]:
+    def validate_sample_ids(self, sample_ids: Sequence[str] | None, gene: str) -> list[str]:
         """Return caller-selected sample IDs or per-group representatives."""
         out = list(sample_ids) if sample_ids else self.representative_sample_ids(gene)
         missing = [sid for sid in out if sid not in self.samples]
@@ -385,9 +331,7 @@ class GliomaGeneProfilePlotter:
         """Plot raw spectra and the L1-normalized group-mean log2 fold change."""
         gi = self.spectra_data["genes"].index(gene)
         spectra = np.asarray(self.spectra_data["spectra"], dtype=float)
-        x, xlabel = _freq_axis(
-            np.asarray(self.spectra_data["freq_edges"], dtype=float), spectra
-        )
+        x, xlabel = _freq_axis(np.asarray(self.spectra_data["freq_edges"], dtype=float), spectra)
         id_to_group = self.meta.set_index("sample_id")["group"].astype(str).to_dict()
         groups = np.asarray(
             [id_to_group[sid] for sid in self.spectra_data["sample_ids"]], dtype=object
@@ -434,8 +378,7 @@ class GliomaGeneProfilePlotter:
         }
         lower_group, upper_group = GROUP_ORDER
         log2fc = np.log2(
-            np.maximum(l1_means[upper_group], EPS)
-            / np.maximum(l1_means[lower_group], EPS)
+            np.maximum(l1_means[upper_group], EPS) / np.maximum(l1_means[lower_group], EPS)
         )
         l1_ax.axhline(0, color="0.25", lw=0.55)
         l1_ax.fill_between(
@@ -533,9 +476,7 @@ def draw_gene_profile_panel(
     last_sc = None
     for j, sid in enumerate(selected):
         ax = fig.add_subplot(map_gs[0, j])
-        last_sc = plotter.plot_spatial(
-            ax, gene, sid, vmax=vmax, view_span_um=view_span_um
-        )
+        last_sc = plotter.plot_spatial(ax, gene, sid, vmax=vmax, view_span_um=view_span_um)
     cax = fig.add_subplot(map_gs[0, len(selected)])
     cbar = fig.colorbar(last_sc, cax=cax)
     cbar.ax.tick_params(labelsize=FONT_MIN, width=0.5, length=1.8, pad=1.2)
@@ -564,7 +505,7 @@ def draw_gene_profile_panel(
     for spine in title_ax.spines.values():
         spine.set_visible(False)
     title_ax.set_title(
-        rf"$\it{{{gene}}}$: {label}" + f"\n{plotter.gene_pvalue_label(gene)}",
+        rf"$\mathit{{{gene}}}$: {label}" + f"\n{plotter.gene_pvalue_label(gene)}",
         fontsize=FONT_TITLE,
         fontstyle="normal",
         pad=13,
@@ -583,7 +524,7 @@ def make_gene_profile_page(
     n_cols = 2
     n_rows = int(math.ceil(len(genes) / n_cols))
     height_mm = max(100.0, 68.0 * n_rows + 18.0)
-    fig = plt.figure(figsize=(FIGURE_WIDTH_MM / 25.4, height_mm / 25.4))
+    fig = plt.figure(figsize=manuscript_size(height_mm))
     outer = gridspec.GridSpec(
         n_rows,
         n_cols,

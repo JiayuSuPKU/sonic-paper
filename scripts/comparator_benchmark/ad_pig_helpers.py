@@ -81,9 +81,7 @@ def ad_pig_spectral_replicate_distance_cache_ready(path: Path) -> bool:
     return (
         set(long["panel"].astype(str)) == {"ad_pig"}
         and {"WT", "AppNL-G-F"}.issubset(set(long["condition"].astype(str)))
-        and {"within_animal", "cross_animal"}.issubset(
-            set(long["relation"].astype(str))
-        )
+        and {"within_animal", "cross_animal"}.issubset(set(long["relation"].astype(str)))
         and {"DC", "radial"}.issubset(set(long["bin_type"].astype(str)))
         and np.isfinite(long["relative_distance"].to_numpy(float)).all()
     )

@@ -81,9 +81,7 @@ logger = logging.getLogger("embryo_xspecies.download")
 # title like "CS12-13, Embryo1, Section1"
 _TITLE_RE = re.compile(r"^(CS[\dA-Za-z-]+),\s*Embryo(\d+),\s*Section(\d+)\s*$")
 # the per-section processed h5ad supplementary line
-_H5AD_RE = re.compile(
-    r"!Sample_supplementary_file_\d+\s*=\s*(\S*_HESTA\.h5ad)\s*$", re.M
-)
+_H5AD_RE = re.compile(r"!Sample_supplementary_file_\d+\s*=\s*(\S*_HESTA\.h5ad)\s*$", re.M)
 
 
 def _metadata_path(section_id: str) -> str:
@@ -148,9 +146,7 @@ def _discover_catalog(*, timeout: int = 60, max_attempts: int = 4) -> list[_Sect
             continue
         tm = _TITLE_RE.match(mt.group(1).strip())
         if not tm:
-            logger.warning(
-                "[%s] unparsable title %r — skipping.", gsm, mt.group(1).strip()
-            )
+            logger.warning("[%s] unparsable title %r — skipping.", gsm, mt.group(1).strip())
             continue
         cs, emb, sec = tm.group(1), int(tm.group(2)), int(tm.group(3))
         url = _https(mh.group(1))
@@ -235,38 +231,25 @@ def _select(
     representative: bool,
 ) -> list[_Section]:
     """Pick the configured replicated panel or its requested subset."""
-    want = set(
-        _configured_section_ids(representative=False if patterns else representative)
-    )
+    want = set(_configured_section_ids(representative=False if patterns else representative))
     pool = sorted(
         [s for s in catalog if s.section_id in want],
         key=lambda s: (s.day, s.embryo, s.section),
     )
     missing = sorted(want - {s.section_id for s in pool})
     if missing:
-        raise RuntimeError(
-            f"Configured HESTA section ids missing from GEO catalog: {missing}"
-        )
+        raise RuntimeError(f"Configured HESTA section ids missing from GEO catalog: {missing}")
     if patterns:
         return [s for s in pool if matches_section(s.section_id, patterns)]
     return pool
 
 
-def _fetch_one(
-    s: _Section, *, force: bool, max_attempts: int
-) -> tuple[_Section, int, str]:
+def _fetch_one(s: _Section, *, force: bool, max_attempts: int) -> tuple[_Section, int, str]:
     """Fetch one section's h5ad. Returns ``(section, new_bytes, status)``."""
     dest = C.RAW_DIR / f"{s.section_id}_HESTA.h5ad"
     remote = remote_size(s.url)
-    if (
-        dest.exists()
-        and not force
-        and remote is not None
-        and dest.stat().st_size == remote
-    ):
-        logger.info(
-            "[%s] already present (%.0f MB) — skip.", s.section_id, remote / 1e6
-        )
+    if dest.exists() and not force and remote is not None and dest.stat().st_size == remote:
+        logger.info("[%s] already present (%.0f MB) — skip.", s.section_id, remote / 1e6)
         return s, 0, "present"
     if dest.exists() and not force and remote is None:
         logger.warning(
@@ -297,9 +280,7 @@ def _fetch_one(
     return s, n, "downloaded"
 
 
-def _inspect_one(
-    s: _Section, *, force: bool
-) -> tuple[_Section, int | None, int | None, str]:
+def _inspect_one(s: _Section, *, force: bool) -> tuple[_Section, int | None, int | None, str]:
     """Return remote size, remaining bytes, and planned action without writing."""
     dest = C.RAW_DIR / f"{s.section_id}_HESTA.h5ad"
     part = dest.with_name(dest.name + ".part")
@@ -357,9 +338,7 @@ def run(
     if not catalog:
         logger.error("Empty catalog — could not discover sections from GEO.")
         return 1
-    logger.info(
-        "Discovered %d HESTA sections across %d stages.", len(catalog), len(C.CS_TO_DAY)
-    )
+    logger.info("Discovered %d HESTA sections across %d stages.", len(catalog), len(C.CS_TO_DAY))
     chosen = _select(
         catalog,
         patterns=sections,
@@ -370,9 +349,7 @@ def run(
         return 1
     workers = max(1, int(workers))
     max_attempts = max(1, int(max_attempts))
-    logger.info(
-        "Selected %d section(s) → %s  (workers=%d)", len(chosen), C.RAW_DIR, workers
-    )
+    logger.info("Selected %d section(s) → %s  (workers=%d)", len(chosen), C.RAW_DIR, workers)
 
     if dry_run:
         return _dry_run(chosen, force=force, workers=workers)
@@ -380,14 +357,11 @@ def run(
     ensure_species_output_dirs(C)
     t0 = time.time()
     if workers == 1:
-        results = [
-            _fetch_one(s, force=force, max_attempts=max_attempts) for s in chosen
-        ]
+        results = [_fetch_one(s, force=force, max_attempts=max_attempts) for s in chosen]
     else:
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futs = {
-                ex.submit(_fetch_one, s, force=force, max_attempts=max_attempts): s
-                for s in chosen
+                ex.submit(_fetch_one, s, force=force, max_attempts=max_attempts): s for s in chosen
             }
             results = [fut.result() for fut in as_completed(futs)]
 
@@ -460,23 +434,15 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PATTERN",
         help="Download section IDs matching any exact name, substring, or glob.",
     )
-    p.add_argument(
-        "--representative", action="store_true", help="Download one section per stage."
-    )
-    p.add_argument(
-        "--force", action="store_true", help="Re-download even if present + size-sane."
-    )
+    p.add_argument("--representative", action="store_true", help="Download one section per stage.")
+    p.add_argument("--force", action="store_true", help="Re-download even if present + size-sane.")
     p.add_argument(
         "--dry-run",
         action="store_true",
         help="Report planned files and transfer size without writing anything.",
     )
-    p.add_argument(
-        "--workers", type=int, default=6, help="Parallel download workers (default 6)."
-    )
-    p.add_argument(
-        "--max-attempts", type=int, default=8, help="Per-section retry budget."
-    )
+    p.add_argument("--workers", type=int, default=6, help="Parallel download workers (default 6).")
+    p.add_argument("--max-attempts", type=int, default=8, help="Per-section retry budget.")
     args = p.parse_args(argv)
     return run(
         sections=args.sections,

@@ -5,8 +5,14 @@ from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 
-FIGURE_WIDTH_MM = 185.0
-FONT_CONFIG = {"title": 7.0, "label": 6.5, "tick": 5.5, "text": 5.0, "legend": 5.5}
+from scripts.paper_utils import (
+    COMPUTER_MODERN_MATHTEXT,
+    FIGURE_WIDTH_MM,
+    FONT_CONFIG,
+    configure_paper_matplotlib,
+)
+
+__all__ = ["COMPUTER_MODERN_MATHTEXT", "FIGURE_WIDTH_MM", "FONT_CONFIG"]
 
 
 def cache_is_reusable(
@@ -78,9 +84,7 @@ def parse_newick(  # noqa: C901
                     position += 1
                     continue
                 if text[position] != ")":
-                    raise ValueError(
-                        f"Malformed Newick near position {position}: {path}"
-                    )
+                    raise ValueError(f"Malformed Newick near position {position}: {path}")
                 position += 1
                 while position < len(text) and text[position] not in ":,);":
                     position += 1
@@ -107,34 +111,19 @@ def parse_newick(  # noqa: C901
 
 def configure_matplotlib() -> None:
     """Apply the shared compact manuscript style."""
-    import matplotlib as mpl
-
-    mpl.rcParams.update(
-        {
-            "font.family": "Arial",
+    configure_paper_matplotlib(
+        font_family="Arial",
+        savefig_dpi=None,
+        hide_spines=True,
+        overrides={
             "font.sans-serif": ["Arial"],
             "font.serif": ["Arial"],
             "font.monospace": ["Arial"],
             "font.cursive": ["Arial"],
             "font.fantasy": ["Arial"],
-            "mathtext.fontset": "cm",
-            "mathtext.default": "it",
-            "mathtext.fallback": "cm",
-            "font.size": 6.0,
-            "axes.titlesize": FONT_CONFIG["title"],
-            "axes.labelsize": FONT_CONFIG["label"],
-            "xtick.labelsize": FONT_CONFIG["tick"],
-            "ytick.labelsize": FONT_CONFIG["tick"],
-            "legend.fontsize": FONT_CONFIG["legend"],
-            "legend.title_fontsize": FONT_CONFIG["text"],
-            "pdf.fonttype": 42,
-            "axes.spines.top": False,
-            "axes.spines.right": False,
             "axes.linewidth": 0.5,
             "grid.linewidth": 0.5,
             "lines.linewidth": 0.75,
             "patch.linewidth": 0.5,
-            "xtick.major.width": 0.5,
-            "ytick.major.width": 0.5,
-        }
+        },
     )

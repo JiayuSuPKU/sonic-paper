@@ -139,14 +139,10 @@ def _safe_tar_members(tf: tarfile.TarFile, dest_dir: Path) -> list[tarfile.TarIn
     safe = []
     for member in tf.getmembers():
         if not (member.isfile() or member.isdir()):
-            raise tarfile.TarError(
-                f"Refusing to extract link/special member: {member.name}"
-            )
+            raise tarfile.TarError(f"Refusing to extract link/special member: {member.name}")
         target = (dest_root / member.name).resolve()
         if dest_root not in (target, *target.parents):
-            raise tarfile.TarError(
-                f"Refusing to extract path outside target dir: {member.name}"
-            )
+            raise tarfile.TarError(f"Refusing to extract path outside target dir: {member.name}")
         safe.append(member)
     return safe
 
@@ -199,9 +195,7 @@ def _extraction_ready(extracted_root: Path) -> bool:
     if not (extracted_root / EXTRACTION_COMPLETE_MARKER).exists():
         return False
     matches = _find_layout_files(extracted_root)
-    return all(
-        matches[key] is not None for key in ("matrix", "positions", "scalefactors")
-    )
+    return all(matches[key] is not None for key in ("matrix", "positions", "scalefactors"))
 
 
 def _normalize_to_spaceranger_layout(extracted_root: Path) -> Path | None:
@@ -222,11 +216,7 @@ def _normalize_to_spaceranger_layout(extracted_root: Path) -> Path | None:
         return outs
 
     matches = _find_layout_files(extracted_root)
-    if (
-        matches["matrix"] is None
-        or matches["positions"] is None
-        or matches["scalefactors"] is None
-    ):
+    if matches["matrix"] is None or matches["positions"] is None or matches["scalefactors"] is None:
         logger.error(
             "could not locate required files under %s (found matrix=%s positions=%s scalefactors=%s)",
             extracted_root,
@@ -296,9 +286,7 @@ def _set_physical_coordinates(adata, sample: str):
     )
 
     if "spatial" in adata.obsm:
-        adata.obsm["spatial_fullres_px"] = np.asarray(
-            adata.obsm["spatial"], dtype=float
-        ).copy()
+        adata.obsm["spatial_fullres_px"] = np.asarray(adata.obsm["spatial"], dtype=float).copy()
     adata = scale_visium_spatial_to_spot_diameter_um(adata, VISIUM_SPOT_DIAMETER_UM)
 
     spatial_uns = adata.uns.get("spatial")
@@ -366,9 +354,7 @@ def _convert_to_h5ad(spaceranger_dir: Path, out_path: Path, sample: str) -> bool
         # local import so --help doesn't need it
         from sonic.utils import load_visium_sample
     except ImportError as e:
-        logger.error(
-            "Cannot import sonic: %s. Install the package in dev mode first.", e
-        )
+        logger.error("Cannot import sonic: %s. Install the package in dev mode first.", e)
         return False
 
     # The Greenwald tarballs need a one-time reshape into the Space Ranger layout.
@@ -405,9 +391,7 @@ def process_sample(sample: str, data_root: Path) -> tuple[str, bool]:
 
     # 1. Download.
     if _tarball_is_valid(raw, MIN_TARBALL_BYTES):
-        logger.info(
-            "[%s] raw tarball already present (%s)", sample, _human(raw.stat().st_size)
-        )
+        logger.info("[%s] raw tarball already present (%s)", sample, _human(raw.stat().st_size))
     else:
         if raw.exists():
             raw.unlink()

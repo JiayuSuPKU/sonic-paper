@@ -85,9 +85,7 @@ def _domains_of_table(table: Any) -> list[str]:
 def _is_mosta_index(adata: Any, *, sample: int = 200) -> bool:
     """Return whether ``adata.obs.index`` looks like the MOSTA bin50 lattice."""
     n = min(int(sample), int(adata.n_obs))
-    return n > 0 and all(
-        _MOSTA_INDEX_RE.match(str(s)) is not None for s in adata.obs.index[:n]
-    )
+    return n > 0 and all(_MOSTA_INDEX_RE.match(str(s)) is not None for s in adata.obs.index[:n])
 
 
 def _coords_from_mosta_index(adata: Any) -> np.ndarray:
@@ -128,9 +126,7 @@ def _subset_to_genes(adata: Any, genes: list[str]) -> Any:
     idx_by_name = {g: i for i, g in enumerate(names)}
     missing = [g for g in genes if g not in idx_by_name]
     if missing:
-        raise KeyError(
-            f"prepared genes missing from section after raw scan: {missing[:10]}"
-        )
+        raise KeyError(f"prepared genes missing from section after raw scan: {missing[:10]}")
     out = adata[:, np.array([idx_by_name[g] for g in genes], dtype=int)].copy()
     out.X = _as_csr(out.X)
     return out
@@ -235,19 +231,13 @@ def _binned_adata_to_spatialdata(
         )
         for r, c in zip(rows, cols, strict=True)
     ]
-    shapes = ShapesModel.parse(
-        gpd.GeoDataFrame({"geometry": polys}, index=np.arange(len(polys)))
-    )
+    shapes = ShapesModel.parse(gpd.GeoDataFrame({"geometry": polys}, index=np.arange(len(polys))))
     obs_keep = [
-        c
-        for c in ("array_row", "array_col", "annotation")
-        if c in adata_binned.obs.columns
+        c for c in ("array_row", "array_col", "annotation") if c in adata_binned.obs.columns
     ]
     # SpatialData table parsing rejects several upstream var metadata column
     # names, so only the gene index is carried into the prepared zarr.
-    var = pd.DataFrame(
-        index=pd.Index(adata_binned.var.index, name=adata_binned.var.index.name)
-    )
+    var = pd.DataFrame(index=pd.Index(adata_binned.var.index, name=adata_binned.var.index.name))
     table = ad.AnnData(
         X=sp.csc_matrix(adata_binned.X),
         obs=adata_binned.obs[obs_keep].copy(),
@@ -262,9 +252,7 @@ def _binned_adata_to_spatialdata(
     table.uns["coordinate_unit"] = "um"
     if "spatial" in adata_binned.obsm:
         table.obsm["spatial"] = np.asarray(adata_binned.obsm["spatial"], dtype=float)
-    return sd.SpatialData(
-        shapes={region_name: shapes}, tables={f"{region_name}_table": table}
-    )
+    return sd.SpatialData(shapes={region_name: shapes}, tables={f"{region_name}_table": table})
 
 
 def _read_configured_metadata(cfg: Any) -> pd.DataFrame:
@@ -276,13 +264,10 @@ def _read_configured_metadata(cfg: Any) -> pd.DataFrame:
     meta = pd.read_csv(cfg.META_CSV)
     configured_stages = list(cfg.KEPT_TIMEPOINTS)
     configured = {
-        section_id
-        for stage in configured_stages
-        for section_id in cfg.ALL_SECTIONS[stage]
+        section_id for stage in configured_stages for section_id in cfg.ALL_SECTIONS[stage]
     }
     meta = meta[
-        meta["timepoint"].isin(configured_stages)
-        & meta["section_id"].astype(str).isin(configured)
+        meta["timepoint"].isin(configured_stages) & meta["section_id"].astype(str).isin(configured)
     ].copy()
     if meta["section_id"].duplicated().any():
         raise ValueError(f"{cfg.META_CSV} contains duplicate configured sections.")
@@ -294,8 +279,7 @@ def _read_configured_metadata(cfg: Any) -> pd.DataFrame:
         raise RuntimeError("No configured sections are present in metadata.csv.")
     meta = _sort_by_stage(cfg, meta).copy()
     meta["h5ad_path_abs"] = [
-        p if (p := Path(str(v))).is_absolute() else C.PROJECT_ROOT / p
-        for v in meta["h5ad_path"]
+        p if (p := Path(str(v))).is_absolute() else C.PROJECT_ROOT / p for v in meta["h5ad_path"]
     ]
     missing = meta.loc[~meta["h5ad_path_abs"].map(Path.exists), "h5ad_path_abs"]
     if len(missing):
@@ -309,9 +293,7 @@ def _read_configured_metadata(cfg: Any) -> pd.DataFrame:
             utils.carnegie_stage("human", timepoint=str(t)) for t in meta["timepoint"]
         ]
     else:
-        meta["carnegie"] = [
-            utils.carnegie_stage("mouse", day=float(d)) for d in meta["day"]
-        ]
+        meta["carnegie"] = [utils.carnegie_stage("mouse", day=float(d)) for d in meta["day"]]
     return meta.reset_index(drop=True)
 
 
@@ -508,9 +490,7 @@ def _build_prepared_genes(
 
     common_genes = sorted(common or set())
     if not common_genes:
-        raise RuntimeError(
-            f"No genes are common to all configured {cfg.PANEL_KEY} sections."
-        )
+        raise RuntimeError(f"No genes are common to all configured {cfg.PANEL_KEY} sections.")
 
     total = np.zeros(len(common_genes), dtype=np.float64)
     detected = np.zeros(len(common_genes), dtype=np.int64)
@@ -564,9 +544,7 @@ def _prepare_mouse_adata(
     if _is_mosta_index(adata):
         adata.obsm["spatial"] = _coords_from_mosta_index(adata)
     if "spatial" not in adata.obsm:
-        raise ValueError(
-            "no obsm['spatial'] and obs.index is not a MOSTA lattice index"
-        )
+        raise ValueError("no obsm['spatial'] and obs.index is not a MOSTA lattice index")
 
     binned = _require_existing_bin_lattice(adata, annotation_col=annotation_col)
     logger.info(
@@ -844,11 +822,7 @@ def run_preprocessing(
         "genes": ("n_genes", "median"),
         "domains_med": ("n_domains", "median"),
     }
-    summ = (
-        geom.groupby("timepoint")
-        .agg(**agg)
-        .reindex(_stage_order(cfg, geom["timepoint"]))
-    )
+    summ = geom.groupby("timepoint").agg(**agg).reindex(_stage_order(cfg, geom["timepoint"]))
     print(summ.to_string(float_format="%.2f"))
     return 0
 
@@ -869,9 +843,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override the configured organ/domain .obs column.",
     )
-    p.add_argument(
-        "--force", action="store_true", help="Rebuild zarr stores even if present."
-    )
+    p.add_argument("--force", action="store_true", help="Rebuild zarr stores even if present.")
     p.add_argument(
         "--dry-run",
         action="store_true",

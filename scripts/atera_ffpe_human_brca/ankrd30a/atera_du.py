@@ -44,9 +44,7 @@ def _pb_tss_event_positions(*, force: bool = False) -> pd.DataFrame:
     if selected.empty:
         raise ValueError("No selected PB TSS positions found for ANKRD30A event")
 
-    selected["event_class"] = selected["transcript_id"].map(
-        PB_EVENT_CLASS_BY_TRANSCRIPT
-    )
+    selected["event_class"] = selected["transcript_id"].map(PB_EVENT_CLASS_BY_TRANSCRIPT)
     selected["event_order"] = selected["transcript_id"].map(
         {tx: i for i, tx in enumerate(PB_EVENT_CLASS_BY_TRANSCRIPT)}
     )
@@ -94,9 +92,7 @@ def _supported_pb_tss_values(*, force: bool = False) -> list[int]:
     return values
 
 
-def _min_abs_distance_to_tss(
-    start: float, end: float, tss_values: list[int]
-) -> tuple[int, int]:
+def _min_abs_distance_to_tss(start: float, end: float, tss_values: list[int]) -> tuple[int, int]:
     """Return the nearest PB-supported TSS and peak-to-TSS distance in bp."""
     best_distance = np.inf
     best_tss = tss_values[0]
@@ -123,9 +119,7 @@ def _summarize_pb_tss_remap_binding(*, force: bool = False) -> pd.DataFrame:
     ]
     tss_values = _supported_pb_tss_values(force=force)
     if not REMAP_NR_HG38_BED.exists():
-        raise FileNotFoundError(
-            f"Missing ReMap hg38 BED: {project_path(REMAP_NR_HG38_BED)}"
-        )
+        raise FileNotFoundError(f"Missing ReMap hg38 BED: {project_path(REMAP_NR_HG38_BED)}")
 
     # Aggregate per TF, rather than per peak
     # Scan a single compact interval spanning the PB TSS cluster plus flanks.
@@ -146,9 +140,7 @@ def _summarize_pb_tss_remap_binding(*, force: bool = False) -> pd.DataFrame:
             tf = remap_target_from_fields(fields)
             if not tf:
                 continue
-            distance, nearest_tss = _min_abs_distance_to_tss(
-                peak_start, peak_end, tss_values
-            )
+            distance, nearest_tss = _min_abs_distance_to_tss(peak_start, peak_end, tss_values)
             row = rows_by_tf.setdefault(
                 tf,
                 {
@@ -165,23 +157,19 @@ def _summarize_pb_tss_remap_binding(*, force: bool = False) -> pd.DataFrame:
             )
             row["remap_pb_tss_peak_count"] = int(row["remap_pb_tss_peak_count"]) + 1
             if distance <= PB_TSS_CORE_BP:
-                row["remap_pb_tss_core_peak_count"] = (
-                    int(row["remap_pb_tss_core_peak_count"]) + 1
-                )
+                row["remap_pb_tss_core_peak_count"] = int(row["remap_pb_tss_core_peak_count"]) + 1
             if distance < float(row["remap_min_abs_distance_to_pb_tss_bp"]):
                 # Store one representative closest peak for labels/audits.
                 row["remap_min_abs_distance_to_pb_tss_bp"] = int(distance)
                 row["remap_nearest_pb_tss_1based"] = int(nearest_tss)
-                row["remap_closest_peak"] = (
-                    f"{PB_TSS_CHROM}:{peak_start}-{peak_end}:{fields[3]}"
-                )
+                row["remap_closest_peak"] = f"{PB_TSS_CHROM}:{peak_start}-{peak_end}:{fields[3]}"
 
     out = pd.DataFrame(rows_by_tf.values(), columns=columns)
     if out.empty:
         raise ValueError("ReMap hg38 BED produced no TF peaks near ANKRD30A PB TSSs")
-    out["remap_min_abs_distance_to_pb_tss_bp"] = out[
-        "remap_min_abs_distance_to_pb_tss_bp"
-    ].replace(np.inf, np.nan)
+    out["remap_min_abs_distance_to_pb_tss_bp"] = out["remap_min_abs_distance_to_pb_tss_bp"].replace(
+        np.inf, np.nan
+    )
     out = out.sort_values(["remap_min_abs_distance_to_pb_tss_bp", "tf"])
     return out
 
@@ -210,9 +198,9 @@ def ankrd30a_regulator_priority_table(
     work = du[du["gene"].astype(str).eq(TARGET_GENE)].copy()
     if work.empty:
         raise ValueError(f"Atera DU result table has no {TARGET_GENE} rows")
-    work = work.sort_values(
-        ["pvalue_adj", "statistic"], ascending=[True, False]
-    ).reset_index(drop=True)
+    work = work.sort_values(["pvalue_adj", "statistic"], ascending=[True, False]).reset_index(
+        drop=True
+    )
     work["ankrd30a_du_rank"] = np.arange(1, work.shape[0] + 1)
     work["regulator"] = work["covariate"].astype(str)
     work["regulator_key"] = work["regulator"].map(normalize_gene_symbol)
@@ -229,9 +217,7 @@ def ankrd30a_regulator_priority_table(
     # Binding evidence is deliberately not part of the primary sort key; it is
     # supporting evidence for the PB TSS event after the DU association.
     remap = _summarize_pb_tss_remap_binding(force=force)
-    remap = remap.rename(columns={"tf_key": "regulator_key"}).drop(
-        columns=["tf"], errors="ignore"
-    )
+    remap = remap.rename(columns={"tf_key": "regulator_key"}).drop(columns=["tf"], errors="ignore")
     work = work.merge(remap, on="regulator_key", how="left")
     for col in ["remap_pb_tss_peak_count", "remap_pb_tss_core_peak_count"]:
         values = work[col] if col in work else pd.Series(0, index=work.index)
@@ -239,9 +225,9 @@ def ankrd30a_regulator_priority_table(
     work["has_pb_tss_remap_peak"] = work["remap_pb_tss_peak_count"].gt(0)
     work["has_pb_tss_core_remap_peak"] = work["remap_pb_tss_core_peak_count"].gt(0)
 
-    work["binding_support_score"] = work["has_pb_tss_core_remap_peak"].astype(
-        int
-    ) * 2 + work["has_pb_tss_remap_peak"].astype(int)
+    work["binding_support_score"] = work["has_pb_tss_core_remap_peak"].astype(int) * 2 + work[
+        "has_pb_tss_remap_peak"
+    ].astype(int)
     # Final ordering remains DU-first; binding score only breaks ties/supports labels.
     work = work.sort_values(
         ["ankrd30a_du_rank", "binding_support_score", "regulator"],
@@ -250,9 +236,7 @@ def ankrd30a_regulator_priority_table(
     return work
 
 
-def _append_unique_regulators(
-    selected: list[str], regulators: Iterable[str]
-) -> list[str]:
+def _append_unique_regulators(selected: list[str], regulators: Iterable[str]) -> list[str]:
     """Append regulator symbols while preserving the first observed order."""
     seen = {normalize_gene_symbol(regulator) for regulator in selected}
     for regulator in regulators:
@@ -264,9 +248,7 @@ def _append_unique_regulators(
     return selected
 
 
-def select_ankrd30a_focus_regulators(
-    priority: pd.DataFrame, *, top_n_each: int = 5
-) -> list[str]:
+def select_ankrd30a_focus_regulators(priority: pd.DataFrame, *, top_n_each: int = 5) -> list[str]:
     """Select the compact TF set used by the DU/TCGA figure.
 
     The figure shows two groups: de novo DU TFs without PB-TSS ReMap support and
@@ -335,6 +317,4 @@ def select_ankrd30a_focus_regulators(
         ],
         ascending=[True, True, True, False, False, True, True],
     )
-    return _append_unique_regulators(
-        de_novo, binding.head(top_n_each)["regulator"].astype(str)
-    )
+    return _append_unique_regulators(de_novo, binding.head(top_n_each)["regulator"].astype(str))

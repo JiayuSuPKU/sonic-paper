@@ -22,9 +22,7 @@ from . import config as C
 LOGGER = logging.getLogger("embryo_xspecies.orthology")
 
 ORTHO_TSV = C.COMPARISON_RESULT_DIR / "human_mouse_orthologs.tsv"
-MGI_HOM_URL = (
-    "https://www.informatics.jax.org/downloads/reports/HOM_MouseHumanSequence.rpt"
-)
+MGI_HOM_URL = "https://www.informatics.jax.org/downloads/reports/HOM_MouseHumanSequence.rpt"
 
 _HUMAN = "human"
 _MOUSE = "mouse, laboratory"
@@ -121,10 +119,7 @@ def load_orthologs() -> pd.DataFrame:
         if not values.isin({"true", "false"}).all():
             raise ValueError(f"{ORTHO_TSV} has invalid values in {column}.")
         table[column] = values.eq("true")
-    if (
-        table["human_symbol"].duplicated().any()
-        or table["mouse_symbol"].duplicated().any()
-    ):
+    if table["human_symbol"].duplicated().any() or table["mouse_symbol"].duplicated().any():
         raise ValueError(f"{ORTHO_TSV} is not strict 1:1; refresh the cache.")
     return table
 

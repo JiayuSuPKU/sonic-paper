@@ -52,9 +52,7 @@ from .utils import (  # noqa: E402
 BRAIN_DEV_TIME_COLORS = dict(
     zip(
         BRAIN_DEV_TIMEPOINT_ORDER,
-        mpl.colormaps["viridis"](
-            np.linspace(0.10, 0.88, len(BRAIN_DEV_TIMEPOINT_ORDER))
-        ),
+        mpl.colormaps["viridis"](np.linspace(0.10, 0.88, len(BRAIN_DEV_TIMEPOINT_ORDER))),
         strict=True,
     )
 )
@@ -257,9 +255,7 @@ class BrainDevProfilePlotter:
     def __init__(self, genes: list[str]) -> None:
         """Fit radial spectra for exactly the requested brain-dev genes."""
         self.samples, self.meta, _sample_sets = load_panel("brain_dev")
-        present = set.intersection(
-            *(set(adata.var_names) for adata in self.samples.values())
-        )
+        present = set.intersection(*(set(adata.var_names) for adata in self.samples.values()))
         self.genes = unique(genes)
         missing = [gene for gene in self.genes if gene not in present]
         if missing:
@@ -345,9 +341,7 @@ def _draw_gene_row(
         width_ratios=[1.0, 0.035],
         wspace=0.035,
     )
-    maps = gridspec.GridSpecFromSubplotSpec(
-        2, 3, subplot_spec=left[0], wspace=0.05, hspace=0.08
-    )
+    maps = gridspec.GridSpecFromSubplotSpec(2, 3, subplot_spec=left[0], wspace=0.05, hspace=0.08)
     cax_maps = fig.add_subplot(left[1])
 
     rep_paths = plotter.representative_paths()
@@ -360,7 +354,7 @@ def _draw_gene_row(
             ax.text(
                 0.5,
                 1.16,
-                f"$\\it{{{gene}}}$ spatial expression",
+                rf"$\mathit{{{gene}}}$ spatial expression",
                 transform=ax.transAxes,
                 ha="center",
                 va="bottom",

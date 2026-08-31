@@ -103,8 +103,7 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
 def _validate_manifest(cfg: Any, expected: dict[str, Any]) -> None:
     if not cfg.SV_MANIFEST_JSON.exists():
         raise FileNotFoundError(
-            f"Missing {cfg.SV_MANIFEST_JSON}; run `python -m "
-            "scripts.embryo_xspecies.sv`."
+            f"Missing {cfg.SV_MANIFEST_JSON}; run `python -m scripts.embryo_xspecies.sv`."
         )
     if json.loads(cfg.SV_MANIFEST_JSON.read_text()) != expected:
         raise RuntimeError(
@@ -115,16 +114,10 @@ def _validate_manifest(cfg: Any, expected: dict[str, Any]) -> None:
 
 def _validate_inventory(cfg: Any, metadata: pd.DataFrame) -> None:
     expected = {cfg.SV_MANIFEST_JSON}
-    expected.update(
-        _slide_path(cfg, str(section_id)) for section_id in metadata["section_id"]
-    )
-    unexpected = sorted(
-        path.name for path in cfg.SV_RESULT_DIR.iterdir() if path not in expected
-    )
+    expected.update(_slide_path(cfg, str(section_id)) for section_id in metadata["section_id"])
+    unexpected = sorted(path.name for path in cfg.SV_RESULT_DIR.iterdir() if path not in expected)
     if unexpected:
-        raise RuntimeError(
-            f"Unexpected artifacts in {cfg.SV_RESULT_DIR}: {unexpected[:10]}"
-        )
+        raise RuntimeError(f"Unexpected artifacts in {cfg.SV_RESULT_DIR}: {unexpected[:10]}")
 
 
 def _validate_frame(
@@ -149,13 +142,10 @@ def _validate_frame(
         missing = sorted(expected - observed)
         extra = sorted(observed - expected)
         raise ValueError(
-            f"{source} has the wrong feature universe; missing={missing[:5]}, "
-            f"extra={extra[:5]}."
+            f"{source} has the wrong feature universe; missing={missing[:5]}, extra={extra[:5]}."
         )
     if len(frame) != len(expected_features):
-        raise ValueError(
-            f"{source} has {len(frame)} rows; expected {len(expected_features)}."
-        )
+        raise ValueError(f"{source} has {len(frame)} rows; expected {len(expected_features)}.")
     identities = {
         "species": species,
         "section_id": section_id,
@@ -169,11 +159,7 @@ def _validate_frame(
         raise ValueError(f"{source} contains non-finite SONIC statistics.")
     if not frame["P_value"].between(0.0, 1.0).all():
         raise ValueError(f"{source} contains p-values outside [0, 1].")
-    return (
-        frame.set_index("feature")
-        .loc[expected_features]
-        .reset_index()[list(RESULT_COLUMNS)]
-    )
+    return frame.set_index("feature").loc[expected_features].reset_index()[list(RESULT_COLUMNS)]
 
 
 def _load_slide(
@@ -186,9 +172,7 @@ def _load_slide(
     """Load a single section's SV results from the species cache."""
     path = _slide_path(cfg, section_id)
     if not path.exists():
-        raise FileNotFoundError(
-            f"Missing {path}; run `python -m scripts.embryo_xspecies.sv`."
-        )
+        raise FileNotFoundError(f"Missing {path}; run `python -m scripts.embryo_xspecies.sv`.")
     frame = _validate_frame(
         pd.read_csv(path),
         source=path,
@@ -280,8 +264,7 @@ def _run_species(cfg: Any, *, force: bool) -> dict[str, int]:
         existing = sorted(path.name for path in cfg.SV_RESULT_DIR.iterdir())
         if existing:
             raise RuntimeError(
-                f"Missing manifest for existing artifacts in {cfg.SV_RESULT_DIR}: "
-                f"{existing[:10]}"
+                f"Missing manifest for existing artifacts in {cfg.SV_RESULT_DIR}: {existing[:10]}"
             )
         _write_json(cfg.SV_MANIFEST_JSON, expected_manifest)
     _validate_inventory(cfg, metadata)

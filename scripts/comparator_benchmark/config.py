@@ -13,19 +13,18 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from scripts.paper_utils import PROJECT_ROOT
+
 # ---------------------------------------------------------------------------
 # Roots — mirror visiumhd_mouse_cbs/config.py:7-14
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = PROJECT_ROOT / "data"
 
 RESULT_DIR = PROJECT_ROOT / "results" / "comparator_benchmark"
 FIGURE_DIR = PROJECT_ROOT / "figures" / "comparator_benchmark"
 
-NUMBA_CACHE_DIR = Path(
-    os.environ.get("NUMBA_CACHE_DIR", PROJECT_ROOT / ".cache" / "numba")
-)
+NUMBA_CACHE_DIR = Path(os.environ.get("NUMBA_CACHE_DIR", PROJECT_ROOT / ".cache" / "numba"))
 NUMBA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("NUMBA_CACHE_DIR", str(NUMBA_CACHE_DIR))
 
@@ -80,7 +79,6 @@ BRAIN_DEV_ANISOTROPY_FILE = "brain_dev_anisotropy.csv"
 BRAIN_DEV_POSITIVE_CONTROLS_FILE = "brain_dev_positive_controls.csv"
 BRAIN_DEV_ENRICH_CONTRAST_FILE = "brain_dev_enrichment_contrasts.csv"
 
-CLUSTERPROFILER_RSCRIPT = PROJECT_ROOT / "scripts" / "run_clusterprofiler.R"
 
 # ---------------------------------------------------------------------------
 # Dataset and QC constants
@@ -99,9 +97,7 @@ AD_PIG_RENAME_PROBES: dict[str, str] = {
     "Serpina3n": "Serpina3",
     "Lyz2": "Lyz",
 }
-AD_PIG_STALE_PROBE_NAMES = frozenset(AD_PIG_DROP_PROBES) | frozenset(
-    AD_PIG_RENAME_PROBES
-)
+AD_PIG_STALE_PROBE_NAMES = frozenset(AD_PIG_DROP_PROBES) | frozenset(AD_PIG_RENAME_PROBES)
 
 # 10x Visium geometry (brain_dev only)
 BRAIN_DEV_SPOT_DIAMETER_UM = 55.0  # capture-spot diameter
@@ -181,9 +177,7 @@ AD_PIG_POS_CONTROLS: tuple[str, ...] = (
 
 # Local copy of the Cell 2026 brain-vascularization supplement used to define
 # the brain-development positive controls.
-BRAIN_DEV_TABLE_S4_CNMFS = (
-    DATA_ROOT / "brain_dev" / "supplementary" / "table_s4_cnmf_programs.xlsx"
-)
+BRAIN_DEV_TABLE_S4_CNMFS = DATA_ROOT / "brain_dev" / "supplementary" / "table_s4_cnmf_programs.xlsx"
 
 # Paper-derived positive-control groups for the continuous postnatal-time
 # analysis (``brain_dev``). These map to Table S4 cNMF enrichment rows. The

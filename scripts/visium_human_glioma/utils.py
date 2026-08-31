@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +10,16 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
-from .._paths import resolve_cached_data_path
+from scripts.paper_utils import (
+    ensure_directories,
+    log,
+    project_relative,
+    resolve_cached_data_path,
+)
+from scripts.paper_utils import (
+    save_csv as _save_csv,
+)
+
 from .config import (
     DATA_ROOT,
     FIGURE_DIR,
@@ -21,30 +29,16 @@ from .config import (
     SAMPLES,
 )
 
-
-def log(message: str) -> None:
-    """Timestamped stdout logging for long workflow runs."""
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+__all__ = ["log", "project_relative"]
 
 
 def ensure_dirs() -> None:
     """Create workflow output directories."""
-    RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    FIGURE_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def project_relative(path: Path) -> str:
-    """Return a project-relative path when possible."""
-    try:
-        return str(path.relative_to(PROJECT_ROOT))
-    except ValueError:
-        return str(path)
+    ensure_directories(RESULT_DIR, FIGURE_DIR)
 
 
 def save_csv(df: pd.DataFrame, path: Path, index: bool = False) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=index)
-    log(f"wrote {project_relative(path)} ({df.shape[0]:,} rows)")
+    _save_csv(df, path, project_root=PROJECT_ROOT, index=index)
 
 
 def resolve_data_root(data_root: Path | str | None) -> Path:
@@ -159,9 +153,7 @@ def select_gene_panel(
         nnz = np.asarray((x > 0).sum(axis=0)).ravel()
         means = np.asarray(x.mean(axis=0)).ravel()
         det_frac = nnz / max(a.n_obs, 1)
-        for gene, frac, mean in zip(
-            a.var_names.astype(str), det_frac, means, strict=True
-        ):
+        for gene, frac, mean in zip(a.var_names.astype(str), det_frac, means, strict=True):
             mean_sums[gene] = mean_sums.get(gene, 0.0) + float(mean)
             if frac >= min_frac_per_sample:
                 detected_counts[gene] = detected_counts.get(gene, 0) + 1
@@ -229,15 +221,11 @@ def align_samples_to_genes(
     return aligned
 
 
-def merge_real_tests(
-    de: pd.DataFrame, df: pd.DataFrame, df_norm: pd.DataFrame
-) -> pd.DataFrame:
+def merge_real_tests(de: pd.DataFrame, df: pd.DataFrame, df_norm: pd.DataFrame) -> pd.DataFrame:
     """Merge DE, DF, and DF-norm outputs into the visualization table."""
     out = (
         de[["Feature", "Statistic", "P_value", "P_adj"]]
-        .rename(
-            columns={"Statistic": "DE_stat", "P_value": "P_DE", "P_adj": "P_adj_DE"}
-        )
+        .rename(columns={"Statistic": "DE_stat", "P_value": "P_DE", "P_adj": "P_adj_DE"})
         .merge(
             df[["Feature", "Statistic", "P_value", "P_adj"]].rename(
                 columns={"Statistic": "DF_stat", "P_value": "P_DF", "P_adj": "P_adj_DF"}

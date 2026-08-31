@@ -69,9 +69,7 @@ def all_pacbio_ankrd30a_transcript_ids() -> tuple[str, ...]:
     return tuple(dict.fromkeys(transcript_ids))
 
 
-def _read_pacbio_gene_annotations(
-    path: Path = PACBIO_GFF, gene: str = TARGET_GENE
-) -> pd.DataFrame:
+def _read_pacbio_gene_annotations(path: Path = PACBIO_GFF, gene: str = TARGET_GENE) -> pd.DataFrame:
     """Read PacBio QC-pass GFF rows for one gene with normalized coordinates."""
     rows: list[dict[str, object]] = []
     with open_text(path) as handle:
@@ -131,9 +129,7 @@ def _read_sqanti_annotations(path: Path, transcript_ids: Iterable[str]) -> pd.Da
         )
     missing = sorted(transcript_ids - set(out["isoform"].astype(str)))
     if missing:
-        raise ValueError(
-            "SQANTI annotation is missing PacBio transcripts: " + ", ".join(missing)
-        )
+        raise ValueError("SQANTI annotation is missing PacBio transcripts: " + ", ".join(missing))
     for col in [
         "FL_counts",
         "FL_samples",
@@ -175,45 +171,33 @@ def _summarize_pacbio_fl_counts(
     tx_ids = set(map(str, transcript_ids))
     subset = counts[counts[id_col].astype(str).isin(tx_ids)].copy()
     if subset.empty:
-        raise ValueError(
-            "PacBio per-sample FL count table has no ANKRD30A transcript rows"
-        )
+        raise ValueError("PacBio per-sample FL count table has no ANKRD30A transcript rows")
     numeric_cols = [
         col
         for col in subset.columns
         if col != id_col and pd.to_numeric(subset[col], errors="coerce").notna().any()
     ]
     if not numeric_cols:
-        raise ValueError(
-            "PacBio per-sample FL count table has no numeric sample columns"
-        )
+        raise ValueError("PacBio per-sample FL count table has no numeric sample columns")
     numeric = subset[numeric_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
     # The sample names encode receptor status; ER+ counts drive PB transcript
     # prioritization, while ER-/other counts remain supporting metadata.
-    er_positive = [
-        col for col in numeric_cols if re.search(r"ERpos", col, flags=re.IGNORECASE)
-    ]
+    er_positive = [col for col in numeric_cols if re.search(r"ERpos", col, flags=re.IGNORECASE)]
     er_negative = [
-        col
-        for col in numeric_cols
-        if re.search(r"ERneg|TNBC", col, flags=re.IGNORECASE)
+        col for col in numeric_cols if re.search(r"ERneg|TNBC", col, flags=re.IGNORECASE)
     ]
-    other = [
-        col for col in numeric_cols if col not in set(er_positive) | set(er_negative)
-    ]
+    other = [col for col in numeric_cols if col not in set(er_positive) | set(er_negative)]
     if not er_positive:
-        raise ValueError(
-            "PacBio per-sample FL count table has no ER-positive sample columns"
-        )
+        raise ValueError("PacBio per-sample FL count table has no ER-positive sample columns")
 
     def totals(sample_cols: list[str]) -> tuple[np.ndarray, np.ndarray]:
         if not sample_cols:
             zeros = np.zeros(numeric.shape[0], dtype=float)
             return zeros, zeros
         values = numeric[sample_cols]
-        return values.sum(axis=1).to_numpy(dtype=float), values.gt(0).sum(
-            axis=1
-        ).to_numpy(dtype=float)
+        return values.sum(axis=1).to_numpy(dtype=float), values.gt(0).sum(axis=1).to_numpy(
+            dtype=float
+        )
 
     all_counts, all_samples = totals(numeric_cols)
     er_pos_counts, er_pos_samples = totals(er_positive)
@@ -245,9 +229,7 @@ def _tss_1based(row: pd.Series) -> int:
     return int(row["start_1based"])
 
 
-def _coerce_numeric_columns(
-    frame: pd.DataFrame, columns: Iterable[str]
-) -> pd.DataFrame:
+def _coerce_numeric_columns(frame: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
     """Coerce selected columns to numeric in place when present."""
     for col in columns:
         if col in frame.columns:
@@ -255,9 +237,7 @@ def _coerce_numeric_columns(
     return frame
 
 
-def _attach_sqanti_metadata(
-    transcripts: pd.DataFrame, sqanti: pd.DataFrame
-) -> pd.DataFrame:
+def _attach_sqanti_metadata(transcripts: pd.DataFrame, sqanti: pd.DataFrame) -> pd.DataFrame:
     """Add SQANTI coding/ORF metadata to PacBio transcript rows."""
     cols = [
         "isoform",
@@ -282,9 +262,7 @@ def _attach_sqanti_metadata(
     )
 
 
-def _attach_fl_count_metadata(
-    transcripts: pd.DataFrame, fl_summary: pd.DataFrame
-) -> pd.DataFrame:
+def _attach_fl_count_metadata(transcripts: pd.DataFrame, fl_summary: pd.DataFrame) -> pd.DataFrame:
     """Prefer ER-stratified sample-level FL counts over aggregate SQANTI counts."""
     transcripts = transcripts.merge(fl_summary, on="transcript_id", how="left")
     missing_fl = (
@@ -294,8 +272,7 @@ def _attach_fl_count_metadata(
     )
     if missing_fl:
         raise ValueError(
-            "PacBio per-sample FL count summary is missing transcripts: "
-            + ", ".join(missing_fl)
+            "PacBio per-sample FL count summary is missing transcripts: " + ", ".join(missing_fl)
         )
     for target_col, source_col in [
         ("FL_counts", "FL_counts_from_sample_table"),
@@ -345,9 +322,7 @@ def _add_pb_tss_metadata(transcripts: pd.DataFrame) -> pd.DataFrame:
 
 
 @lru_cache(maxsize=1)
-def _compute_ankrd30a_long_read_annotations() -> (
-    tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]
-):
+def _compute_ankrd30a_long_read_annotations() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Build ANKRD30A PacBio structures and FL-count summaries from source files."""
     # Start from PB-QC structural rows, then enrich transcript rows with SQANTI
     # ORF/coding calls and ER-stratified sample-level FL support.
@@ -439,8 +414,7 @@ def load_ankrd30a_visualization_cache() -> dict[str, pd.DataFrame]:
 def _visualization_cache_ready() -> bool:
     """Return true when the three plain-CSV notebook cache files are readable."""
     if any(
-        not path.exists() or path.stat().st_size == 0
-        for path in ANKRD30A_VISUALIZATION_CACHE_FILES
+        not path.exists() or path.stat().st_size == 0 for path in ANKRD30A_VISUALIZATION_CACHE_FILES
     ):
         return False
     load_ankrd30a_visualization_cache()
@@ -467,9 +441,7 @@ def _ankrd30a_compatibility_from_svp_cache() -> pd.DataFrame:
         )
         table = table[table["gene"].astype(str).eq(TARGET_GENE)].copy()
         if table.empty:
-            raise ValueError(
-                f"all-SVP {source} compatibility cache has no {TARGET_GENE} rows"
-            )
+            raise ValueError(f"all-SVP {source} compatibility cache has no {TARGET_GENE} rows")
         table["annotation_source"] = source
         # The all-SVP cache stores raw compatible codewords; collapse them into
         # the small biological classes used by the ANKRD30A transcript panel.
@@ -477,10 +449,7 @@ def _ankrd30a_compatibility_from_svp_cache() -> pd.DataFrame:
             lambda value: _probe_compatibility_class(_codewords_from_cache(value))
         )
         table["probe_class_order"] = (
-            table["probe_compatibility_class"]
-            .map(PROBE_CLASS_ORDER)
-            .fillna(99)
-            .astype(int)
+            table["probe_compatibility_class"].map(PROBE_CLASS_ORDER).fillna(99).astype(int)
         )
         frames.append(table)
     return pd.concat(frames, ignore_index=True, sort=False)
@@ -576,9 +545,7 @@ def _combine_ankrd30a_transcript_annotations(
     # TSS is repeated on every feature row so plotting can draw transcripts from
     # one flat CSV without re-parsing GTF/GFF files.
     tss = _annotation_tss_table(annotations)
-    annotations = annotations.merge(
-        tss, on=["annotation_source", "transcript_id"], how="left"
-    )
+    annotations = annotations.merge(tss, on=["annotation_source", "transcript_id"], how="left")
     if "tss_1based" not in annotations:
         annotations["tss_1based"] = np.nan
     annotations["tss_1based"] = pd.to_numeric(
@@ -621,12 +588,8 @@ def _combine_ankrd30a_transcript_annotations(
         "ANKRD30A transcript/probe compatibility table",
     )
     compat_cols = [col for col in compat_cols if col in compatibility.columns]
-    compat = compatibility[compat_cols].drop_duplicates(
-        ["annotation_source", "transcript_id"]
-    )
-    annotations = annotations.merge(
-        compat, on=["annotation_source", "transcript_id"], how="left"
-    )
+    compat = compatibility[compat_cols].drop_duplicates(["annotation_source", "transcript_id"])
+    annotations = annotations.merge(compat, on=["annotation_source", "transcript_id"], how="left")
     probe_class = (
         annotations["probe_compatibility_class"]
         if "probe_compatibility_class" in annotations
@@ -638,9 +601,7 @@ def _combine_ankrd30a_transcript_annotations(
         if "probe_class_order" in annotations
         else pd.Series(99, index=annotations.index)
     )
-    annotations["probe_class_order"] = pd.to_numeric(
-        probe_order, errors="coerce"
-    ).fillna(99)
+    annotations["probe_class_order"] = pd.to_numeric(probe_order, errors="coerce").fillna(99)
     return annotations.sort_values(
         ["annotation_source", "transcript_id", "start_1based", "end_1based", "feature"],
         na_position="last",
@@ -663,13 +624,9 @@ def _ankrd30a_probe_segments_from_svp_cache() -> pd.DataFrame:
     mappings = mappings[mappings["target_name"].astype(str).eq(TARGET_GENE)].copy()
     if mappings.empty:
         raise ValueError(f"all-SVP probe mapping cache has no {TARGET_GENE} rows")
-    mappings = mappings[
-        mappings["mapping_status"].astype(str).str.startswith("mapped")
-    ].copy()
+    mappings = mappings[mappings["mapping_status"].astype(str).str.startswith("mapped")].copy()
     if mappings.empty:
-        raise ValueError(
-            f"all-SVP probe mapping cache has no mapped {TARGET_GENE} rows"
-        )
+        raise ValueError(f"all-SVP probe mapping cache has no mapped {TARGET_GENE} rows")
     rows: list[dict[str, object]] = []
     for row_idx, row in mappings.reset_index(drop=True).iterrows():
         base = row.to_dict()

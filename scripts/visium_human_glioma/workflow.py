@@ -6,7 +6,6 @@ import argparse
 import hashlib
 import json
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,6 +18,8 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     __package__ = "scripts.visium_human_glioma"
+
+from scripts.paper_utils import CLUSTERPROFILER_SCRIPT, clusterprofiler_command
 
 from .config import (
     CACHE_SUMMARY_FILE,
@@ -57,7 +58,6 @@ from .utils import (
     select_gene_panel,
 )
 
-CLUSTERPROFILER_SCRIPT = PROJECT_ROOT / "scripts" / "run_clusterprofiler.R"
 CLUSTERPROFILER_TIMEOUT_SECONDS = 900
 CACHE_SCHEMA_VERSION = 1
 
@@ -123,9 +123,7 @@ def _write_cache_summary(
 def _output_fingerprints(
     paths: dict[str, Path], *, digest: bool = False
 ) -> dict[str, dict[str, Any]]:
-    return {
-        name: _file_fingerprint(path, digest=digest) for name, path in paths.items()
-    }
+    return {name: _file_fingerprint(path, digest=digest) for name, path in paths.items()}
 
 
 def _comparison_signature(data_root: Path) -> dict[str, Any]:
@@ -164,9 +162,7 @@ def _enrichment_signature() -> dict[str, Any]:
     """Describe the tested genes and wrapper used for pathway enrichment."""
     return {
         "real_tests": _file_fingerprint(REAL_TESTS_FILE, digest=True),
-        "clusterprofiler_wrapper": _file_fingerprint(
-            CLUSTERPROFILER_SCRIPT, digest=True
-        ),
+        "clusterprofiler_wrapper": _file_fingerprint(CLUSTERPROFILER_SCRIPT, digest=True),
         "top_n": 100,
         "sources": ["GO:BP", "KEGG"],
         "orgdb": "org.Hs.eg.db",
@@ -229,9 +225,7 @@ def _idh_status_comparison_cache_ready(data_root: Path) -> bool:
     try:
         real_tests = pd.read_csv(REAL_TESTS_FILE)
         null = pd.read_csv(PERMUTATION_NULL_FILE)
-        if not required.issubset(real_tests.columns) or not null_required.issubset(
-            null.columns
-        ):
+        if not required.issubset(real_tests.columns) or not null_required.issubset(null.columns):
             return False
         with np.load(SPECTRA_FILE, allow_pickle=True) as spectra:
             if not {"spectra", "freq_edges", "sample_ids", "groups", "genes"}.issubset(
@@ -411,8 +405,8 @@ def _spatial_diagnostics_table(
         )
 
         # Radial bins discard angle, so re-stream raw 2D power in bounded chunks.
-        spectrum_chunker, _dc, _presence, n_genes, grid_shape = (
-            comparator._nufft_spectrum_chunker(sample_idx)
+        spectrum_chunker, _dc, _presence, n_genes, grid_shape = comparator._nufft_spectrum_chunker(
+            sample_idx
         )
         chunk_size = int(comparator._nufft_chunk_size)
         anis = pd.concat(
@@ -444,10 +438,7 @@ def _spatial_diagnostics_table(
 
 def _spatial_diagnostics_cache_ready() -> bool:
     """Return whether the diagnostics cache has every required metric basis."""
-    if (
-        not SPATIAL_DIAGNOSTICS_FILE.exists()
-        or SPATIAL_DIAGNOSTICS_FILE.stat().st_size == 0
-    ):
+    if not SPATIAL_DIAGNOSTICS_FILE.exists() or SPATIAL_DIAGNOSTICS_FILE.stat().st_size == 0:
         return False
     try:
         diagnostics = pd.read_csv(SPATIAL_DIAGNOSTICS_FILE, usecols=["metric", "basis"])
@@ -461,19 +452,6 @@ def _spatial_diagnostics_cache_ready() -> bool:
     }.issubset(observed)
 
 
-def _clusterprofiler_command() -> list[str]:
-    """Resolve Rscript without baking a conda environment into the public script."""
-    active_env_rscript = Path(sys.prefix) / "bin" / "Rscript"
-    if active_env_rscript.exists():
-        return [str(active_env_rscript)]
-    path_rscript = shutil.which("Rscript")
-    if path_rscript:
-        return [path_rscript]
-    raise FileNotFoundError(
-        "Could not find Rscript in the active Python environment or PATH."
-    )
-
-
 def _run_clusterprofiler(job_rows: list[dict[str, Any]]) -> None:
     """Write one temporary job table and run the shared clusterProfiler wrapper."""
     if not job_rows:
@@ -482,7 +460,7 @@ def _run_clusterprofiler(job_rows: list[dict[str, Any]]) -> None:
         raise FileNotFoundError(f"Missing {CLUSTERPROFILER_SCRIPT}")
     job_path = Path(job_rows[0]["job_path"])
     pd.DataFrame(job_rows).drop(columns=["job_path"]).to_csv(job_path, index=False)
-    cmd = _clusterprofiler_command() + [str(CLUSTERPROFILER_SCRIPT), str(job_path)]
+    cmd = clusterprofiler_command() + [str(CLUSTERPROFILER_SCRIPT), str(job_path)]
     try:
         proc = subprocess.run(
             cmd,
@@ -507,17 +485,11 @@ def _run_clusterprofiler(job_rows: list[dict[str, Any]]) -> None:
         log(proc.stderr.strip())
 
 
-def _ranked_gene_sets(
-    real_tests: pd.DataFrame, *, top_n: int = 100
-) -> dict[str, list[str]]:
+def _ranked_gene_sets(real_tests: pd.DataFrame, *, top_n: int = 100) -> dict[str, list[str]]:
     """Return equal-sized DE and DF-norm gene sets ordered by raw p-value."""
     ranked: dict[str, list[str]] = {}
     for gene_set, p_col in (("DE", "P_DE"), ("DF_norm", "P_DF_norm")):
-        sub = (
-            real_tests.dropna(subset=[p_col])
-            .sort_values(p_col, kind="stable")
-            .head(top_n)
-        )
+        sub = real_tests.dropna(subset=[p_col]).sort_values(p_col, kind="stable").head(top_n)
         ranked[gene_set] = sub["Feature"].astype(str).drop_duplicates().tolist()
     return ranked
 
@@ -525,9 +497,7 @@ def _ranked_gene_sets(
 def _missing_enrichment_pairs(terms: pd.DataFrame) -> set[tuple[str, str]]:
     """Return expected gene-set/source combinations absent from an enrichment table."""
     expected = {
-        (gene_set, source)
-        for gene_set in ("DE", "DF_norm")
-        for source in ("GO:BP", "KEGG")
+        (gene_set, source) for gene_set in ("DE", "DF_norm") for source in ("GO:BP", "KEGG")
     }
     if not {"gene_set", "source"}.issubset(terms.columns):
         return expected
@@ -628,18 +598,14 @@ def run_enrichment_cache(
             )
 
         if job_rows:
-            log(
-                f"clusterProfiler enrichment jobs={len({row['job_id'] for row in job_rows})}"
-            )
+            log(f"clusterProfiler enrichment jobs={len({row['job_id'] for row in job_rows})}")
             _run_clusterprofiler(job_rows)
         parts = _read_enrichment_outputs(out_paths, gene_sets)
 
     terms = pd.concat(parts, ignore_index=True, sort=False) if parts else pd.DataFrame()
     missing = _missing_enrichment_pairs(terms)
     if missing:
-        formatted = ", ".join(
-            f"{gene_set}/{source}" for gene_set, source in sorted(missing)
-        )
+        formatted = ", ".join(f"{gene_set}/{source}" for gene_set, source in sorted(missing))
         raise RuntimeError(
             "clusterProfiler returned incomplete enrichment results: "
             f"{formatted}. Check the R output and KEGG network access."
@@ -855,13 +821,9 @@ def assign_top_df_norm_genes_to_metaprograms(
 
 def run_metaprogram_gene_map_cache() -> dict[str, str]:
     """Regenerate the top-100 DF-norm meta-program map from current caches."""
-    missing = [
-        path for path in (REAL_TESTS_FILE, ENRICHMENT_TERMS_FILE) if not path.exists()
-    ]
+    missing = [path for path in (REAL_TESTS_FILE, ENRICHMENT_TERMS_FILE) if not path.exists()]
     if missing:
-        raise FileNotFoundError(
-            f"Missing inputs for meta-program assignment: {missing}"
-        )
+        raise FileNotFoundError(f"Missing inputs for meta-program assignment: {missing}")
     gene_map = assign_top_df_norm_genes_to_metaprograms(
         pd.read_csv(REAL_TESTS_FILE),
         pd.read_csv(ENRICHMENT_TERMS_FILE),
@@ -961,10 +923,7 @@ def run_idh_status_comparison_cache(
             dtype=object,
         ),
         h5ad_paths=np.asarray(
-            [
-                str(Path(path).relative_to(resolved_data_root))
-                for path in meta["h5ad_path"]
-            ],
+            [str(Path(path).relative_to(resolved_data_root)) for path in meta["h5ad_path"]],
             dtype=object,
         ),
         genes=np.asarray(genes, dtype=object),
@@ -1031,9 +990,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Root containing adata/*.h5ad. Defaults to data/visium_glioma_idh_status.",
     )
-    parser.add_argument(
-        "--force", action="store_true", help="Recompute cached outputs."
-    )
+    parser.add_argument("--force", action="store_true", help="Recompute cached outputs.")
     parser.add_argument("--n-jobs", type=int, default=1)
     parser.add_argument(
         "--skip-enrichment",

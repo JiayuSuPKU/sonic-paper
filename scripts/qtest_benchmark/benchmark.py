@@ -111,15 +111,11 @@ def _bounded_fft_grid_shape(n: int) -> tuple[int, int]:
 
 
 def _regular_grid_coordinates(ny: int, nx: int) -> np.ndarray:
-    y, x = np.meshgrid(
-        np.arange(ny, dtype=float), np.arange(nx, dtype=float), indexing="ij"
-    )
+    y, x = np.meshgrid(np.arange(ny, dtype=float), np.arange(nx, dtype=float), indexing="ij")
     return np.column_stack((y.ravel(), x.ravel()))
 
 
-def _build_runtime_kernel(
-    spec: RuntimeImplementation, ny: int, nx: int, coords: np.ndarray
-):
+def _build_runtime_kernel(spec: RuntimeImplementation, ny: int, nx: int, coords: np.ndarray):
     if spec.kind == "matrix_matern":
         return MatrixKernel(coords, method="matern", bandwidth=2.5, nu=1.5)
     if spec.kind == "matrix_car":
@@ -145,9 +141,7 @@ def _reshape_fft_values(kernel, values: np.ndarray, ny: int, nx: int) -> np.ndar
     return values.reshape(ny, nx, -1) if isinstance(kernel, FFTKernel) else values
 
 
-def cache_runtime_scaling_results(
-    *, force: bool = False
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+def cache_runtime_scaling_results(*, force: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Measure runtime/memory scaling and cache transcriptome projections."""
     ensure_output_dirs()
     runtime_outputs = (BENCHMARK_SCALING_FILE, BENCHMARK_PROJECTION_FILE)
@@ -158,9 +152,7 @@ def cache_runtime_scaling_results(
         logger=LOGGER,
         label="Runtime benchmark",
     ):
-        return pd.read_csv(BENCHMARK_SCALING_FILE), pd.read_csv(
-            BENCHMARK_PROJECTION_FILE
-        )
+        return pd.read_csv(BENCHMARK_SCALING_FILE), pd.read_csv(BENCHMARK_PROJECTION_FILE)
 
     rows: list[dict] = []
     rng = np.random.default_rng(42)
@@ -270,13 +262,9 @@ def _project_transcriptome_runtime(benchmark: pd.DataFrame) -> pd.DataFrame:
         for target, n, geometry in BENCHMARK_TARGETS:
             geometry_ok = not (geometry == "irregular" and spec.kind == "fft")
             peak_mb = _loglog_predict(n, sub["n"].to_numpy(), sub["peak_mb"].to_numpy())
-            supported = (
-                geometry_ok and n <= spec.max_n and peak_mb <= RUNTIME_MEMORY_BUDGET_MB
-            )
+            supported = geometry_ok and n <= spec.max_n and peak_mb <= RUNTIME_MEMORY_BUDGET_MB
             build_s = _loglog_predict(n, sub["n"].to_numpy(), sub["build_s"].to_numpy())
-            per_feature_s = _loglog_predict(
-                n, sub["n"].to_numpy(), sub["per_feature_s"].to_numpy()
-            )
+            per_feature_s = _loglog_predict(n, sub["n"].to_numpy(), sub["per_feature_s"].to_numpy())
             total_s = build_s + M_FEATURES * per_feature_s if supported else np.nan
             rows.append(
                 {
@@ -298,14 +286,10 @@ def _draw_white_noise(n: int, features: int, seed: int) -> np.ndarray:
     return np.random.default_rng(seed).standard_normal((n, features))
 
 
-def _draw_gaussian_process(
-    covariance: np.ndarray, features: int, seed: int
-) -> np.ndarray:
+def _draw_gaussian_process(covariance: np.ndarray, features: int, seed: int) -> np.ndarray:
     eigenvalues, eigenvectors = np.linalg.eigh(covariance)
     factor = eigenvectors * np.sqrt(np.clip(eigenvalues, 0, None))[None, :]
-    return factor @ np.random.default_rng(seed).standard_normal(
-        (len(covariance), features)
-    )
+    return factor @ np.random.default_rng(seed).standard_normal((len(covariance), features))
 
 
 def _torus_covariance(
@@ -347,14 +331,10 @@ def _build_matched_matrix_fft_kernels(
         adjacency[np.arange(len(coords))[:, None], neighbors] = 1
         adjacency = np.maximum(adjacency, adjacency.T)
         degree = adjacency.sum(axis=1)
-        normalized = adjacency / np.sqrt(
-            np.maximum(degree[:, None] * degree[None, :], 1e-20)
-        )
+        normalized = adjacency / np.sqrt(np.maximum(degree[:, None] * degree[None, :], 1e-20))
         if method == "car":
             precision = np.eye(len(coords)) - parameters.get("rho", 0.9) * normalized
-            matrix = MatrixKernel.from_matrix(
-                precision, method=method, is_precision=True
-            )
+            matrix = MatrixKernel.from_matrix(precision, method=method, is_precision=True)
         elif method == "moran":
             matrix = MatrixKernel.from_matrix(normalized, method=method)
         else:
@@ -397,9 +377,7 @@ def _compute_implementation_agreement_tables() -> dict[str, pd.DataFrame]:
     torus, boundary = [], []
     # Compare identical toroidal operators first, then expose open-boundary error.
     for method, parameters in _VALIDATION_KERNEL_PARAMETERS.items():
-        coords, matrix, fft = _build_matched_matrix_fft_kernels(
-            ny, nx, method, parameters
-        )
+        coords, matrix, fft = _build_matched_matrix_fft_kernels(ny, nx, method, parameters)
         q_matrix = _compute_q_scores(matrix, values, ny, nx)
         q_fft = _compute_q_scores(fft, values, ny, nx)
         q_open = _compute_q_scores(
@@ -570,9 +548,7 @@ def _compute_implementation_power_table(
     rows = []
     for method, parameters in _VALIDATION_KERNEL_PARAMETERS.items():
         if spectral_impl == "FFT":
-            _, matrix, spectral = _build_matched_matrix_fft_kernels(
-                ny, nx, method, parameters
-            )
+            _, matrix, spectral = _build_matched_matrix_fft_kernels(ny, nx, method, parameters)
         elif spectral_impl == "NUFFT":
             matrix = MatrixKernel(coords, method=method, **parameters)
             spectral = NUFFTKernel(coords, method=method, workers=1, **parameters)
@@ -690,9 +666,7 @@ def _compute_power_comparison_tables() -> dict[str, pd.DataFrame]:
     }
 
 
-def cache_validation_benchmark_results(
-    *, force: bool = False
-) -> dict[str, pd.DataFrame]:
+def cache_validation_benchmark_results(*, force: bool = False) -> dict[str, pd.DataFrame]:
     """Cache implementation agreement, null calibration, and power tables."""
     ensure_output_dirs()
     VALIDATION_RESULT_DIR.mkdir(parents=True, exist_ok=True)
@@ -728,13 +702,9 @@ def cache_validation_benchmark_results(
             continue
         tables = compute()
         if set(tables) != set(keys):
-            raise RuntimeError(
-                f"Validation stage returned {sorted(tables)}, expected {keys}"
-            )
+            raise RuntimeError(f"Validation stage returned {sorted(tables)}, expected {keys}")
         for key, table in tables.items():
-            table.to_csv(
-                VALIDATION_RESULT_DIR / VALIDATION_CACHE_FILES[key], index=False
-            )
+            table.to_csv(VALIDATION_RESULT_DIR / VALIDATION_CACHE_FILES[key], index=False)
         LOGGER.info("Validation %s: cached %d tables", label, len(tables))
     return load_validation_benchmark_results()
 

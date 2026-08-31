@@ -74,15 +74,11 @@ def filtered_metadata(
     stages = list(stages) if stages else list(cfg.KEPT_TIMEPOINTS)
     # Load all sample metadata produced during data download for a species.
     if not Path(cfg.META_CSV).exists():
-        raise FileNotFoundError(
-            f"Missing {cfg.META_CSV} — run the download step first."
-        )
+        raise FileNotFoundError(f"Missing {cfg.META_CSV} — run the download step first.")
     meta = pd.read_csv(cfg.META_CSV)
 
     # Make sure requested stages and section_ids are configured for this species.
-    configured = {
-        section_id for stage in stages for section_id in cfg.ALL_SECTIONS[stage]
-    }
+    configured = {section_id for stage in stages for section_id in cfg.ALL_SECTIONS[stage]}
     meta = meta[
         meta["timepoint"].isin(stages) & meta["section_id"].astype(str).isin(configured)
     ].copy()
@@ -92,13 +88,9 @@ def filtered_metadata(
             f"{cfg.PANEL_KEY} metadata is missing configured sections: {missing_configured[:10]}"
         )
     if not Path(cfg.GEOMETRY_CSV).exists():
-        raise FileNotFoundError(
-            f"Missing {cfg.GEOMETRY_CSV} — run preprocessing first."
-        )
+        raise FileNotFoundError(f"Missing {cfg.GEOMETRY_CSV} — run preprocessing first.")
     geom = pd.read_csv(cfg.GEOMETRY_CSV)
-    cols = [
-        c for c in ("section_id", "ny", "nx", "min_extent_um", "n_bins") if c in geom
-    ]
+    cols = [c for c in ("section_id", "ny", "nx", "min_extent_um", "n_bins") if c in geom]
     meta = meta.merge(geom[cols], on="section_id", how="left")
     missing_geometry = meta.loc[meta["ny"].isna(), "section_id"].astype(str).tolist()
     if missing_geometry:
@@ -116,9 +108,7 @@ def filtered_metadata(
         meta = meta[meta["section_id"].astype(str).isin(requested)].copy()
     stage_rank = {tp: i for i, tp in enumerate(stages)}
     meta = (
-        meta.assign(
-            _stage_rank=meta["timepoint"].map(stage_rank).fillna(len(stage_rank))
-        )
+        meta.assign(_stage_rank=meta["timepoint"].map(stage_rank).fillna(len(stage_rank)))
         .sort_values(["_stage_rank", "section_id"])
         .drop(columns="_stage_rank")
         .reset_index(drop=True)
@@ -159,11 +149,7 @@ def _is_named_non_lnc_non_mito_gene(gene: str) -> bool:
     upper = gene.upper()
     if upper.startswith("MT-"):
         return False
-    if (
-        gene.endswith("Rik")
-        or _UNNAMED_GENE_RE.search(gene)
-        or _LNCRNA_GENE_RE.search(gene)
-    ):
+    if gene.endswith("Rik") or _UNNAMED_GENE_RE.search(gene) or _LNCRNA_GENE_RE.search(gene):
         return False
     return True
 
@@ -196,9 +182,7 @@ def _genes_detected_in_every_section(
         eligible = passing if eligible is None else eligible & passing
 
     if not eligible:
-        raise RuntimeError(
-            f"No {cfg.PANEL_KEY} genes pass the all-section detection threshold."
-        )
+        raise RuntimeError(f"No {cfg.PANEL_KEY} genes pass the all-section detection threshold.")
     return eligible
 
 
@@ -266,9 +250,7 @@ def parse_bins_table(x_csc: Any, obs: pd.DataFrame, var: pd.DataFrame) -> Any:
     a = ad.AnnData(X=sp.csc_matrix(x_csc), obs=obs.copy(), var=var_index_only)
     a.obs["region"] = pd.Categorical(["bins"] * a.n_obs)
     a.obs["instance_id"] = np.arange(a.n_obs, dtype=np.int64)
-    return TableModel.parse(
-        a, region="bins", region_key="region", instance_key="instance_id"
-    )
+    return TableModel.parse(a, region="bins", region_key="region", instance_key="instance_id")
 
 
 def _gene_matrix_for_expression_mode(
@@ -282,9 +264,7 @@ def _gene_matrix_for_expression_mode(
     if expression_mode not in {"raw_counts", "log1p_norm"}:
         raise ValueError("expression_mode must be 'raw_counts' or 'log1p_norm'.")
     if sp.issparse(table.X):
-        x_genes = (
-            table.X[:, gene_indices].astype(np.float64, copy=False).tocsr(copy=True)
-        )
+        x_genes = table.X[:, gene_indices].astype(np.float64, copy=False).tocsr(copy=True)
     else:
         x_all = np.asarray(table.X)
         x_genes = sp.csr_matrix(x_all[:, gene_indices].astype(np.float64, copy=False))
@@ -368,8 +348,7 @@ def _table_with_domain_channels(
     if domain_union:
         anno = table.obs["annotation"].astype(str).to_numpy()
         cols = [
-            sp.csc_matrix((anno == d).astype(np.float64).reshape(n_obs, 1))
-            for d in domain_union
+            sp.csc_matrix((anno == d).astype(np.float64).reshape(n_obs, 1)) for d in domain_union
         ]
         x_dom = sp.hstack(cols, format="csc")
     else:
@@ -427,9 +406,7 @@ def build_comparator(
         fft_solver="rfft2",
         spacing=(float(bin_size_um), float(bin_size_um)),
         freq_edges=freq_edges,
-        fft_chunk_size=(
-            fft_chunk_size if fft_chunk_size == "auto" else int(fft_chunk_size)
-        ),
+        fft_chunk_size=(fft_chunk_size if fft_chunk_size == "auto" else int(fft_chunk_size)),
         adaptive_freq_edges=adaptive_freq_edges,
     )
 
@@ -537,9 +514,7 @@ def load_prepared_sections(
             normalization_target_sum=normalization_target_sum,
         )
     keep_cols = [
-        c
-        for c in ("section_id", "timepoint", "day", "min_extent_um", "n_bins")
-        if c in meta
+        c for c in ("section_id", "timepoint", "day", "min_extent_um", "n_bins") if c in meta
     ]
     return (
         sections,
@@ -582,9 +557,7 @@ def shared_supported_freq_edges(
         else:
             lowest = 1.0 / float(extents.min())
             if lowest >= nyquist:
-                raise RuntimeError(
-                    "Smallest section cannot resolve a nonzero frequency."
-                )
+                raise RuntimeError("Smallest section cannot resolve a nonzero frequency.")
             requested = np.concatenate(
                 [
                     [0.0],

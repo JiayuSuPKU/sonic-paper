@@ -423,7 +423,9 @@ def _select_ont_rows(
         ref_key = info["ref_tx_id"]
         ref_row = reference_cache["reference"]["by_tx"].get(ref_key)
         tx_name = ref_row["tx_name"] if ref_row else ref_key
-        label = f"{ref_key} | {tx_name}" if tx_key == ref_key else f"{tx_key} -> {ref_key} | {tx_name}"
+        label = (
+            f"{ref_key} | {tx_name}" if tx_key == ref_key else f"{tx_key} -> {ref_key} | {tx_name}"
+        )
         rows.append({"group": "ONT transcripts", "label": label, "blocks": info["blocks"]})
         selected_ref.add(ref_key)
     return rows, selected_ref
@@ -481,8 +483,6 @@ def _select_reference_rows(
                 seen.add(row["tx_id"])
                 break
     return selected
-
-
 
 
 def ensure_remap_nr_bed() -> Path:

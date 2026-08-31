@@ -47,9 +47,7 @@ def _valid_canonical_metrics(metrics: pd.DataFrame) -> bool:
 
 
 def _load_cached(path: Path, metrics_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
-    svp = pd.read_csv(path).sort_values(
-        ["pvalue_adj", "statistic"], ascending=[True, False]
-    )
+    svp = pd.read_csv(path).sort_values(["pvalue_adj", "statistic"], ascending=[True, False])
     # svp_rank is derived from the current sort order rather than trusted from disk.
     svp["svp_rank"] = np.arange(1, svp.shape[0] + 1)
     if "gene_key" not in svp.columns:
@@ -80,9 +78,7 @@ def _write_summary(svp: pd.DataFrame, metrics: pd.DataFrame) -> None:
     save_json(summary, SV_SUMMARY_JSON)
 
 
-def run_sv(
-    *, force: bool = False, n_jobs: int = 8
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+def run_sv(*, force: bool = False, n_jobs: int = 8) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run/load canonical segmented SVP calls."""
     if SV_CSV.exists() and SV_METRICS_CSV.exists() and not force:
         svp, metrics = _load_cached(SV_CSV, SV_METRICS_CSV)
@@ -156,9 +152,7 @@ def run_sv(
     save_csv(svp.drop(columns=["gene_key"], errors="ignore"), SV_CSV)
     save_csv(metrics, SV_METRICS_CSV)
     _write_summary(svp, metrics)
-    log(
-        f"SVP genes at FDR < {FDR_THRESHOLD:g}: {(svp['pvalue_adj'] < FDR_THRESHOLD).sum():,}"
-    )
+    log(f"SVP genes at FDR < {FDR_THRESHOLD:g}: {(svp['pvalue_adj'] < FDR_THRESHOLD).sum():,}")
     return svp, metrics
 
 

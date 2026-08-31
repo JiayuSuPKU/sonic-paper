@@ -52,9 +52,7 @@ def _gene_row_order(adata_gene: AnnData, codeword_cell_ids: pd.Index) -> np.ndar
     indexer = pd.Series(np.arange(adata_gene.n_obs), index=gene_cell_ids)
     missing = codeword_cell_ids[~codeword_cell_ids.isin(indexer.index)]
     if len(missing):
-        raise ValueError(
-            f"{len(missing):,} codeword cells are absent from the gene table"
-        )
+        raise ValueError(f"{len(missing):,} codeword cells are absent from the gene table")
     return indexer.loc[codeword_cell_ids].to_numpy()
 
 
@@ -107,15 +105,11 @@ def build_regulator_design(
     """Build sparse log1p-CP10K regulator covariates aligned to codeword cells."""
     requested = _request_regulator_table()
     available = _available_gene_symbol_map(adata_gene)
-    requested["present_in_segmented_gene_table"] = requested["regulator_key"].isin(
-        available
-    )
+    requested["present_in_segmented_gene_table"] = requested["regulator_key"].isin(available)
     requested["gene_table_symbol"] = requested["regulator_key"].map(available)
     present = requested[requested["present_in_segmented_gene_table"]].copy()
     if present.empty:
-        raise ValueError(
-            "No configured RBP/ReMap regulator genes are present in the gene table."
-        )
+        raise ValueError("No configured RBP/ReMap regulator genes are present in the gene table.")
 
     row_order = _gene_row_order(adata_gene, codeword_cell_ids)
     gene_symbols = present["gene_table_symbol"].astype(str).tolist()
@@ -140,13 +134,9 @@ def build_regulator_design(
     kept_symbols = present.loc[keep, "gene_table_symbol"].astype(str).tolist()
     x_keep = x_raw[:, keep].tocsr()
     if "total_counts" in adata_gene.obs:
-        cell_totals = (
-            adata_gene.obs.iloc[row_order]["total_counts"].astype(float).to_numpy()
-        )
+        cell_totals = adata_gene.obs.iloc[row_order]["total_counts"].astype(float).to_numpy()
     else:
-        cell_totals = (
-            np.asarray(adata_gene[row_order, :].X.sum(axis=1)).ravel().astype(float)
-        )
+        cell_totals = np.asarray(adata_gene[row_order, :].X.sum(axis=1)).ravel().astype(float)
     scale = np.divide(
         10_000.0,
         cell_totals,
@@ -190,12 +180,7 @@ def _target_adata(sdata, svp: pd.DataFrame) -> tuple[AnnData, list[str]]:
     target_genes = svp_target_genes(svp)
     # DU is restricted to codeword features whose parent gene passed SV FDR.
     target_keys = {normalize_gene_symbol(gene) for gene in target_genes}
-    mask = (
-        adata.var[GENE_COL_CODEWORD]
-        .astype(str)
-        .map(normalize_gene_symbol)
-        .isin(target_keys)
-    )
+    mask = adata.var[GENE_COL_CODEWORD].astype(str).map(normalize_gene_symbol).isin(target_keys)
     if not mask.any():
         raise ValueError("No codeword features found for SVP target genes.")
     return adata[:, mask.to_numpy()].copy(), target_genes
@@ -225,8 +210,7 @@ def _cached_du_matches(svp: pd.DataFrame, covariates: list[str]) -> bool:
         and summary.get("parameters", {}).get("gpr_backend") == DU_GPR_BACKEND
         and summary.get("parameters", {}).get("min_counts") == MIN_COUNTS
         and summary.get("parameters", {}).get("min_bin_pct") == MIN_BIN_PCT
-        and summary.get("parameters", {}).get("min_component_size")
-        == MIN_COMPONENT_SIZE
+        and summary.get("parameters", {}).get("min_component_size") == MIN_COMPONENT_SIZE
     )
 
 
@@ -257,14 +241,12 @@ def _annotate_du(du: pd.DataFrame, status: pd.DataFrame) -> pd.DataFrame:
     out["method"] = DU_METHOD
     out["residualize"] = DU_RESIDUALIZE
     out["gpr_backend"] = DU_GPR_BACKEND
-    return out.sort_values(
-        ["pvalue_adj", "statistic"], ascending=[True, False]
-    ).reset_index(drop=True)
+    return out.sort_values(["pvalue_adj", "statistic"], ascending=[True, False]).reset_index(
+        drop=True
+    )
 
 
-def _write_du_summary(
-    du: pd.DataFrame, status: pd.DataFrame, metrics: pd.DataFrame
-) -> None:
+def _write_du_summary(du: pd.DataFrame, status: pd.DataFrame, metrics: pd.DataFrame) -> None:
     """Write compact metadata for validating the canonical all-SVP DU cache."""
     target_keys = sorted(du["gene_key"].dropna().astype(str).unique())
     covariate_keys = sorted(du["covariate_key"].dropna().astype(str).unique())

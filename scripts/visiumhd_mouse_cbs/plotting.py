@@ -4,6 +4,8 @@ from typing import Any
 
 import numpy as np
 
+from scripts.paper_utils import FIGURE_WIDTH_IN, FONT_CONFIG
+
 from .reference_annotations import (
     _as_patterns,
     _select_bed_rows,
@@ -12,8 +14,8 @@ from .reference_annotations import (
 )
 from .utils import normalize_gene_symbol
 
-MAX_FIGURE_WIDTH_IN = 185 / 25.4
-MIN_FONT_SIZE = 5
+MAX_FIGURE_WIDTH_IN = FIGURE_WIDTH_IN
+MIN_FONT_SIZE = FONT_CONFIG["text"]
 
 
 def bounded_font_size(size: float) -> float:
@@ -312,7 +314,11 @@ def _draw_feature_structure(gene_name: str, rows: list[dict[str, Any]]):
     legend_groups = list(dict.fromkeys(row["group"] for row in rows))
     ax.legend(
         handles=[
-            Patch(facecolor=colors.get(group, "0.5"), edgecolor="black", label=_short_group_label(group))
+            Patch(
+                facecolor=colors.get(group, "0.5"),
+                edgecolor="black",
+                label=_short_group_label(group),
+            )
             for group in legend_groups
         ],
         frameon=False,
@@ -349,10 +355,14 @@ def plot_feature_structure(
     if include_reference:
         rows.extend(_select_reference_rows(gene_key, reference_cache, ref_patterns, selected_ref))
     rows.extend(
-        _select_bed_rows("trend_3prime", gene_name, reference_cache, trend_patterns, sdata_cache, resolution)
+        _select_bed_rows(
+            "trend_3prime", gene_name, reference_cache, trend_patterns, sdata_cache, resolution
+        )
     )
     rows.extend(
-        _select_bed_rows("ffpe_probe", gene_name, reference_cache, probe_patterns, sdata_cache, resolution)
+        _select_bed_rows(
+            "ffpe_probe", gene_name, reference_cache, probe_patterns, sdata_cache, resolution
+        )
     )
 
     if not rows:

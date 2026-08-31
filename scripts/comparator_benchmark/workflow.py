@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,6 +26,8 @@ if __package__ in {None, ""}:
     __package__ = "scripts.comparator_benchmark"
 
 from sonic.statistics import apply_bh_correction
+
+from scripts.paper_utils import CLUSTERPROFILER_SCRIPT, clusterprofiler_command
 
 from .ad_pig_helpers import (
     ad_pig_anisotropy_cache_ready,
@@ -68,7 +69,6 @@ from .config import (
     BRAIN_DEV_REFERENCE_INPUT,
     BRAIN_DEV_REFERENCE_N_RADIAL_BINS,
     BRAIN_DEV_TESTS_FILE,
-    CLUSTERPROFILER_RSCRIPT,
     MAX_GENES,
     N_RADIAL_BINS,
     PANELS,
@@ -183,13 +183,9 @@ def _ad_pig_full_cache_ready(test_path: Path, null_path: Path) -> bool:
     )
     if observed_scenarios != expected or null_scenarios != expected:
         return False
-    observed_tests = set(
-        tests.loc[tests["panel"].eq("ad_pig"), "test"].dropna().astype(str)
-    )
+    observed_tests = set(tests.loc[tests["panel"].eq("ad_pig"), "test"].dropna().astype(str))
     null_tests = set(null.loc[null["panel"].eq("ad_pig"), "test"].dropna().astype(str))
-    return observed_tests == set(TEST_LABELS) and null_tests == {
-        test for test, _ in SPATIAL_TESTS
-    }
+    return observed_tests == set(TEST_LABELS) and null_tests == {test for test, _ in SPATIAL_TESTS}
 
 
 def _brain_dev_cache_ready(test_path: Path, null_path: Path) -> bool:
@@ -282,22 +278,16 @@ def _brain_dev_cache_ready(test_path: Path, null_path: Path) -> bool:
     )
     if observed_scenarios != expected or null_scenarios != expected:
         return False
-    observed_tests = set(
-        tests.loc[tests["panel"].eq("brain_dev"), "test"].dropna().astype(str)
-    )
-    null_tests = set(
-        null.loc[null["panel"].eq("brain_dev"), "test"].dropna().astype(str)
-    )
-    if observed_tests != set(TEST_LABELS) or null_tests != {
-        test for test, _ in SPATIAL_TESTS
-    }:
+    observed_tests = set(tests.loc[tests["panel"].eq("brain_dev"), "test"].dropna().astype(str))
+    null_tests = set(null.loc[null["panel"].eq("brain_dev"), "test"].dropna().astype(str))
+    if observed_tests != set(TEST_LABELS) or null_tests != {test for test, _ in SPATIAL_TESTS}:
         return False
 
     null_perm_counts = (
         null.loc[null["panel"].eq("brain_dev")]
-        .groupby(
-            ["input", "binning", "feature_mode", "requested_n_radial_bins", "test"]
-        )["perm_idx"]
+        .groupby(["input", "binning", "feature_mode", "requested_n_radial_bins", "test"])[
+            "perm_idx"
+        ]
         .nunique()
     )
     expected_null_groups = len(expected) * len(SPATIAL_TESTS)
@@ -410,11 +400,7 @@ def _observed_test_rows(
             raise ValueError("Expected a P_value column")
         if "P_adj" not in out.columns:
             out["P_adj"] = apply_bh_correction(out["P_value"].to_numpy(float))
-        keep = [
-            col
-            for col in ("Feature", "Statistic", "P_value", "P_adj")
-            if col in out.columns
-        ]
+        keep = [col for col in ("Feature", "Statistic", "P_value", "P_adj") if col in out.columns]
         out = out[keep].copy()
         out.insert(0, "test", test)
         for key, value in reversed(meta.items()):
@@ -559,17 +545,13 @@ def run_ad_pig_full_scenarios(  # noqa: C901
                     n_radial_bins=N_RADIAL_BINS,
                 )
                 if actual_n_bins != N_RADIAL_BINS:
-                    log(
-                        f"  adapted requested {N_RADIAL_BINS} bins to actual {actual_n_bins} bins"
-                    )
+                    log(f"  adapted requested {N_RADIAL_BINS} bins to actual {actual_n_bins} bins")
                 suffix = f"bins{actual_n_bins}"
                 if actual_n_bins != N_RADIAL_BINS:
                     suffix = f"{suffix}_requested{N_RADIAL_BINS}"
                 meta = {
                     "panel": "ad_pig",
-                    "scenario_id": (
-                        f"{input_transform}_{binning}_{feature_mode}_{suffix}"
-                    ),
+                    "scenario_id": (f"{input_transform}_{binning}_{feature_mode}_{suffix}"),
                     "input": input_transform,
                     "binning": binning,
                     "feature_mode": feature_mode,
@@ -623,9 +605,7 @@ def _effective_rank_summary(
 ) -> dict[str, Any]:
     subset = _subset_design(real_set, paths_order)
     if subset is None or subset["is_design"]:
-        raise ValueError(
-            "AD/PIG effective-rank summary requires a binary real contrast"
-        )
+        raise ValueError("AD/PIG effective-rank summary requires a binary real contrast")
     real_cmp = comparator.subset(subset["idx"])
     n_bins = int(real_cmp.spectra_.shape[-1])
     # Compute per-sample rank of cross-gene spectra.
@@ -638,9 +618,7 @@ def _effective_rank_summary(
     sample_names = [paths_order[int(sample_idx)].stem for sample_idx in subset["idx"]]
     return {
         "n_frequency_bins": n_bins,
-        "sample_effective_rank_samples": json.dumps(
-            sample_names, separators=(",", ":")
-        ),
+        "sample_effective_rank_samples": json.dumps(sample_names, separators=(",", ":")),
         "sample_effective_rank_values": json.dumps(
             [float(rank) for rank in sample_rank], separators=(",", ":")
         ),
@@ -710,12 +688,8 @@ def run_ad_pig_radial_bin_robustness(  # noqa: C901
     # Load the AD/PIG panel data and select genes for comparison.
     samples, _meta, sample_sets = load_panel("ad_pig")
     genes = _select_comparison_genes("ad_pig", samples, presence_threshold, max_genes)
-    real_set = next(
-        s for s in sample_sets if s.null_type == "real"
-    )  # 1 real sample set
-    perm_sets = [
-        s for s in sample_sets if s.null_type == "perm"
-    ]  # 12 shuffled sample sets
+    real_set = next(s for s in sample_sets if s.null_type == "real")  # 1 real sample set
+    perm_sets = [s for s in sample_sets if s.null_type == "perm"]  # 12 shuffled sample sets
 
     # Run the spatial test per n_radial_bins choice
     fitted: dict[tuple[int, str], tuple[Any, list[Path], int]] = {}
@@ -735,9 +709,7 @@ def run_ad_pig_radial_bin_robustness(  # noqa: C901
             fitted[(n_bins, binning)] = (comparator, paths_order, actual_n_bins)
             real_subset = _subset_design(real_set, paths_order)
             if real_subset is None or real_subset["is_design"]:
-                raise ValueError(
-                    "AD/PIG radial-bin robustness requires a binary real contrast"
-                )
+                raise ValueError("AD/PIG radial-bin robustness requires a binary real contrast")
             # Run DF and DF-norm tests
             for test, normalize_shape in SPATIAL_TESTS:
                 observed[(n_bins, binning, test)] = _spatial_test(
@@ -750,16 +722,10 @@ def run_ad_pig_radial_bin_robustness(  # noqa: C901
     for (n_bins, binning), (comparator, paths_order, actual_n_bins) in fitted.items():
         for test, normalize_shape in SPATIAL_TESTS:
             frame = observed[(n_bins, binning, test)]
-            ref = observed.get(
-                (AD_PIG_REFERENCE_N_RADIAL_BINS, binning, test), pd.DataFrame()
-            )
+            ref = observed.get((AD_PIG_REFERENCE_N_RADIAL_BINS, binning, test), pd.DataFrame())
             merged = frame.merge(ref, on="Feature", suffixes=("", "_ref"))
-            current_score = -np.log10(
-                np.clip(merged["P_value"].to_numpy(float), 1e-300, 1.0)
-            )
-            ref_score = -np.log10(
-                np.clip(merged["P_value_ref"].to_numpy(float), 1e-300, 1.0)
-            )
+            current_score = -np.log10(np.clip(merged["P_value"].to_numpy(float), 1e-300, 1.0))
+            ref_score = -np.log10(np.clip(merged["P_value_ref"].to_numpy(float), 1e-300, 1.0))
             if (
                 current_score.size < 2
                 or ref_score.size < 2
@@ -785,13 +751,9 @@ def run_ad_pig_radial_bin_robustness(  # noqa: C901
                 subset = _subset_design(perm_set, paths_order)
                 if subset is None or subset["is_design"]:
                     continue
-                perm = _spatial_test(
-                    comparator, subset, normalize_shape=normalize_shape
-                )
+                perm = _spatial_test(comparator, subset, normalize_shape=normalize_shape)
                 null_parts.append(perm["P_value"].to_numpy(float))
-            null_p = (
-                np.concatenate(null_parts) if null_parts else np.array([], dtype=float)
-            )
+            null_p = np.concatenate(null_parts) if null_parts else np.array([], dtype=float)
             rank_summary = _effective_rank_summary(
                 comparator,
                 paths_order,
@@ -811,12 +773,8 @@ def run_ad_pig_radial_bin_robustness(  # noqa: C901
                     **rank_summary,
                     "n_perm_sets": len(perm_sets),
                     "n_null_pvalues": int(null_p.size),
-                    "perm_fpr_0p05": (
-                        float((null_p < 0.05).mean()) if null_p.size else np.nan
-                    ),
-                    "perm_median_p": (
-                        float(np.nanmedian(null_p)) if null_p.size else np.nan
-                    ),
+                    "perm_fpr_0p05": (float((null_p < 0.05).mean()) if null_p.size else np.nan),
+                    "perm_median_p": (float(np.nanmedian(null_p)) if null_p.size else np.nan),
                     "n_fdr_hits": int(len(current_hits)),
                     "ref_n_fdr_hits": int(len(ref_hits)),
                     "pvalue_spearman_vs_ref": corr,
@@ -841,12 +799,8 @@ def run_ad_pig_spectral_replicate_distance_cache(
     """Relative DC/radial-bin distances for within- vs cross-animal sections."""
     path = RESULT_DIR / AD_PIG_SPECTRAL_REPLICATE_DISTANCE_FILE
     if ad_pig_spectral_replicate_distance_cache_ready(path) and not force:
-        log(
-            "using cached AD/PIG spectral replicate distances; pass --force to recompute"
-        )
-        return {
-            "ad_pig_spectral_replicate_distance": str(path.relative_to(PROJECT_ROOT))
-        }
+        log("using cached AD/PIG spectral replicate distances; pass --force to recompute")
+        return {"ad_pig_spectral_replicate_distance": str(path.relative_to(PROJECT_ROOT))}
 
     ensure_dirs()
 
@@ -855,18 +809,14 @@ def run_ad_pig_spectral_replicate_distance_cache(
     real_set = next(s for s in sample_sets if s.null_type == "real")
     paths_order = sorted([*real_set.a_paths, *real_set.b_paths])
     real_samples = {path_i: samples[path_i] for path_i in paths_order}
-    genes = _select_comparison_genes(
-        "ad_pig", real_samples, presence_threshold, max_genes
-    )
+    genes = _select_comparison_genes("ad_pig", real_samples, presence_threshold, max_genes)
     pig_gene_set = {gene for gene in AD_PIG_POS_CONTROLS if gene in set(genes)}
     condition_by_path = {
         **dict.fromkeys(real_set.a_paths, "WT"),
         **dict.fromkeys(real_set.b_paths, "AppNL-G-F"),
     }
 
-    log(
-        f"AD/PIG spectral replicate distances samples={len(paths_order)} genes={len(genes)}"
-    )
+    log(f"AD/PIG spectral replicate distances samples={len(paths_order)} genes={len(genes)}")
     # Compute binned radial spectra across genes and samples.
     comparator, paths_order = fit_all_samples(
         real_samples,
@@ -884,14 +834,10 @@ def run_ad_pig_spectral_replicate_distance_cache(
     feature_values = np.concatenate([dc, spectra], axis=2)
     n_genes, n_bins = feature_values.shape[1], feature_values.shape[2]
     bin_index = np.arange(n_bins, dtype=int)
-    bin_labels = np.array(
-        ["DC", *[f"k{i:02d}" for i in range(1, n_bins)]], dtype=object
-    )
+    bin_labels = np.array(["DC", *[f"k{i:02d}" for i in range(1, n_bins)]], dtype=object)
     bin_types = np.array(["DC", *["radial"] * (n_bins - 1)], dtype=object)
     gene_arr = np.asarray(genes, dtype=object)
-    gene_set_arr = np.where(
-        np.isin(gene_arr, list(pig_gene_set)), "PIG", "non-PIG"
-    ).astype(object)
+    gene_set_arr = np.where(np.isin(gene_arr, list(pig_gene_set)), "PIG", "non-PIG").astype(object)
     flat_gene = np.repeat(gene_arr, n_bins)
     flat_gene_set = np.repeat(gene_set_arr, n_bins)
     flat_bin = np.tile(bin_labels, n_genes)
@@ -971,8 +917,8 @@ def _raw_2d_anisotropy_scores(
     for sample_idx, path_i in enumerate(paths_order):
         # Use SONIC's raw spectrum chunker directly: these are 2D spectra
         # before any rotational alignment or radial bin collapse.
-        spectrum_chunker, _dc, _presence, n_genes, grid_shape = (
-            comparator._nufft_spectrum_chunker(sample_idx)
+        spectrum_chunker, _dc, _presence, n_genes, grid_shape = comparator._nufft_spectrum_chunker(
+            sample_idx
         )
         power = spectrum_chunker(0, n_genes)
         scores = power_spectrum_anisotropy(
@@ -1013,16 +959,12 @@ def run_ad_pig_anisotropy_cache(
         **dict.fromkeys(real_set.b_paths, "AppNL-G-F"),
     }
     real_samples = {path_i: samples[path_i] for path_i in paths_order}
-    present = set.intersection(
-        *(set(samples[path_i].var_names) for path_i in paths_order)
-    )
+    present = set.intersection(*(set(samples[path_i].var_names) for path_i in paths_order))
     # Keep PIG genes explicit and use the expression-ranked non-PIG panel only
     # as the background distribution for the anisotropy supplement.
     pig_genes = [gene for gene in AD_PIG_POS_CONTROLS if gene in present]
     if not pig_genes:
-        raise RuntimeError(
-            "No AD/PIG positive-control genes are present in real samples"
-        )
+        raise RuntimeError("No AD/PIG positive-control genes are present in real samples")
     background_genes = [
         gene
         for gene in select_gene_panel(real_samples, presence_threshold, max_genes)
@@ -1036,9 +978,7 @@ def run_ad_pig_anisotropy_cache(
         f"samples={len(paths_order)} genes={len(genes)} "
         f"(PIG={len(pig_genes)}, background={len(background_genes)})"
     )
-    gene_set_by_gene = {
-        gene: ("PIG" if gene in pig_gene_set else "non-PIG") for gene in genes
-    }
+    gene_set_by_gene = {gene: ("PIG" if gene in pig_gene_set else "non-PIG") for gene in genes}
     long = _raw_2d_anisotropy_scores(
         samples=samples,
         paths_order=paths_order,
@@ -1071,9 +1011,7 @@ def run_brain_dev_anisotropy_cache(
     real_set = next(s for s in sample_sets if s.null_type == "real")
     paths_order = list(real_set.a_paths)
     real_samples = {path_i: samples[path_i] for path_i in paths_order}
-    present = set.intersection(
-        *(set(samples[path_i].var_names) for path_i in paths_order)
-    )
+    present = set.intersection(*(set(samples[path_i].var_names) for path_i in paths_order))
 
     # Separate marker genes and background genes for anisotropy distribution comparison.
     marker_genes = [gene for gene in brain_dev_forced_controls() if gene in present]
@@ -1088,12 +1026,8 @@ def run_brain_dev_anisotropy_cache(
     marker_set = set(marker_genes)
 
     meta_by_path = meta.assign(_path=meta["h5ad_path"].map(Path)).set_index("_path")
-    groups = {
-        path_i: str(meta_by_path.loc[path_i, "timepoint"]) for path_i in paths_order
-    }
-    gene_set_by_gene = {
-        gene: ("marker" if gene in marker_set else "non-marker") for gene in genes
-    }
+    groups = {path_i: str(meta_by_path.loc[path_i, "timepoint"]) for path_i in paths_order}
+    gene_set_by_gene = {gene: ("marker" if gene in marker_set else "non-marker") for gene in genes}
     log(
         "brain-development anisotropy "
         f"samples={len(paths_order)} genes={len(genes)} "
@@ -1165,41 +1099,17 @@ def _brain_dev_reference_tests_wide(full_tests: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _clusterprofiler_command() -> list[str]:
-    env_rscript = os.environ.get("CLUSTERPROFILER_RSCRIPT")
-    if env_rscript:
-        return [env_rscript]
-    active_env_rscript = Path(sys.prefix) / "bin" / "Rscript"
-    if active_env_rscript.exists():
-        return [str(active_env_rscript)]
-    conda = shutil.which("conda")
-    if conda:
-        return [
-            conda,
-            "run",
-            "-n",
-            os.environ.get("CLUSTERPROFILER_CONDA_ENV", "sonic_paper"),
-            "Rscript",
-        ]
-    path_rscript = shutil.which("Rscript")
-    if path_rscript:
-        return [path_rscript]
-    raise FileNotFoundError(
-        "Could not find conda or Rscript for clusterProfiler enrichment."
-    )
-
-
 def run_clusterprofiler_jobs(job_rows: list[dict[str, Any]]) -> None:
     """Run clusterProfiler GO BP + KEGG enrichment for pending gene-set jobs."""
     if not job_rows:
         return
-    if not CLUSTERPROFILER_RSCRIPT.exists():
-        raise FileNotFoundError(f"Missing {CLUSTERPROFILER_RSCRIPT}")
+    if not CLUSTERPROFILER_SCRIPT.exists():
+        raise FileNotFoundError(f"Missing {CLUSTERPROFILER_SCRIPT}")
 
     with tempfile.TemporaryDirectory(prefix="clusterprofiler_jobs_") as tmp:
         job_path = Path(tmp) / "jobs.csv"
         pd.DataFrame(job_rows).to_csv(job_path, index=False)
-        cmd = _clusterprofiler_command() + [str(CLUSTERPROFILER_RSCRIPT), str(job_path)]
+        cmd = clusterprofiler_command() + [str(CLUSTERPROFILER_SCRIPT), str(job_path)]
         timeout = int(os.environ.get("CLUSTERPROFILER_TIMEOUT_SECONDS", "900"))
         try:
             proc = subprocess.run(
@@ -1290,9 +1200,7 @@ def _df_norm_enrichment_contrasts(panel: str, top_n: int) -> pd.DataFrame:  # no
             continue
         keep = [col for col in base_cols + test_cols if col in df.columns]
         out = df[keep].copy()
-        out = out.rename(
-            columns={col: f"{col}_{test}" for col in test_cols if col in out.columns}
-        )
+        out = out.rename(columns={col: f"{col}_{test}" for col in test_cols if col in out.columns})
         parts.append(out)
     if len(parts) != 2:
         return pd.DataFrame()
@@ -1368,9 +1276,7 @@ def _df_norm_enrichment_contrasts(panel: str, top_n: int) -> pd.DataFrame:  # no
         ascending=[True, True, False, False],
         kind="stable",
     ).reset_index(drop=True)
-    merged["rank_abs_delta"] = (
-        merged.groupby(["panel", "variant"], sort=False).cumcount() + 1
-    )
+    merged["rank_abs_delta"] = merged.groupby(["panel", "variant"], sort=False).cumcount() + 1
     return merged
 
 
@@ -1420,12 +1326,7 @@ def _run_topn_enrichment_cache(
             and genes_path.exists()
             and enrich_path.stat().st_mtime < genes_path.stat().st_mtime
         )
-        if (
-            enrich_path.exists()
-            and not genes_changed
-            and not enrich_stale
-            and not force
-        ):
+        if enrich_path.exists() and not genes_changed and not enrich_stale and not force:
             continue
         variant = f"topN{top_n}"
         job_rows.extend(
@@ -1445,9 +1346,7 @@ def _run_topn_enrichment_cache(
 
     # Run clusterProfiler enrichment analysis in R using the wrapper function
     if job_rows:
-        log(
-            f"clusterProfiler enrichment jobs={len({row['job_id'] for row in job_rows})}"
-        )
+        log(f"clusterProfiler enrichment jobs={len({row['job_id'] for row in job_rows})}")
         run_clusterprofiler_jobs(job_rows)
 
     contrast_path = RESULT_DIR / contrast_file
@@ -1470,9 +1369,7 @@ def run_ad_pig_enrichment_cache(
     # Reuse the reference test results from the full_scenarios run
     full_path = RESULT_DIR / AD_PIG_FULL_TESTS_FILE
     if not full_path.exists():
-        raise FileNotFoundError(
-            f"Missing {full_path}; run run_ad_pig_full_scenarios() first."
-        )
+        raise FileNotFoundError(f"Missing {full_path}; run run_ad_pig_full_scenarios() first.")
     full_tests = pd.read_csv(full_path)
     reference = _ad_pig_reference_tests_wide(full_tests)
     return _run_topn_enrichment_cache(
@@ -1495,9 +1392,7 @@ def run_brain_dev_enrichment_cache(
     # Reuse the reference test results from the full_scenarios run
     test_path = RESULT_DIR / BRAIN_DEV_TESTS_FILE
     if not test_path.exists():
-        raise FileNotFoundError(
-            f"Missing {test_path}; run _run_brain_dev_full_scenarios() first."
-        )
+        raise FileNotFoundError(f"Missing {test_path}; run _run_brain_dev_full_scenarios() first.")
     reference = _brain_dev_reference_tests_wide(pd.read_csv(test_path))
     return _run_topn_enrichment_cache(
         panel="brain_dev",
@@ -1685,9 +1580,7 @@ def run_brain_dev_workflow(
             f"permutations={BRAIN_DEV_NULL_PERMUTATIONS}"
         )
         samples, _meta, sample_sets = load_panel("brain_dev")
-        genes = _select_comparison_genes(
-            "brain_dev", samples, presence_threshold, max_genes
-        )
+        genes = _select_comparison_genes("brain_dev", samples, presence_threshold, max_genes)
         observed, null = _run_brain_dev_full_scenarios(
             samples=samples,
             sample_sets=sample_sets,
@@ -1747,12 +1640,8 @@ def run_workflow(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run and cache comparator benchmark inputs."
-    )
-    parser.add_argument(
-        "--force", action="store_true", help="Recompute cached outputs."
-    )
+    parser = argparse.ArgumentParser(description="Run and cache comparator benchmark inputs.")
+    parser.add_argument("--force", action="store_true", help="Recompute cached outputs.")
     parser.add_argument(
         "--analysis",
         choices=("ad-pig", "brain-dev", "all"),

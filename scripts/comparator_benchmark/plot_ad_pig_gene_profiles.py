@@ -16,6 +16,8 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     __package__ = "scripts.comparator_benchmark"
 
+from scripts.paper_utils import manuscript_size
+
 from .config import (
     AD_PIG_FULL_TESTS_FILE,
     AD_PIG_REFERENCE_BINNING,
@@ -61,12 +63,8 @@ def _load_ad_pig_stats() -> pd.DataFrame:
         & tests["n_radial_bins"].eq(AD_PIG_REFERENCE_N_RADIAL_BINS)
     ].copy()
     if ref.empty:
-        raise RuntimeError(
-            "Reference AD/PIG scenario is missing from ad_pig_full_tests.csv"
-        )
-    wide = ref.pivot_table(
-        index="Feature", columns="test", values="P_value", aggfunc="first"
-    )
+        raise RuntimeError("Reference AD/PIG scenario is missing from ad_pig_full_tests.csv")
+    wide = ref.pivot_table(index="Feature", columns="test", values="P_value", aggfunc="first")
     wide = wide.rename(columns={col: f"P_{col}" for col in wide.columns})
     return wide
 
@@ -77,9 +75,7 @@ class AdPigProfilePlotter:
     def __init__(self, genes: list[str]) -> None:
         """Load AD/PIG samples and fit radial spectra for exactly ``genes``."""
         self.samples, _meta, sample_sets = load_panel("ad_pig")
-        present = set.intersection(
-            *(set(adata.var_names) for adata in self.samples.values())
-        )
+        present = set.intersection(*(set(adata.var_names) for adata in self.samples.values()))
         self.genes = unique(genes)
         missing = [gene for gene in self.genes if gene not in present]
         if missing:
@@ -88,9 +84,7 @@ class AdPigProfilePlotter:
         self.real_set = next(s for s in sample_sets if s.null_type == "real")
         # The standalone plotter is argument-driven: it fits only the requested
         # genes so custom profile PDFs do not depend on hidden panel choices.
-        self.comparator, self.paths_order = fit_all_samples(
-            self.samples, self.genes, "radial"
-        )
+        self.comparator, self.paths_order = fit_all_samples(self.samples, self.genes, "radial")
         path_to_idx = {p: i for i, p in enumerate(self.paths_order)}
         self.wt_idx = np.asarray(
             [path_to_idx[p] for p in self.real_set.a_paths if p in path_to_idx],
@@ -109,9 +103,7 @@ class AdPigProfilePlotter:
 
     def gene_vmax(self, gene: str, q: float = 0.99) -> float:
         """Shared upper color limit for the WT/AppNL-G-F maps of one gene."""
-        return common_gene_vmax(
-            (self.samples[self.wt_path], self.samples[self.ad_path]), gene, q=q
-        )
+        return common_gene_vmax((self.samples[self.wt_path], self.samples[self.ad_path]), gene, q=q)
 
     def plot_spatial(self, ax, gene: str, path: Path, title: str, vmax: float):
         """Draw one spatial expression map with a caller-provided color scale."""
@@ -162,9 +154,7 @@ class AdPigProfilePlotter:
                 lw=1.35,
                 label=f"{label} (n={y.shape[0]})",
             )
-        ax.legend(
-            frameon=True, loc="upper right", fontsize=5, borderpad=0.2, handlelength=1.4
-        )
+        ax.legend(frameon=True, loc="upper right", fontsize=5, borderpad=0.2, handlelength=1.4)
         ax.set_yscale("log")
         ax.set_xlabel("Radial bin")
         ax.set_ylabel("P(k)")
@@ -243,7 +233,7 @@ def _add_gene_row(
         ax_wt,
         gene,
         plotter.wt_path,
-        f"$\\it{{{gene}}}$" + f"\n{AD_MAP_LABELS[0]}",
+        rf"$\mathit{{{gene}}}$" + f"\n{AD_MAP_LABELS[0]}",
         vmax,
     )
     sc = plotter.plot_spatial(ax_ad, gene, plotter.ad_path, AD_MAP_LABELS[1], vmax)
@@ -275,7 +265,7 @@ def _make_page(
 ):
     """Build one PDF page containing up to ``rows_per_page`` gene rows."""
     height_mm = max(70.0, 38.5 * rows_per_page + 8.0)
-    fig = plt.figure(figsize=(185 / 25.4, height_mm / 25.4))
+    fig = plt.figure(figsize=manuscript_size(height_mm))
     outer = gridspec.GridSpec(
         len(subset),
         1,
@@ -312,9 +302,7 @@ def generate_pdf(
     real = _load_ad_pig_stats()
     missing_stats = [gene for gene in genes if gene not in real.index]
     if missing_stats:
-        raise KeyError(
-            f"Genes missing from cached AD/PIG real-test table: {missing_stats}"
-        )
+        raise KeyError(f"Genes missing from cached AD/PIG real-test table: {missing_stats}")
     # Fit once per requested gene list, then reuse the plotter across pages.
     plotter = AdPigProfilePlotter(genes)
 

@@ -40,7 +40,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -51,6 +50,8 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
     __package__ = "scripts.atera_ffpe_human_brca.ankrd30a"
+
+from scripts.paper_utils import log
 
 from ..config import (
     TCGA_BAM_MANIFEST_TSV,
@@ -112,10 +113,6 @@ MANIFEST_COLUMNS = [
     "slice_bytes",
     "slice_error",
 ]
-
-
-def log(message: str) -> None:
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
 
 
 def sanitize_token(value: object, *, fallback: str = "NA") -> str:
@@ -209,9 +206,7 @@ def build_filters(args: argparse.Namespace) -> dict[str, object]:
         content.append(in_filter("access", ["controlled"]))
     if not args.all_workflows:
         content.append(
-            in_filter(
-                "analysis.workflow_type", args.workflow_type or [DEFAULT_WORKFLOW_TYPE]
-            )
+            in_filter("analysis.workflow_type", args.workflow_type or [DEFAULT_WORKFLOW_TYPE])
         )
     return {"op": "and", "content": content}
 
@@ -238,18 +233,12 @@ def flatten_hit(hit: dict[str, object], *, slice_region: str) -> dict[str, str]:
             sample_submitters.append(str(sample.get("submitter_id", "")))
             sample_types.append(str(sample.get("sample_type", "")))
             for portion in sample.get("portions") or []:
-                for analyte in (
-                    portion.get("analytes") or [] if isinstance(portion, dict) else []
-                ):
+                for analyte in portion.get("analytes") or [] if isinstance(portion, dict) else []:
                     for aliquot in (
-                        analyte.get("aliquots") or []
-                        if isinstance(analyte, dict)
-                        else []
+                        analyte.get("aliquots") or [] if isinstance(analyte, dict) else []
                     ):
                         if isinstance(aliquot, dict):
-                            aliquot_submitters.append(
-                                str(aliquot.get("submitter_id", ""))
-                            )
+                            aliquot_submitters.append(str(aliquot.get("submitter_id", "")))
 
     associated = hit.get("associated_entities") or []
     if not isinstance(associated, list):
@@ -307,18 +296,14 @@ def add_duplicate_flags(rows: list[dict[str, str]]) -> None:
         row.get("case_submitter_id", "") for row in rows if row.get("case_submitter_id")
     )
     sample_counts = Counter(
-        row.get("sample_submitter_id", "")
-        for row in rows
-        if row.get("sample_submitter_id")
+        row.get("sample_submitter_id", "") for row in rows if row.get("sample_submitter_id")
     )
     for row in rows:
         case_key = row.get("case_submitter_id", "")
         sample_key = row.get("sample_submitter_id", "")
         row["n_files_for_case_submitter_id"] = str(case_counts.get(case_key, 0))
         row["n_files_for_sample_submitter_id"] = str(sample_counts.get(sample_key, 0))
-        row["duplicate_case_submitter_id"] = (
-            "true" if case_counts.get(case_key, 0) > 1 else "false"
-        )
+        row["duplicate_case_submitter_id"] = "true" if case_counts.get(case_key, 0) > 1 else "false"
         row["duplicate_sample_submitter_id"] = (
             "true" if sample_counts.get(sample_key, 0) > 1 else "false"
         )
@@ -328,18 +313,10 @@ def validation_summary(rows: list[dict[str, str]]) -> dict[str, object]:
     return {
         "n_files": len(rows),
         "n_unique_cases": len(
-            {
-                row.get("case_submitter_id", "")
-                for row in rows
-                if row.get("case_submitter_id")
-            }
+            {row.get("case_submitter_id", "") for row in rows if row.get("case_submitter_id")}
         ),
         "n_unique_samples": len(
-            {
-                row.get("sample_submitter_id", "")
-                for row in rows
-                if row.get("sample_submitter_id")
-            }
+            {row.get("sample_submitter_id", "") for row in rows if row.get("sample_submitter_id")}
         ),
         "n_ok_slices": sum(row.get("slice_status") == "ok" for row in rows),
         "n_error_slices": sum(row.get("slice_status") == "error" for row in rows),
@@ -398,18 +375,12 @@ def run_cmd(cmd: list[str], log_path: Path) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log(f"run: {' '.join(cmd)}")
     with log_path.open("w") as handle:
-        completed = subprocess.run(
-            cmd, stdout=handle, stderr=subprocess.STDOUT, text=True
-        )
+        completed = subprocess.run(cmd, stdout=handle, stderr=subprocess.STDOUT, text=True)
     if completed.returncode != 0:
-        raise RuntimeError(
-            f"Command failed with exit {completed.returncode}: {' '.join(cmd)}"
-        )
+        raise RuntimeError(f"Command failed with exit {completed.returncode}: {' '.join(cmd)}")
 
 
-def download_bam_slice(
-    args: argparse.Namespace, file_id: str, output_bam: Path
-) -> None:
+def download_bam_slice(args: argparse.Namespace, file_id: str, output_bam: Path) -> None:
     if output_bam.exists() and output_bam.stat().st_size > 0 and not args.force:
         log(f"reuse {output_bam}")
         return
@@ -426,9 +397,7 @@ def download_bam_slice(
         headers={"X-Auth-Token": token},
     )
     with urllib.request.urlopen(request) as response:
-        with tempfile.NamedTemporaryFile(
-            "wb", dir=str(output_bam.parent), delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile("wb", dir=str(output_bam.parent), delete=False) as tmp:
             shutil.copyfileobj(response, tmp)
             tmp_path = Path(tmp.name)
     tmp_path.replace(output_bam)
@@ -457,9 +426,7 @@ def slice_bams(args: argparse.Namespace) -> Path:
             [samtools, "index", "-@", str(args.threads), str(output_bam)],
             logs / f"{output_bam.name}.index.log",
         )
-        with output_bam.with_suffix(output_bam.suffix + ".idxstats.tsv").open(
-            "w"
-        ) as handle:
+        with output_bam.with_suffix(output_bam.suffix + ".idxstats.tsv").open("w") as handle:
             completed = subprocess.run(
                 [samtools, "idxstats", str(output_bam)], stdout=handle, text=True
             )
@@ -479,9 +446,7 @@ def slice_bams(args: argparse.Namespace) -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Download TCGA-BRCA ANKRD30A sliced BAMs."
-    )
+    parser = argparse.ArgumentParser(description="Download TCGA-BRCA ANKRD30A sliced BAMs.")
     parser.add_argument("--token-file", type=Path)
     parser.add_argument("--slice-region", default=DEFAULT_SLICE_REGION)
     parser.add_argument("--threads", type=int, default=4)
@@ -492,9 +457,7 @@ def main() -> None:
     parser.add_argument("--project", default=DEFAULT_PROJECT)
     parser.add_argument("--workflow-type", action="append")
     parser.add_argument("--all-workflows", action="store_true")
-    parser.add_argument(
-        "--controlled-only", action=argparse.BooleanOptionalAction, default=True
-    )
+    parser.add_argument("--controlled-only", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--page-size", type=int, default=1000)
     parser.add_argument("--gdc-api-base", default=DEFAULT_GDC_API_BASE)
     parser.add_argument("--samtools")

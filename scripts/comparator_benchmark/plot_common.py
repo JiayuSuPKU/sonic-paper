@@ -12,6 +12,16 @@ import pandas as pd
 from scipy import sparse
 from sonic.statistics import apply_bh_correction
 
+from scripts.paper_utils import (
+    FONT_CONFIG,
+    neglog10,
+)
+from scripts.paper_utils import (
+    configure_paper_matplotlib as _configure_paper_matplotlib,
+)
+
+__all__ = ["neglog10"]
+
 ENRICHMENT_NUMERIC_COLUMNS: tuple[str, ...] = (
     "abs_delta",
     "stronger_score",
@@ -27,29 +37,10 @@ ENRICHMENT_NUMERIC_COLUMNS: tuple[str, ...] = (
 
 def configure_paper_matplotlib() -> None:
     """Apply the benchmark figure font and line defaults."""
-    mpl.rcParams.update(
-        {
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-            "font.family": ["Arial", "DejaVu Sans"],
-            "font.size": 6,
-            "axes.titlesize": 7,
-            "axes.labelsize": 6,
-            "xtick.labelsize": 6,
-            "ytick.labelsize": 6,
-            "legend.fontsize": 5.5,
-            "axes.linewidth": 0.6,
-            "xtick.major.width": 0.5,
-            "ytick.major.width": 0.5,
-            "xtick.major.size": 2.5,
-            "ytick.major.size": 2.5,
-        }
+    _configure_paper_matplotlib(
+        fonts=FONT_CONFIG,
+        savefig_dpi=None,
     )
-
-
-def neglog10(values) -> np.ndarray:
-    """Return clipped -log10 p-values for stable plotting."""
-    return -np.log10(np.clip(np.asarray(values, dtype=float), 1e-300, 1.0))
 
 
 def gene_test_stats(
@@ -69,9 +60,7 @@ def fdr_counts(
 ) -> dict[str, int]:
     """Count BH-FDR significant genes for each test in a wide p-value table."""
     return {
-        test: int(
-            (apply_bh_correction(wide_tests[f"P_{test}"].to_numpy(float)) < alpha).sum()
-        )
+        test: int((apply_bh_correction(wide_tests[f"P_{test}"].to_numpy(float)) < alpha).sum())
         for test in tests
     }
 
@@ -125,9 +114,7 @@ def scenario_wide(
     ].copy()
     if sub.empty:
         return pd.DataFrame(columns=["panel", "Feature", "P_DE", "P_DF", "P_DF_norm"])
-    wide = sub.pivot_table(
-        index="Feature", columns="test", values="P_value", aggfunc="first"
-    )
+    wide = sub.pivot_table(index="Feature", columns="test", values="P_value", aggfunc="first")
     wide = wide.rename(columns={test: f"P_{test}" for test in wide.columns})
     wide = wide.reset_index()
     wide.insert(0, "panel", panel)

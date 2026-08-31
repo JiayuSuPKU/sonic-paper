@@ -7,7 +7,6 @@ import json
 import logging
 import shutil
 import subprocess
-import sys
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -18,6 +17,8 @@ import pandas as pd
 from scipy.spatial import cKDTree
 from scipy.stats import false_discovery_control, hypergeom
 from sklearn.cluster import MiniBatchKMeans
+
+from scripts.paper_utils import CLUSTERPROFILER_SCRIPT, clusterprofiler_command
 
 from . import config as C
 from . import orthology, sv, utils
@@ -59,10 +60,10 @@ def cached_go_enrichment(  # noqa: C901
     result_dir: Path = RESULT_DIR,
 ) -> pd.DataFrame:
     """Run and cache named clusterProfiler queries with explicit universes."""
-    rscript = Path(sys.prefix) / "bin" / "Rscript"
-    wrapper = C.PROJECT_ROOT / "scripts" / "run_clusterprofiler.R"
-    if not rscript.exists():
-        raise FileNotFoundError(f"Missing Rscript in active environment: {rscript}")
+    wrapper = CLUSTERPROFILER_SCRIPT
+    if not wrapper.exists():
+        raise FileNotFoundError(f"Missing clusterProfiler wrapper: {wrapper}")
+    rscript_command = clusterprofiler_command()
 
     normalized = {}
     for name, (genes, universe, orgdb) in queries.items():
@@ -83,9 +84,7 @@ def cached_go_enrichment(  # noqa: C901
         "queries": {
             name: {
                 "genes_sha256": hashlib.sha256("\n".join(genes).encode()).hexdigest(),
-                "universe_sha256": hashlib.sha256(
-                    "\n".join(universe).encode()
-                ).hexdigest(),
+                "universe_sha256": hashlib.sha256("\n".join(universe).encode()).hexdigest(),
                 "n_genes": len(genes),
                 "n_universe": len(universe),
                 "orgdb": orgdb,
@@ -97,9 +96,7 @@ def cached_go_enrichment(  # noqa: C901
     cache_path = result_dir / f"{cache_name}.csv.gz"
     manifest_path = result_dir / f"{cache_name}_manifest.json"
     if cache_path.exists() != manifest_path.exists():
-        raise RuntimeError(
-            f"Incomplete GO cache: expected both {cache_path} and {manifest_path}."
-        )
+        raise RuntimeError(f"Incomplete GO cache: expected both {cache_path} and {manifest_path}.")
     if cache_path.exists() and json.loads(manifest_path.read_text()) == cache_config:
         return pd.read_csv(cache_path)
 
@@ -132,7 +129,7 @@ def cached_go_enrichment(  # noqa: C901
         jobs_path = root / "jobs.csv"
         pd.DataFrame(jobs).to_csv(jobs_path, index=False)
         subprocess.run(
-            [str(rscript), str(wrapper), str(jobs_path)],
+            rscript_command + [str(wrapper), str(jobs_path)],
             cwd=C.PROJECT_ROOT,
             check=True,
             capture_output=True,
@@ -162,9 +159,7 @@ def select_go_terms(
 ) -> pd.DataFrame:
     """Select specific significant terms retained by semantic simplification."""
     terms = enrichment.copy()
-    terms["term_universe_fraction"] = (
-        terms["term_size"] / terms["effective_domain_size"]
-    )
+    terms["term_universe_fraction"] = terms["term_size"] / terms["effective_domain_size"]
     terms = terms[
         terms[fdr_column].le(C.GO_FDR_THRESHOLD)
         & terms["term_universe_fraction"].le(C.GO_MAX_TERM_UNIVERSE_FRACTION)
@@ -229,8 +224,7 @@ def embedding_points(embedding: dict[str, Any]) -> pd.DataFrame:
         n_sections, n_genes, _ = coordinates.shape
         meta = bundle["meta"].reset_index(drop=True)
         stage_rank = {
-            stage: index
-            for index, stage in enumerate(C.SPECIES_CONFIGS[species].KEPT_TIMEPOINTS)
+            stage: index for index, stage in enumerate(C.SPECIES_CONFIGS[species].KEPT_TIMEPOINTS)
         }
         stage_index = meta["timepoint"].map(stage_rank)
         if stage_index.isna().any():
@@ -251,19 +245,11 @@ def embedding_points(embedding: dict[str, Any]) -> pd.DataFrame:
     points = pd.concat(frames, ignore_index=True)
 
     table = orthology.load_orthologs()
-    mouse_to_human = dict(
-        zip(table["mouse_symbol"], table["human_symbol"], strict=True)
-    )
-    human_to_mouse = dict(
-        zip(table["human_symbol"], table["mouse_symbol"], strict=True)
-    )
+    mouse_to_human = dict(zip(table["mouse_symbol"], table["human_symbol"], strict=True))
+    human_to_mouse = dict(zip(table["human_symbol"], table["mouse_symbol"], strict=True))
     mouse = points["species"].eq("mouse")
-    points["mouse_symbol"] = np.where(
-        mouse, points["gene"], points["gene"].map(human_to_mouse)
-    )
-    points["human_symbol"] = np.where(
-        mouse, points["gene"].map(mouse_to_human), points["gene"]
-    )
+    points["mouse_symbol"] = np.where(mouse, points["gene"], points["gene"].map(human_to_mouse))
+    points["human_symbol"] = np.where(mouse, points["gene"].map(mouse_to_human), points["gene"])
 
     panels = {
         species: group["gene"].drop_duplicates().astype(str).tolist()
@@ -273,9 +259,7 @@ def embedding_points(embedding: dict[str, Any]) -> pd.DataFrame:
         species: group["section_id"].drop_duplicates().astype(str).tolist()
         for species, group in points.groupby("species", sort=False)
     }
-    statistics = sv.load(panels, section_ids=section_ids).rename(
-        columns={"feature": "gene"}
-    )
+    statistics = sv.load(panels, section_ids=section_ids).rename(columns={"feature": "gene"})
     points = points.merge(
         statistics[["species", "section_id", "gene", "Z_score"]],
         on=["species", "section_id", "gene"],
@@ -333,9 +317,7 @@ def _gene_stage_memberships(
     )
     coordinates = memberships[PC_COLUMNS].to_numpy(np.float32)
     centre_coordinates = centres[PC_COLUMNS].to_numpy(np.float32)
-    distances = np.square(coordinates[:, None, :] - centre_coordinates[None, :, :]).sum(
-        axis=2
-    )
+    distances = np.square(coordinates[:, None, :] - centre_coordinates[None, :, :]).sum(axis=2)
     memberships["cluster"] = centres["cluster"].to_numpy(int)[distances.argmin(axis=1)]
     return memberships
 
@@ -351,12 +333,8 @@ def _cluster_functional_labels(enrichment: pd.DataFrame) -> pd.DataFrame:
     ]
     rows = []
     for cluster, (label, go_ids) in CLUSTER_FUNCTIONAL_LABELS.items():
-        support = eligible[
-            eligible["cluster"].eq(cluster) & eligible["native"].isin(go_ids)
-        ]
-        observed = set(
-            support[["species", "native"]].itertuples(index=False, name=None)
-        )
+        support = eligible[eligible["cluster"].eq(cluster) & eligible["native"].isin(go_ids)]
+        observed = set(support[["species", "native"]].itertuples(index=False, name=None))
         expected = {(species, go_id) for species in C.GO_ORGDB for go_id in go_ids}
         if observed != expected:
             raise RuntimeError(
@@ -462,9 +440,7 @@ def local_mixing_scores(  # noqa: C901
             null_distance[query_code] = expected_distance
             maximum_distance[query_code] = 1 - proportions[query_code].min()
         if np.any(maximum_distance <= null_distance):
-            raise ValueError(
-                f"{factor!r} has no TV range beyond finite-neighbor null variation."
-            )
+            raise ValueError(f"{factor!r} has no TV range beyond finite-neighbor null variation.")
         encoded[factor] = (
             codes,
             proportions,
@@ -496,9 +472,9 @@ def local_mixing_scores(  # noqa: C901
                     for category in range(proportions.shape[1])
                 ]
             )
-            observed_distance = 0.5 * np.abs(
-                local_proportions - proportions[query_codes]
-            ).sum(axis=1)
+            observed_distance = 0.5 * np.abs(local_proportions - proportions[query_codes]).sum(
+                axis=1
+            )
             # Remove expected finite-k variation and bound excess divergence
             # relative to the most compositionally different neighborhood.
             excess_distance = (observed_distance - null_distance[query_codes]) / (
@@ -575,9 +551,9 @@ def summarize_local_mixing(
     summaries = []
     for factor, group in by_section.groupby("factor", sort=False):
         values = group["mixing_score"].to_numpy(float)
-        bootstrap = rng.choice(
-            values, size=(bootstrap_samples, len(values)), replace=True
-        ).mean(axis=1)
+        bootstrap = rng.choice(values, size=(bootstrap_samples, len(values)), replace=True).mean(
+            axis=1
+        )
         summaries.append(
             {
                 "factor": factor,
@@ -631,11 +607,7 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
     signature = _input_signature(embedding)
     if (
         not force
-        and (
-            manifest := utils.current_cache_manifest(
-                RESULT_DIR, _CACHE_ARTIFACTS, signature
-            )
-        )
+        and (manifest := utils.current_cache_manifest(RESULT_DIR, _CACHE_ARTIFACTS, signature))
         is not None
     ):
         LOGGER.info("Embedding metrics cache is current: %s", RESULT_DIR)
@@ -675,9 +647,9 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
         lambda values: false_discovery_control(values.fillna(1).to_numpy(float))
     )
     # Compute fold enrichment relative to the species-specific background genes (effective_domain_size).
-    enrichment["fold_enrichment"] = (
-        enrichment["intersection_size"] / enrichment["query_size"]
-    ) / (enrichment["term_size"] / enrichment["effective_domain_size"])
+    enrichment["fold_enrichment"] = (enrichment["intersection_size"] / enrichment["query_size"]) / (
+        enrichment["term_size"] / enrichment["effective_domain_size"]
+    )
     enrichment.to_csv(RESULT_DIR / "cluster_go_enrichment.csv.gz", index=False)
     functional_labels = _cluster_functional_labels(enrichment)
     centres = centres.merge(functional_labels, on="cluster", validate="one_to_one")
@@ -685,9 +657,7 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
     memberships.to_csv(RESULT_DIR / "gene_stage_cluster_membership.csv.gz", index=False)
 
     # Compute and save local mixing metrics
-    _local_mixing_by_section(points).to_csv(
-        RESULT_DIR / "local_mixing_by_section.csv", index=False
-    )
+    _local_mixing_by_section(points).to_csv(RESULT_DIR / "local_mixing_by_section.csv", index=False)
 
     clusters_per_gene = (
         memberships[["species", "gene", "cluster"]]
@@ -705,16 +675,13 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
             species: int(group.gt(1).sum())
             for species, group in clusters_per_gene.groupby(level="species")
         },
-        "pca_explained_variance_ratio": embedding[
-            "pca"
-        ].explained_variance_ratio_.tolist(),
+        "pca_explained_variance_ratio": embedding["pca"].explained_variance_ratio_.tolist(),
         "cluster_go_enrichment": {
             "assignment_unit": "species, gene, stage; slide replicates use median PCA coordinates",
             "query": "unique genes observed in each species-cluster across stages",
             "background": "all QC-passing embedded genes for that species",
             "source": {
-                species: f"{C.GO_SOURCE} via local {orgdb}"
-                for species, orgdb in C.GO_ORGDB.items()
+                species: f"{C.GO_SOURCE} via local {orgdb}" for species, orgdb in C.GO_ORGDB.items()
             },
             "global_fdr_scope": "all cluster terms within each species",
             "functional_labels": "manually shortened from GO IDs significant in both species",

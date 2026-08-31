@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from scripts.paper_utils import PROJECT_ROOT, ensure_directories
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data" / "qtest_benchmark"
 RESULT_DIR = PROJECT_ROOT / "results" / "qtest_benchmark"
 FIGURE_DIR = PROJECT_ROOT / "figures" / "qtest_benchmark"
@@ -63,5 +62,4 @@ BENCHMARK_TARGETS = (
 
 def ensure_output_dirs() -> None:
     """Create ignored result and figure directories."""
-    for path in (RESULT_DIR, FIGURE_DIR):
-        path.mkdir(parents=True, exist_ok=True)
+    ensure_directories(RESULT_DIR, FIGURE_DIR)

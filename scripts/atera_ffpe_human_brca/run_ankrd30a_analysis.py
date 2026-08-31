@@ -40,9 +40,7 @@ def run_ankrd30a_analysis(
     force: bool = False,
 ) -> tuple[pd.DataFrame, list[str], dict[str, object]]:
     """Run ANKRD30A long-read, regulator-priority, and TCGA summary caches."""
-    pacbio_tx, pacbio_features, _sqanti = prepare_ankrd30a_long_read_annotations(
-        force=force
-    )
+    pacbio_tx, pacbio_features, _sqanti = prepare_ankrd30a_long_read_annotations(force=force)
     # Source downloads remain idempotent here; redownload/debug controls belong
     # in the dedicated download scripts rather than this analysis wrapper.
     download_status = ensure_tcga_clinical_expression_data(force=False)
@@ -85,9 +83,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--du-csv", type=Path, default=DU_CSV, help="Canonical Atera DU result CSV."
     )
-    parser.add_argument(
-        "--force", action="store_true", help="Rebuild derived TCGA summary caches."
-    )
+    parser.add_argument("--force", action="store_true", help="Rebuild derived TCGA summary caches.")
     return parser.parse_args()
 
 

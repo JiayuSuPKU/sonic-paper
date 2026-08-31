@@ -47,18 +47,14 @@ PB_EVENT_CLASS_BY_TRANSCRIPT = {
     )
     for tx in PB_EVENT_TRANSCRIPTS_BY_CLASS[probe_class]
 }
-PB_TRANSCRIPT_SHORT_LABELS = {
-    tx: tx.replace("PB.3828.", "PB") for tx in PB_TRANSCRIPTS_OF_INTEREST
-}
+PB_TRANSCRIPT_SHORT_LABELS = {tx: tx.replace("PB.3828.", "PB") for tx in PB_TRANSCRIPTS_OF_INTEREST}
 PB_TSS_HYPOTHESIS_TRANSCRIPTS = PB_TRANSCRIPTS_OF_INTEREST
 
 # T47D dTAG-TRPS1 PRO-seq constants. The processed GEO bigWigs are
 # timepoint-combined strand-specific normalized tracks; these settings define
 # the narrow ANKRD30A-region cache consumed by the figure notebook.
 TRPS1_PROSEQ_GEO_ACCESSION = "GSE236172"
-TRPS1_PROSEQ_SOURCE_BASE_URL = (
-    "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE236nnn/GSE236172/suppl/"
-)
+TRPS1_PROSEQ_SOURCE_BASE_URL = "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE236nnn/GSE236172/suppl/"
 TRPS1_PROSEQ_TIMEPOINTS = (
     ("0h", 0.0, "0hour"),
     ("0.5h", 0.5, "0.5hour"),
@@ -115,9 +111,7 @@ QUANT_SAMPLE_COLUMNS = (
     "local_slice_bam",
 )
 PROBE_REGION_CODEWORDS = (45213, 50762, 7939, 6037)
-PROBE_REGION_FEATURES = tuple(
-    f"probe_{codeword}" for codeword in PROBE_REGION_CODEWORDS
-)
+PROBE_REGION_FEATURES = tuple(f"probe_{codeword}" for codeword in PROBE_REGION_CODEWORDS)
 PROBE_CLASS_ORDER = {
     "45213-only": 0,
     "45213+50762": 1,
@@ -176,9 +170,7 @@ def _require_columns(frame: pd.DataFrame, columns: Iterable[str], label: str) ->
         raise ValueError(f"{label} is missing required columns: {missing}")
 
 
-def _read_required_tsv(
-    path: Path, label: str, **read_csv_kwargs: object
-) -> pd.DataFrame:
+def _read_required_tsv(path: Path, label: str, **read_csv_kwargs: object) -> pd.DataFrame:
     """Read one required TSV cache used by the final figure workflow."""
     if not path.exists() or path.stat().st_size == 0:
         raise FileNotFoundError(f"Missing required {label}: {project_path(path)}")

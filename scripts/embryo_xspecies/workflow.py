@@ -58,9 +58,7 @@ def run(
             continue
         status = preprocessing.run_preprocessing(cfg, force=rebuild_derived)
         if status or not preprocessing.preprocessing_is_current(cfg):
-            raise RuntimeError(
-                f"{cfg.PANEL_KEY} preprocessing did not produce a complete cache."
-            )
+            raise RuntimeError(f"{cfg.PANEL_KEY} preprocessing did not produce a complete cache.")
 
     LOGGER.info("Step 3/7: strict human-mouse orthology")
     orthology.prepare_orthologs(force=force)

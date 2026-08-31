@@ -32,9 +32,7 @@ EXAMPLE_TUMORS = ("3430_NT_T2", "3730_NT_T2")
 GENE_PANEL = ("Rgs4", "Col4a2", "Tmem37", "Cd200")
 PAIR_GENES = ("Gdpd2", "Spink5")
 ANCESTRY_WEIGHTS = (1.0, 0.5, 0.25)
-EXAMPLE_TREE_FILES = tuple(
-    LINEAGE_TREE_DIR / f"{tumor}.newick" for tumor in EXAMPLE_TUMORS
-)
+EXAMPLE_TREE_FILES = tuple(LINEAGE_TREE_DIR / f"{tumor}.newick" for tumor in EXAMPLE_TUMORS)
 LINEAGE_INPUTS = (LINEAGE_ANALYSIS_DATA_FILE, *EXAMPLE_TREE_FILES)
 MIN_TUMOR_CELLS = 300
 MAX_GENE_ANALYSIS_CELLS = 3_000
@@ -42,9 +40,7 @@ FDR_CUTOFF = 0.05
 CAR_RHO = 0.9
 
 
-def _ancestral_connectivity(
-    parent: dict[str, str], leaves: list[str]
-) -> sparse.csr_matrix:
+def _ancestral_connectivity(parent: dict[str, str], leaves: list[str]) -> sparse.csr_matrix:
     """Build sparse leaf connectivity from the nearest shared ancestor."""
     matrix = sparse.csr_matrix((len(leaves), len(leaves)), dtype=np.float64)
     seen = sparse.csr_matrix(matrix.shape, dtype=bool)
@@ -59,9 +55,7 @@ def _ancestral_connectivity(
             if ancestor:
                 groups[ancestor].append(index)
         rows = [index for indices in groups.values() for index in indices]
-        columns = [
-            group for group, indices in enumerate(groups.values()) for _ in indices
-        ]
+        columns = [group for group, indices in enumerate(groups.values()) for _ in indices]
         membership = sparse.csr_matrix(
             (np.ones(len(rows)), (rows, columns)),
             shape=(len(leaves), len(groups)),
@@ -103,9 +97,7 @@ def _run_lineage_q_tests(
         ("moran", {}),
         ("car", {"rho": CAR_RHO, "standardize": False}),
     ):
-        detector = DetectorIrregular(
-            kernel_method=method, backend="matrix", **parameters
-        )
+        detector = DetectorIrregular(kernel_method=method, backend="matrix", **parameters)
         detector.setup_data(
             data,
             obsp_key="lineage",
@@ -126,9 +118,7 @@ def _run_lineage_q_tests(
 def _merge_q_results(results: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Align Moran and CAR outputs with explicit method suffixes."""
     return (
-        results["moran"]
-        .add_suffix("_moran")
-        .join(results["car"].add_suffix("_car"), how="inner")
+        results["moran"].add_suffix("_moran").join(results["car"].add_suffix("_car"), how="inner")
     )
 
 
@@ -138,9 +128,7 @@ def _bivariate_disagreement(
     gene_scores: pd.DataFrame,
 ) -> list[dict[str, object]]:
     """Summarize method disagreement among genes detected by both Q tests."""
-    selected = sorted(
-        gene_scores.index[gene_scores["Sig_moran"] & gene_scores["Sig_car"]]
-    )
+    selected = sorted(gene_scores.index[gene_scores["Sig_moran"] & gene_scores["Sig_car"]])
     if len(selected) < 2:
         LOGGER.info("Lineage %s: skipping R statistics (<2 shared Q hits)", tumor)
         return []
@@ -156,17 +144,13 @@ def _bivariate_disagreement(
         return_pval=True,
         show_progress=False,
     )
-    pairs = _canonical_pairs(r_moran, "Z_Moran").join(
-        _canonical_pairs(r_car, "Z_CAR"), how="inner"
-    )
+    pairs = _canonical_pairs(r_moran, "Z_Moran").join(_canonical_pairs(r_car, "Z_CAR"), how="inner")
     if len(pairs) < 10:
         LOGGER.info("Lineage %s: skipping R statistics (<10 gene pairs)", tumor)
         return []
 
     regression = stats.linregress(pairs["Z_Moran"], pairs["Z_CAR"])
-    residual = pairs["Z_CAR"] - (
-        regression.intercept + regression.slope * pairs["Z_Moran"]
-    )
+    residual = pairs["Z_CAR"] - (regression.intercept + regression.slope * pairs["Z_Moran"])
     deviation = residual / residual.std()
     records = []
     for threshold in range(1, 11):
@@ -243,13 +227,9 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
             )
             clusters = _merge_q_results(cluster_results)
             clusters["Tumor"] = tumor
-            clusters["Cluster"] = clusters.index.str.replace(
-                "Cluster-Name_", "", regex=False
-            )
+            clusters["Cluster"] = clusters.index.str.replace("Cluster-Name_", "", regex=False)
             clusters["I_moran"] = clusters["Q_moran"] / tumor_data.n_obs
-            cluster_scores.append(
-                clusters[["Tumor", "Cluster", "I_moran", "Q_car", "Z_score_car"]]
-            )
+            cluster_scores.append(clusters[["Tumor", "Cluster", "I_moran", "Q_car", "Z_score_car"]])
 
             if tumor_data.n_obs > MAX_GENE_ANALYSIS_CELLS:
                 LOGGER.info(
@@ -277,9 +257,7 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
             tested = gene_detectors["car"].adata
             columns = tested.var_names.get_indexer(genes.index)
             if np.any(columns < 0):
-                raise ValueError(
-                    "Q-statistic output contains genes absent from local data"
-                )
+                raise ValueError("Q-statistic output contains genes absent from local data")
             values = tested.X[:, columns]
             genes["Sparsity"] = (
                 1 - values.getnnz(axis=0) / tested.n_obs
@@ -300,22 +278,14 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
                     ]
                 ]
             )
-            bivariate_summaries.extend(
-                _bivariate_disagreement(tumor, gene_detectors, genes)
-            )
+            bivariate_summaries.extend(_bivariate_disagreement(tumor, gene_detectors, genes))
     finally:
         source.file.close()
 
     LINEAGE_RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    pd.concat(cluster_scores, ignore_index=True).to_csv(
-        LINEAGE_CLUSTER_SCORES_FILE, index=False
-    )
-    pd.concat(gene_scores, ignore_index=True).to_csv(
-        LINEAGE_GENE_SCORES_FILE, index=False
-    )
-    pd.DataFrame(bivariate_summaries).to_csv(
-        LINEAGE_BIVARIATE_SUMMARY_FILE, index=False
-    )
+    pd.concat(cluster_scores, ignore_index=True).to_csv(LINEAGE_CLUSTER_SCORES_FILE, index=False)
+    pd.concat(gene_scores, ignore_index=True).to_csv(LINEAGE_GENE_SCORES_FILE, index=False)
+    pd.DataFrame(bivariate_summaries).to_csv(LINEAGE_BIVARIATE_SUMMARY_FILE, index=False)
     LOGGER.info(
         "Lineage cross-tumor statistics: cached %d cluster and %d gene tumors",
         len(cluster_scores),
@@ -351,16 +321,12 @@ def _cache_gene_diagnostics(*, force: bool) -> None:
     try:
         missing = features.difference(source.var_names)
         if len(missing):
-            raise ValueError(
-                f"{len(missing)} scored lineage genes are absent from local data"
-            )
+            raise ValueError(f"{len(missing)} scored lineage genes are absent from local data")
         target = source[leaves, features].to_memory()
     finally:
         source.file.close()
     expression = target.X[keep]
-    expression = (
-        expression.toarray() if sparse.issparse(expression) else np.asarray(expression)
-    )
+    expression = expression.toarray() if sparse.issparse(expression) else np.asarray(expression)
     marker_expression = expression.astype(np.float64, copy=False)
     expression = marker_expression.copy()
     expression -= expression.mean(axis=0)
@@ -392,13 +358,9 @@ def _cache_gene_diagnostics(*, force: bool) -> None:
         ("Both", "CAR only", "Moran only"),
         default="Neither",
     )
-    labels = (
-        target.obs.iloc[np.flatnonzero(keep)]["Cluster-Name"].astype(str).to_numpy()
-    )
+    labels = target.obs.iloc[np.flatnonzero(keep)]["Cluster-Name"].astype(str).to_numpy()
     counts = pd.Series(labels).value_counts()
-    small_states = counts[
-        (counts >= 2) & (counts <= max(2, np.ceil(0.1 * len(labels))))
-    ].index
+    small_states = counts[(counts >= 2) & (counts <= max(2, np.ceil(0.1 * len(labels))))].index
     markers = np.zeros(expression.shape[1], dtype=bool)
     for state in small_states:
         inside = labels == state
@@ -493,13 +455,9 @@ def _cache_bivariate_diagnostics(*, force: bool) -> None:  # noqa: C901
     tumor = "3730_NT_T2"
     scores = pd.read_csv(LINEAGE_GENE_SCORES_FILE)
     scores = scores[scores["Tumor"].eq(tumor)]
-    selected = sorted(
-        scores.loc[scores["Sig_moran"] & scores["Sig_car"], "Feature"].astype(str)
-    )
+    selected = sorted(scores.loc[scores["Sig_moran"] & scores["Sig_car"], "Feature"].astype(str))
     if len(selected) < 2:
-        raise ValueError(
-            "Fewer than two genes are significant under both lineage kernels"
-        )
+        raise ValueError("Fewer than two genes are significant under both lineage kernels")
     _, _, parent, leaves = parse_newick(LINEAGE_TREE_DIR / f"{tumor}.newick")
     source = ad.read_h5ad(LINEAGE_ANALYSIS_DATA_FILE, backed="r")
     try:
@@ -529,9 +487,7 @@ def _cache_bivariate_diagnostics(*, force: bool) -> None:  # noqa: C901
     r_car = detectors["car"].compute_rstat(
         features_x=selected, n_jobs=1, return_pval=True, show_progress=False
     )
-    pairs = _canonical_pairs(r_moran, "Z_Moran").join(
-        _canonical_pairs(r_car, "Z_CAR"), how="inner"
-    )
+    pairs = _canonical_pairs(r_moran, "Z_Moran").join(_canonical_pairs(r_car, "Z_CAR"), how="inner")
     regression = stats.linregress(pairs["Z_Moran"], pairs["Z_CAR"])
     pairs["Predicted"] = regression.intercept + regression.slope * pairs["Z_Moran"]
     pairs["Residual"] = pairs["Z_CAR"] - pairs["Predicted"]
@@ -562,9 +518,7 @@ def _cache_bivariate_diagnostics(*, force: bool) -> None:  # noqa: C901
     eigenvalues = eigenvalues[order]
     eigenvectors = eigenvectors[:, order]
     expression = tumor_data[:, list(PAIR_GENES)].X
-    expression = (
-        expression.toarray() if sparse.issparse(expression) else np.asarray(expression)
-    )
+    expression = expression.toarray() if sparse.issparse(expression) else np.asarray(expression)
     expression = stats.zscore(expression, axis=0)
     coefficients = eigenvectors.T @ expression
     contributions = coefficients[:, 0] * coefficients[:, 1] * eigenvalues
@@ -576,9 +530,7 @@ def _cache_bivariate_diagnostics(*, force: bool) -> None:  # noqa: C901
         z_moran=matrix_moran[upper],
         z_car=matrix_car[upper],
         group=group_codes[upper],
-        regression=np.asarray(
-            (regression.slope, regression.intercept, regression.rvalue**2)
-        ),
+        regression=np.asarray((regression.slope, regression.intercept, regression.rvalue**2)),
         cells=np.asarray(leaves),
         pair_genes=np.asarray(PAIR_GENES),
         pair_expression=expression,

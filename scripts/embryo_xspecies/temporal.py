@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import hypergeom, spearmanr
 
+from scripts.paper_utils import CLUSTERPROFILER_SCRIPT
+
 from . import config as C
 from . import embeddings, metrics, orthology, utils
 
@@ -53,7 +55,7 @@ def _input_signature(embedding: dict[str, Any]) -> str:
         Path(C.__file__),
         Path(metrics.__file__),
         orthology.ORTHO_TSV,
-        C.PROJECT_ROOT / "scripts" / "run_clusterprofiler.R",
+        CLUSTERPROFILER_SCRIPT,
     ]
     for cfg in C.SPECIES_CONFIGS.values():
         metadata = utils.filtered_metadata(cfg)
@@ -96,9 +98,7 @@ def quantify_temporal_variation(
     features = np.asarray(feature_names, dtype=str)
     stages = list(map(str, stage_order))
     if coordinates.ndim != 3:
-        raise ValueError(
-            "embedding must have shape (replicates, features, dimensions)."
-        )
+        raise ValueError("embedding must have shape (replicates, features, dimensions).")
     if labels.shape != (coordinates.shape[0],):
         raise ValueError("stage_labels must contain one label per replicate.")
     if features.shape != (coordinates.shape[1],):
@@ -128,8 +128,7 @@ def quantify_temporal_variation(
         {
             "feature": features,
             "within_stage_variance": within_ss / (n_replicates - n_stages),
-            "between_stage_variance": np.maximum(total_ss - within_ss, 0)
-            / (n_stages - 1),
+            "between_stage_variance": np.maximum(total_ss - within_ss, 0) / (n_stages - 1),
         }
     )
 
@@ -153,19 +152,11 @@ def _temporal_conservation(
         )
         .drop(columns="gene")
     )
-    table["mouse_dynamic_percentile"] = table["between_stage_variance_mouse"].rank(
-        pct=True
-    )
-    table["human_dynamic_percentile"] = table["between_stage_variance_human"].rank(
-        pct=True
-    )
+    table["mouse_dynamic_percentile"] = table["between_stage_variance_mouse"].rank(pct=True)
+    table["human_dynamic_percentile"] = table["between_stage_variance_human"].rank(pct=True)
 
-    mouse_top = table["mouse_dynamic_percentile"].ge(
-        C.TEMPORAL_DYNAMIC_PERCENTILE_THRESHOLD
-    )
-    human_top = table["human_dynamic_percentile"].ge(
-        C.TEMPORAL_DYNAMIC_PERCENTILE_THRESHOLD
-    )
+    mouse_top = table["mouse_dynamic_percentile"].ge(C.TEMPORAL_DYNAMIC_PERCENTILE_THRESHOLD)
+    human_top = table["human_dynamic_percentile"].ge(C.TEMPORAL_DYNAMIC_PERCENTILE_THRESHOLD)
     table["dynamic_group"] = "not top-decile"
     table.loc[mouse_top & ~human_top, "dynamic_group"] = "mouse-specific dynamic"
     table.loc[~mouse_top & human_top, "dynamic_group"] = "human-specific dynamic"
@@ -207,9 +198,7 @@ def _select_temporal_examples(
     ]
     excluded = conservation["mouse_symbol"].str.upper().str.startswith(
         _EXAMPLE_GENE_EXCLUDED_PREFIXES
-    ) | conservation["human_symbol"].str.upper().str.startswith(
-        _EXAMPLE_GENE_EXCLUDED_PREFIXES
-    )
+    ) | conservation["human_symbol"].str.upper().str.startswith(_EXAMPLE_GENE_EXCLUDED_PREFIXES)
     conservation = conservation[~excluded]
     selected = []
     ranking = {
@@ -231,20 +220,15 @@ def _select_temporal_examples(
             columns, ascending=ascending
         )
         group_terms = displayed_terms[displayed_terms["query_group"].eq(category)]
-        symbol_column = (
-            "human_symbol" if category == "human-specific dynamic" else "mouse_symbol"
-        )
+        symbol_column = "human_symbol" if category == "human-specific dynamic" else "mouse_symbol"
         if group_terms.empty:
             selection_basis = "temporal variation percentile; no specific GO term"
             pathway_terms = ""
         else:
-            hit_genes = set(
-                "/".join(group_terms["hit_genes"].dropna().astype(str)).split("/")
-            )
+            hit_genes = set("/".join(group_terms["hit_genes"].dropna().astype(str)).split("/"))
             ranked = ranked[ranked[symbol_column].isin(hit_genes)]
             selection_basis = (
-                "highest focal temporal variation percentile among displayed "
-                "GO term genes"
+                "highest focal temporal variation percentile among displayed GO term genes"
             )
         row = ranked.iloc[0]
         if not group_terms.empty:
@@ -293,9 +277,7 @@ def quantify_stage_movements(
     features = np.asarray(feature_names, dtype=str)
     pairs = [(str(previous), str(current)) for previous, current in stage_pairs]
     if values.ndim != 3:
-        raise ValueError(
-            "coordinates must have shape (sections, features, dimensions)."
-        )
+        raise ValueError("coordinates must have shape (sections, features, dimensions).")
     if labels.shape != (values.shape[0],):
         raise ValueError("stage_labels must contain one label per section.")
     if features.shape != (values.shape[1],):
@@ -314,14 +296,10 @@ def quantify_stage_movements(
         previous_values = centered[labels == previous]
         current_values = centered[labels == current]
         if len(previous_values) < 2 or len(current_values) < 2:
-            raise ValueError(
-                f"{previous}->{current} requires at least two sections per stage."
-            )
+            raise ValueError(f"{previous}->{current} requires at least two sections per stage.")
         interval = float(stage_values[current]) - float(stage_values[previous])
         if interval <= 0:
-            raise ValueError(
-                f"{previous}->{current} has non-positive stage interval {interval}."
-            )
+            raise ValueError(f"{previous}->{current} has non-positive stage interval {interval}.")
 
         displacement = current_values.mean(axis=0) - previous_values.mean(axis=0)
         squared_movement = np.square(displacement).sum(axis=1)  # len(features)
@@ -351,9 +329,7 @@ def _test_table(result: pd.DataFrame, prefix: str) -> pd.DataFrame:
     """Standardize one SONIC differential-test result table."""
     required = {"Feature", "Statistic", "P_value", "P_adj"}
     if missing := required - set(result):
-        raise ValueError(
-            f"SONIC {prefix} result is missing columns: {sorted(missing)}"
-        )
+        raise ValueError(f"SONIC {prefix} result is missing columns: {sorted(missing)}")
     return result[["Feature", "Statistic", "P_value", "P_adj"]].rename(
         columns={
             "Feature": "feature",
@@ -371,9 +347,7 @@ def _transition_tests(
     genes: list[str],
 ) -> pd.DataFrame:
     """Run DE, amplitude-sensitive DF, and shape-only DF through SONIC."""
-    comparator = embeddings.comparator_from_cached_spectra(
-        bundle, section_indices, genes
-    )
+    comparator = embeddings.comparator_from_cached_spectra(bundle, section_indices, genes)
     design = labels[section_indices]
     tables = [
         _test_table(
@@ -418,9 +392,7 @@ def _cache_global_variation(
     for species in ("mouse", "human"):
         bundle = embedding["species"][species]
         if bundle["label"] != species:
-            raise ValueError(
-                f"Expected {species!r} embedding, got {bundle['label']!r}."
-            )
+            raise ValueError(f"Expected {species!r} embedding, got {bundle['label']!r}.")
         gene_columns = np.asarray(bundle["gene_cols"], dtype=int)
         coordinates = np.asarray(bundle["coords"][:, gene_columns, :])
         dimensions = coordinates.shape[2]
@@ -433,12 +405,8 @@ def _cache_global_variation(
             feature_names=bundle["gene_names"],
             stage_order=C.SPECIES_CONFIGS[species].KEPT_TIMEPOINTS,
         ).rename(columns={"feature": "gene"})
-        cutoff = variation["within_stage_variance"].quantile(
-            C.TEMPORAL_MAX_WITHIN_STAGE_PERCENTILE
-        )
-        variation["passes_within_stage_filter"] = variation["within_stage_variance"].le(
-            cutoff
-        )
+        cutoff = variation["within_stage_variance"].quantile(C.TEMPORAL_MAX_WITHIN_STAGE_PERCENTILE)
+        variation["passes_within_stage_filter"] = variation["within_stage_variance"].le(cutoff)
         statistics[species] = variation
 
     if embedding_dimensions is None:
@@ -554,9 +522,7 @@ def _cache_global_variation(
             "protein-coding in both species according to cached orthology flags"
         ),
         **summary,
-        "technical_families_excluded_from_display_only": list(
-            _EXAMPLE_GENE_EXCLUDED_PREFIXES
-        ),
+        "technical_families_excluded_from_display_only": list(_EXAMPLE_GENE_EXCLUDED_PREFIXES),
         "go_gene_sets": (
             "mutually exclusive conserved, mouse-specific, and human-specific "
             "top-decile dynamic orthologs"
@@ -610,11 +576,7 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
     signature = _input_signature(embedding)
     if (
         not force
-        and (
-            manifest := utils.current_cache_manifest(
-                RESULT_DIR, _CACHE_ARTIFACTS, signature
-            )
-        )
+        and (manifest := utils.current_cache_manifest(RESULT_DIR, _CACHE_ARTIFACTS, signature))
         is not None
     ):
         LOGGER.info("Temporal cache is current: %s", RESULT_DIR)
@@ -624,8 +586,7 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     global_variation = _cache_global_variation(embedding)
     stages_by_species = {
-        species: list(C.SPECIES_CONFIGS[species].KEPT_TIMEPOINTS)
-        for species in ("mouse", "human")
+        species: list(C.SPECIES_CONFIGS[species].KEPT_TIMEPOINTS) for species in ("mouse", "human")
     }
     stage_values = {
         "mouse": {
@@ -633,8 +594,7 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
             for stage in stages_by_species["mouse"]
         },
         "human": {
-            stage: utils.human_label_to_carnegie(stage)
-            for stage in stages_by_species["human"]
+            stage: utils.human_label_to_carnegie(stage) for stage in stages_by_species["human"]
         },
     }
 
@@ -691,9 +651,7 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
             expression["absolute_normalized_expression_change"] = expression[
                 "relative_normalized_expression_change"
             ].abs()
-            transition_frames.append(
-                expression.merge(tests, on="feature", validate="one_to_one")
-            )
+            transition_frames.append(expression.merge(tests, on="feature", validate="one_to_one"))
 
         transition_table = movements.merge(
             pd.concat(transition_frames, ignore_index=True),
@@ -729,13 +687,9 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
 
     # Run GO enrichment for each transition's top hits that are DF-norm significant.
     queries = {}
-    for (species, stage), group in transitions.groupby(
-        ["species", "current_stage"], sort=True
-    ):
+    for (species, stage), group in transitions.groupby(["species", "current_stage"], sort=True):
         active = (
-            group["adjusted_movement"]
-            .rank(pct=True)
-            .ge(C.TEMPORAL_DYNAMIC_PERCENTILE_THRESHOLD)
+            group["adjusted_movement"].rank(pct=True).ge(C.TEMPORAL_DYNAMIC_PERCENTILE_THRESHOLD)
         )
         queries[f"{species}|{stage}"] = (
             group.loc[active & group["df_norm_significant"], "gene"],
@@ -756,9 +710,7 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
         "global_variation": global_variation,
         "consecutive_stage": {
             "stage_pairs": {
-                species: [
-                    list(pair) for pair in zip(stages[:-1], stages[1:], strict=True)
-                ]
+                species: [list(pair) for pair in zip(stages[:-1], stages[1:], strict=True)]
                 for species, stages in stages_by_species.items()
             },
             "stage_axis": (
@@ -770,22 +722,15 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
                 "plus a signed symmetric relative change bounded to [-1, 1]"
             ),
             "movement": (
-                "section-background-centered PCA distance minus stage-centroid "
-                "sampling variance"
+                "section-background-centered PCA distance minus stage-centroid sampling variance"
             ),
             "tests": {
                 "DE": "ComparatorGrid.test_diff_expr on cached DC values",
-                "DF": (
-                    "ComparatorGrid.test_diff_freq(log_l2, analytic, "
-                    "normalize_shape=False)"
-                ),
+                "DF": ("ComparatorGrid.test_diff_freq(log_l2, analytic, normalize_shape=False)"),
                 "DF-norm": (
-                    "ComparatorGrid.test_diff_freq(log_l2, analytic, "
-                    "normalize_shape=True)"
+                    "ComparatorGrid.test_diff_freq(log_l2, analytic, normalize_shape=True)"
                 ),
-                "fdr_scope": (
-                    "all QC-passing genes within each species, transition, and test"
-                ),
+                "fdr_scope": ("all QC-passing genes within each species, transition, and test"),
                 "fdr_threshold": C.TRANSITION_FDR_THRESHOLD,
             },
             "replicates": "individual sections at each stage; no embryo averaging",

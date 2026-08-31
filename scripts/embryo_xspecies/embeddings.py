@@ -115,8 +115,7 @@ def _load_section_cache(
     with np.load(path, allow_pickle=False) as cached:
         if set(cached.files) != _CACHE_KEYS:
             raise ValueError(
-                f"{path} arrays are {sorted(cached.files)}; "
-                f"expected {sorted(_CACHE_KEYS)}."
+                f"{path} arrays are {sorted(cached.files)}; expected {sorted(_CACHE_KEYS)}."
             )
         arrays = {key: cached[key] for key in cached.files}
 
@@ -139,8 +138,7 @@ def _load_section_cache(
     expected_shape = (len(expected_features), expected_intervals.shape[0])
     if arrays["spectra"].shape != expected_shape:
         raise ValueError(
-            f"{path} spectra shape is {arrays['spectra'].shape}; "
-            f"expected {expected_shape}."
+            f"{path} spectra shape is {arrays['spectra'].shape}; expected {expected_shape}."
         )
     scalar_shape = expected_shape[:1]
     if arrays["dc"].shape != scalar_shape or arrays["presence"].shape != scalar_shape:
@@ -241,22 +239,16 @@ def _cache_species_sections(
         )
         section_comparator.compute_spectra(n_jobs=1, progress=progress)
         section_comparator.normalize_background()
-        section_comparator.spectra_ = np.asarray(
-            section_comparator.spectra_, dtype=np.float32
-        )
+        section_comparator.spectra_ = np.asarray(section_comparator.spectra_, dtype=np.float32)
         section_comparator.dc_ = np.asarray(section_comparator.dc_, dtype=np.float32)
-        section_comparator.presence_ = np.asarray(
-            section_comparator.presence_, dtype=bool
-        )
+        section_comparator.presence_ = np.asarray(section_comparator.presence_, dtype=bool)
         expected_shape = (1, n_features, n_frequencies)
         if section_comparator.spectra_.shape != expected_shape:
             raise RuntimeError(
                 f"{cfg.PANEL_KEY} {section_id} spectra shape is "
                 f"{section_comparator.spectra_.shape}; expected {expected_shape}."
             )
-        if not np.array_equal(
-            section_comparator.frequency_bin_intervals_, expected_intervals
-        ):
+        if not np.array_equal(section_comparator.frequency_bin_intervals_, expected_intervals):
             raise RuntimeError(
                 f"{cfg.PANEL_KEY} {section_id} changed the consensus frequency grid."
             )
@@ -314,9 +306,7 @@ def _load_species_arrays(
         "gene_names": genes,
         "name_to_col": {name: i for i, name in enumerate(genes)},
         "domain_cols": domain_cols,
-        "domain_labels": [
-            name.removeprefix(C.DOMAIN_CHANNEL_PREFIX) for name in domain_channels
-        ],
+        "domain_labels": [name.removeprefix(C.DOMAIN_CHANNEL_PREFIX) for name in domain_channels],
     }
 
 
@@ -387,9 +377,7 @@ def frequency_weights(
         return np.ones(n_frequencies, dtype=np.float64)
     weights = np.asarray(custom_weights, dtype=np.float64)
     if weights.shape != (n_frequencies,):
-        raise ValueError(
-            f"custom_weights must have shape ({n_frequencies},), got {weights.shape}."
-        )
+        raise ValueError(f"custom_weights must have shape ({n_frequencies},), got {weights.shape}.")
     mean = float(weights.mean())
     if not np.isfinite(weights).all() or np.any(weights < 0) or mean == 0:
         raise ValueError("custom_weights must be finite, non-negative, and nonzero.")
@@ -433,14 +421,10 @@ def _fit_joint_embedding(
 ) -> tuple[PCA, Callable[[np.ndarray], np.ndarray]]:
     frequency_counts = {bundle["spectra"].shape[-1] for bundle in species.values()}
     if len(frequency_counts) != 1:
-        raise RuntimeError(
-            f"Species spectra use different frequency counts: {frequency_counts}"
-        )
+        raise RuntimeError(f"Species spectra use different frequency counts: {frequency_counts}")
     # Combine all species' gene-slide spectra into one matrix for PCA fitting.
     gene_rows = [
-        bundle["spectra"][:, bundle["gene_cols"], :].reshape(
-            -1, bundle["spectra"].shape[-1]
-        )
+        bundle["spectra"][:, bundle["gene_cols"], :].reshape(-1, bundle["spectra"].shape[-1])
         for bundle in species.values()
     ]
     pca, transform = fit_shape_embedding(np.vstack(gene_rows), n_components=C.N_PC)
@@ -504,15 +488,13 @@ def load_spectra_and_fit_joint_embedding(
     # PCA coordinates are stored in place in each species' bundle under the "coords" key.
     pca, transform = _fit_joint_embedding(species)
     n_coordinates = sum(
-        bundle["coords"].shape[0] * bundle["coords"].shape[1]
-        for bundle in species.values()
+        bundle["coords"].shape[0] * bundle["coords"].shape[1] for bundle in species.values()
     )
     LOGGER.info(
         "Joint PCA: %d in-memory feature-slide coordinates; variance %s",
         n_coordinates,
         ", ".join(
-            f"PC{i + 1}={100 * value:.1f}%"
-            for i, value in enumerate(pca.explained_variance_ratio_)
+            f"PC{i + 1}={100 * value:.1f}%" for i, value in enumerate(pca.explained_variance_ratio_)
         ),
     )
     return {

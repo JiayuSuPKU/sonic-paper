@@ -47,6 +47,11 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     __package__ = "scripts.atera_ffpe_human_brca"
 
+from scripts.paper_utils import (
+    FONT_CONFIG,
+    configure_paper_matplotlib,
+)
+
 from .config import (
     GENCODE_GTF,
     LAYER,
@@ -69,20 +74,9 @@ from .probe_mapping import (
 )
 from .utils import log, project_path, selected_to_dense
 
-plt.rcParams.update(
-    {
-        "font.size": 6,
-        "axes.titlesize": 7,
-        "axes.labelsize": 6,
-        "xtick.labelsize": 5,
-        "ytick.labelsize": 5,
-        "legend.fontsize": 5,
-        "legend.title_fontsize": 5.5,
-        "figure.titlesize": 7,
-        "savefig.dpi": 450,
-        "pdf.fonttype": 42,
-        "ps.fonttype": 42,
-    }
+configure_paper_matplotlib(
+    fonts=FONT_CONFIG,
+    savefig_dpi=450,
 )
 
 
@@ -115,9 +109,7 @@ def build_windows(
     exon_rows = features[features["feature"].eq("exon")]
     for _, row in exon_rows.iterrows():
         intervals.append((int(row["start_0based"]) - 100, int(row["end_0based"]) + 100))
-    for _, row in probes[
-        probes["mapping_status"].astype(str).str.startswith("mapped")
-    ].iterrows():
+    for _, row in probes[probes["mapping_status"].astype(str).str.startswith("mapped")].iterrows():
         for _chrom, start0, end0 in parse_segments(row):
             intervals.append((int(start0) - 180, int(end0) + 180))
     if not intervals:
@@ -152,9 +144,7 @@ def make_mapper(windows: list[dict[str, object]], gap: int = 340):
     def mapped_coord(coord: float) -> float | None:
         for window in windows:
             if int(window["start"]) <= coord <= int(window["end"]):
-                return (
-                    float(window["mapped_start"]) + float(coord) - int(window["start"])
-                )
+                return float(window["mapped_start"]) + float(coord) - int(window["start"])
         return None
 
     return mapped_coord
@@ -212,9 +202,7 @@ def choose_display_transcripts(compat: pd.DataFrame, source_label: str) -> pd.Da
         # protein-coding, and MANE/APPRIS-tagged when available.
         df["is_protein_coding"] = df["transcript_type"].astype(str).eq("protein_coding")
         df["has_mane_or_appris"] = (
-            df["tag"]
-            .astype(str)
-            .str.contains("MANE_Select|appris_principal", regex=True, na=False)
+            df["tag"].astype(str).str.contains("MANE_Select|appris_principal", regex=True, na=False)
         )
         df["sort_len"] = df["end_1based"].astype(int) - df["start_1based"].astype(int)
         sort_cols = [
@@ -246,13 +234,9 @@ def choose_display_transcripts(compat: pd.DataFrame, source_label: str) -> pd.Da
     display_parts = []
     for _, group in df.groupby("compatibility_group", sort=False):
         display_parts.append(
-            group.sort_values(sort_cols, ascending=ascending).head(
-                MAX_DISPLAY_PER_GROUP
-            )
+            group.sort_values(sort_cols, ascending=ascending).head(MAX_DISPLAY_PER_GROUP)
         )
-    display = (
-        pd.concat(display_parts, ignore_index=True) if display_parts else pd.DataFrame()
-    )
+    display = pd.concat(display_parts, ignore_index=True) if display_parts else pd.DataFrame()
     display = display.sort_values(
         ["has_probe_overlap", "compatibility_group"] + sort_cols[1:],
         ascending=[False, True] + ascending[1:],
@@ -323,9 +307,7 @@ def plot_transcript_panel(  # noqa: C901
         chosen = choose_display_transcripts(compat, source)
         if not chosen.empty:
             display_rows.append(chosen)
-    display = (
-        pd.concat(display_rows, ignore_index=True) if display_rows else pd.DataFrame()
-    )
+    display = pd.concat(display_rows, ignore_index=True) if display_rows else pd.DataFrame()
 
     windows = build_windows(features, probes, locus)
     mapped_coord = make_mapper(windows)
@@ -338,9 +320,7 @@ def plot_transcript_panel(  # noqa: C901
         )
         if i < len(windows) - 1:
             x = float(window["mapped_end"]) + 170
-            ax.text(
-                x, -0.25, "//", ha="center", va="center", fontsize=6, color="#777777"
-            )
+            ax.text(x, -0.25, "//", ha="center", va="center", fontsize=6, color="#777777")
 
     y = 0.0
     y_rows: list[tuple[float, pd.Series]] = []
@@ -407,9 +387,7 @@ def plot_transcript_panel(  # noqa: C901
             zorder=1,
         )
         for _, exon in (
-            tx_features[tx_features["feature"].eq("exon")]
-            .sort_values("start_1based")
-            .iterrows()
+            tx_features[tx_features["feature"].eq("exon")].sort_values("start_1based").iterrows()
         ):
             draw_segmented_rect(
                 ax,
@@ -485,9 +463,7 @@ def plot_transcript_panel(  # noqa: C901
                 + max(right for _left, right in visible_bounds)
             ) / 2
         else:
-            x = mapped_coord(
-                float(segments[0][1] if segments else probe["start_0based"])
-            )
+            x = mapped_coord(float(segments[0][1] if segments else probe["start_0based"]))
         if x is not None:
             label = str(probe["probe_oligo_label"])
             if int(probe.get("approx_tie_count", 1)) > 1:
@@ -634,22 +610,17 @@ def build_normalized_values(
     adata = sdata.tables[TABLE_CODEWORD]
     coords = np.asarray(adata.obsm["spatial"])
     all_features = probe_info["feature"].drop_duplicates().tolist()
-    available = [
-        feature for feature in all_features if feature in adata.var_names.astype(str)
-    ]
+    available = [feature for feature in all_features if feature in adata.var_names.astype(str)]
     missing = sorted(set(all_features) - set(available))
     if missing:
         raise ValueError(
-            "Requested codeword features are absent from table_codeword: "
-            + ", ".join(missing[:12])
+            "Requested codeword features are absent from table_codeword: " + ", ".join(missing[:12])
         )
 
     counts_layer = adata.layers[LAYER]
     library = np.asarray(counts_layer.sum(axis=1)).ravel().astype(np.float64)
     library[library <= 0] = np.nan
-    selected = selected_to_dense(adata[:, available].layers[LAYER]).astype(
-        np.float32, copy=False
-    )
+    selected = selected_to_dense(adata[:, available].layers[LAYER]).astype(np.float32, copy=False)
     norm = np.log1p(selected / library[:, None] * NORM_SCALE)
     norm_df = pd.DataFrame(norm, index=adata.obs_names.astype(str), columns=available)
 
@@ -685,12 +656,8 @@ def _inventory_matches_request(inventory: pd.DataFrame, top: pd.DataFrame) -> bo
     expected = top[["gene", "svp_rank"]].copy().reset_index(drop=True)
     observed["gene"] = observed["gene"].astype(str)
     expected["gene"] = expected["gene"].astype(str)
-    observed["svp_rank"] = pd.to_numeric(observed["svp_rank"], errors="coerce").astype(
-        "Int64"
-    )
-    expected["svp_rank"] = pd.to_numeric(expected["svp_rank"], errors="coerce").astype(
-        "Int64"
-    )
+    observed["svp_rank"] = pd.to_numeric(observed["svp_rank"], errors="coerce").astype("Int64")
+    expected["svp_rank"] = pd.to_numeric(expected["svp_rank"], errors="coerce").astype("Int64")
     return observed.equals(expected)
 
 
@@ -698,10 +665,8 @@ def _required_svp_probe_cache_paths(cache_dir: Path) -> dict[str, Path]:
     """List workflow-owned all-SVP mapping tables consumed by this renderer."""
     return {
         "mapping": cache_dir / "svp_probe_mappings.csv",
-        "gencode_compatibility": cache_dir
-        / "svp_gencode_transcript_probe_compatibility.csv",
-        "pacbio_compatibility": cache_dir
-        / "svp_pacbio_transcript_probe_compatibility.csv",
+        "gencode_compatibility": cache_dir / "svp_gencode_transcript_probe_compatibility.csv",
+        "pacbio_compatibility": cache_dir / "svp_pacbio_transcript_probe_compatibility.csv",
     }
 
 
@@ -760,15 +725,11 @@ def prepare_top20_panel_inputs(
         if _inventory_matches_request(inventory, top) and (
             not render_figures or _inventory_complete(inventory)
         ):
-            log(
-                f"top SVP panel inventory matches request: {project_path(inventory_path)}"
-            )
+            log(f"top SVP panel inventory matches request: {project_path(inventory_path)}")
             return inventory
     log(f"rendering-ready top SVP genes from cached mappings: {', '.join(genes)}")
 
-    mappings_all, gencode_compat_all, pacbio_compat_all = _load_svp_probe_cache(
-        cache_dir
-    )
+    mappings_all, gencode_compat_all, pacbio_compat_all = _load_svp_probe_cache(cache_dir)
     # All-SVP mapping is workflow-owned; this renderer only subsets those caches.
     mappings = mappings_all[mappings_all["target_name"].astype(str).isin(genes)].copy()
     compat_all = pd.concat(
@@ -796,9 +757,7 @@ def prepare_top20_panel_inputs(
     coords, norm_df = build_normalized_values(sdata, genes, probe_info)
 
     top.to_csv(OUT_DIR / "top20_svp_genes.csv", index=False)
-    norm_summary_path = (
-        OUT_DIR / "top20_svp_probe_log_normalized_expression_summary.csv"
-    )
+    norm_summary_path = OUT_DIR / "top20_svp_probe_log_normalized_expression_summary.csv"
     summary_rows: list[dict[str, object]] = []
     for feature in norm_df.columns:
         values = norm_df[feature].to_numpy(dtype=float)
@@ -815,14 +774,10 @@ def prepare_top20_panel_inputs(
                 "mean_log_norm": float(np.nanmean(values)),
                 "median_log_norm": float(np.nanmedian(values)),
                 "p95_log_norm_positive": (
-                    float(np.nanpercentile(values[positive], 95))
-                    if positive.any()
-                    else 0.0
+                    float(np.nanpercentile(values[positive], 95)) if positive.any() else 0.0
                 ),
                 "p99_4_log_norm_positive": (
-                    float(np.nanpercentile(values[positive], 99.4))
-                    if positive.any()
-                    else 0.0
+                    float(np.nanpercentile(values[positive], 99.4)) if positive.any() else 0.0
                 ),
             }
         )
@@ -865,31 +820,20 @@ def prepare_top20_panel_inputs(
                 "gene": gene,
                 "figure": str(out_png),
                 "n_codeword_features": int(
-                    probe_info.loc[
-                        probe_info["target_name"].eq(gene), "feature"
-                    ].nunique()
+                    probe_info.loc[probe_info["target_name"].eq(gene), "feature"].nunique()
                 ),
                 "n_probe_oligos": int(probe_info["target_name"].eq(gene).sum()),
                 "n_mapped_probe_oligos": int(
                     gene_mappings.loc[
-                        gene_mappings["mapping_status"]
-                        .astype(str)
-                        .str.startswith("mapped"),
+                        gene_mappings["mapping_status"].astype(str).str.startswith("mapped"),
                         "probe_instance_id",
                     ].nunique()
                 ),
                 "n_mapping_rows_including_ties": int(
-                    gene_mappings["mapping_status"]
-                    .astype(str)
-                    .str.startswith("mapped")
-                    .sum()
+                    gene_mappings["mapping_status"].astype(str).str.startswith("mapped").sum()
                 ),
-                "n_gencode_transcripts": int(
-                    gencode_tx["gene_name"].astype(str).eq(gene).sum()
-                ),
-                "n_pacbio_transcripts": int(
-                    pacbio_tx["gene_name"].astype(str).eq(gene).sum()
-                ),
+                "n_gencode_transcripts": int(gencode_tx["gene_name"].astype(str).eq(gene).sum()),
+                "n_pacbio_transcripts": int(pacbio_tx["gene_name"].astype(str).eq(gene).sum()),
                 "n_compatibility_groups": (
                     int(gene_compat["compatibility_group"].nunique())
                     if not gene_compat.empty

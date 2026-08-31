@@ -241,16 +241,10 @@ def _read_table_s4_controls() -> pd.DataFrame:
             fallback = pd.DataFrame({"gene": missing_manual}).merge(
                 manual_stats, on="gene", how="left"
             )
-            fallback["source_programs"] = fallback["source_programs"].fillna(
-                "manual_curated"
-            )
-            fallback["source_terms"] = fallback["source_terms"].fillna(
-                "Manual curated marker"
-            )
+            fallback["source_programs"] = fallback["source_programs"].fillna("manual_curated")
+            fallback["source_terms"] = fallback["source_terms"].fillna("Manual curated marker")
             fallback["n_programs"] = fallback["n_programs"].fillna(0).astype(int)
-            fallback["max_program_group_score"] = fallback[
-                "max_program_group_score"
-            ].fillna(0.0)
+            fallback["max_program_group_score"] = fallback["max_program_group_score"].fillna(0.0)
             fallback["control_group"] = control_group
             fallback["group_label"] = BRAIN_DEV_CELL_TYPE_LABELS[control_group]
             fallback["manual_rank"] = fallback["gene"].map(manual_rank)
@@ -284,10 +278,7 @@ def _read_table_s4_controls() -> pd.DataFrame:
         kind="stable",
     )
     best["rank_in_group"] = best.groupby("control_group", sort=False).cumcount() + 1
-    keep = (
-        best["rank_in_group"].le(BRAIN_DEV_CELL_TYPE_CONTROL_TOP_N)
-        | best["manual_control"]
-    )
+    keep = best["rank_in_group"].le(BRAIN_DEV_CELL_TYPE_CONTROL_TOP_N) | best["manual_control"]
     return best[keep].copy()
 
 
@@ -302,11 +293,7 @@ def brain_dev_positive_control_table(force: bool = False) -> pd.DataFrame:
         "mean_score",
         "rank_in_group",
     }
-    if (
-        positive_path.exists()
-        and cache_has_columns(positive_path, required)
-        and not force
-    ):
+    if positive_path.exists() and cache_has_columns(positive_path, required) and not force:
         return pd.read_csv(positive_path)
 
     # Build the positive control table using both a manually curated gene list,
@@ -314,9 +301,7 @@ def brain_dev_positive_control_table(force: bool = False) -> pd.DataFrame:
     positive = _read_table_s4_controls()
     positive.insert(0, "panel", "brain_dev")
     positive.insert(1, "source", "Cell 2026 Table S4 cNMF")
-    positive.loc[positive["manual_control"].astype(bool), "source"] = (
-        "Cell 2026 manual curation"
-    )
+    positive.loc[positive["manual_control"].astype(bool), "source"] = "Cell 2026 manual curation"
     save_csv(positive, positive_path)
     return positive
 
@@ -325,12 +310,9 @@ def brain_dev_forced_controls(force: bool = False) -> list[str]:
     """Return Table S4/manual control genes for panel selection."""
     controls = brain_dev_positive_control_table(force=force)
     top = controls[
-        controls["rank_in_group"].le(BRAIN_DEV_CELL_TYPE_CONTROL_TOP_N)
-        | controls["manual_control"]
+        controls["rank_in_group"].le(BRAIN_DEV_CELL_TYPE_CONTROL_TOP_N) | controls["manual_control"]
     ].copy()
-    genes = top.sort_values(["control_group", "rank_in_group"], kind="stable")[
-        "gene"
-    ].astype(str)
+    genes = top.sort_values(["control_group", "rank_in_group"], kind="stable")["gene"].astype(str)
     return list(dict.fromkeys(genes))
 
 

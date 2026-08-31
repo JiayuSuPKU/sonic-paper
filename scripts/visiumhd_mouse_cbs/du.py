@@ -75,9 +75,7 @@ def build_gene_expression_table(
     counts = adata.layers["counts"].tocsr()
     x_gene = (counts[:, mask] @ agg_mat.T).tocsr()
     gene_total_counts = np.asarray(x_gene.sum(axis=0)).ravel()
-    gene_bin_pct = np.asarray((x_gene > 0).sum(axis=0)).ravel() / max(
-        1, x_gene.shape[0]
-    )
+    gene_bin_pct = np.asarray((x_gene > 0).sum(axis=0)).ravel() / max(1, x_gene.shape[0])
     keep = (gene_total_counts >= min_counts) & (gene_bin_pct > min_bin_pct)
     if not keep.any():
         raise ValueError(
@@ -85,12 +83,8 @@ def build_gene_expression_table(
             f"(min_counts={min_counts}, min_bin_pct>{min_bin_pct})."
         )
     x_gene = x_gene[:, keep].tocsr()
-    unique_genes = [
-        gene for gene, keep_gene in zip(unique_genes, keep, strict=False) if keep_gene
-    ]
-    unique_keys = [
-        key for key, keep_gene in zip(unique_keys, keep, strict=False) if keep_gene
-    ]
+    unique_genes = [gene for gene, keep_gene in zip(unique_genes, keep, strict=False) if keep_gene]
+    unique_keys = [key for key, keep_gene in zip(unique_keys, keep, strict=False) if keep_gene]
     gene_total_counts = gene_total_counts[keep]
     gene_bin_pct = gene_bin_pct[keep]
     total_counts = np.asarray(counts.sum(axis=1)).ravel()
@@ -228,10 +222,7 @@ def _cached_du_matches_inputs(
     if cached.empty:
         return not svp_keys and not covariate_keys
     cached = _ensure_du_keys(cached)
-    return (
-        set(cached["gene_key"]) == svp_keys
-        and set(cached["covariate_key"]) == covariate_keys
-    )
+    return set(cached["gene_key"]) == svp_keys and set(cached["covariate_key"]) == covariate_keys
 
 
 def _du_output_columns(df: pd.DataFrame) -> list[str]:
@@ -387,9 +378,9 @@ def run_du_suite(
                 "n_pairs": n_pairs,
             }
         )
-        du = model.get_formatted_test_results(
-            "du", with_gene_summary=False
-        ).sort_values("pvalue_adj")
+        du = model.get_formatted_test_results("du", with_gene_summary=False).sort_values(
+            "pvalue_adj"
+        )
         du["gene_key"] = du["gene"].map(normalize_gene_symbol)
         du["covariate_key"] = du["covariate"].map(normalize_gene_symbol)
         du["covariate_set"] = covariate_set
@@ -498,21 +489,15 @@ def du_pairwise_agreement(
                 "right": right_cfg.short_label,
                 "n_shared_svp": len(shared_svp),
                 "n_shared_covariates": len(shared_covariates),
-                "n_shared_rbps": (
-                    len(shared_covariates) if covariate_set == "rbp" else np.nan
-                ),
-                "n_shared_tfs": (
-                    len(shared_covariates) if covariate_set == "tf_chip" else np.nan
-                ),
+                "n_shared_rbps": (len(shared_covariates) if covariate_set == "rbp" else np.nan),
+                "n_shared_tfs": (len(shared_covariates) if covariate_set == "tf_chip" else np.nan),
                 "shared_tested_pairs": int(merged.shape[0]),
                 "spearman_logp": rho,
                 "left_sig_pairs": len(left_sig),
                 "right_sig_pairs": len(right_sig),
                 "shared_sig_pairs": len(sig_overlap),
                 "sig_pair_union": len(sig_union),
-                "jaccard_sig_pairs": (
-                    len(sig_overlap) / len(sig_union) if sig_union else np.nan
-                ),
+                "jaccard_sig_pairs": (len(sig_overlap) / len(sig_union) if sig_union else np.nan),
             }
         )
     return pd.DataFrame(rows)
@@ -576,9 +561,9 @@ def du_shared_associations(
     padj_cols = [f"pvalue_adj_{key}" for key in dataset_keys]
     pvalue_cols = [f"pvalue_{key}" for key in dataset_keys]
     merged["max_padj"] = merged[padj_cols].max(axis=1)
-    merged["mean_neglogp"] = np.vstack(
-        [minus_log10_p(merged[col]) for col in pvalue_cols]
-    ).mean(axis=0)
+    merged["mean_neglogp"] = np.vstack([minus_log10_p(merged[col]) for col in pvalue_cols]).mean(
+        axis=0
+    )
     sig_matrix = merged[padj_cols].lt(FDR_THRESHOLD)
     merged["n_sig_datasets"] = sig_matrix.sum(axis=1)
     merged["sig_all"] = sig_matrix.all(axis=1)

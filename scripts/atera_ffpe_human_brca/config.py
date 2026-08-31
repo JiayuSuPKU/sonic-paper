@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from scripts.paper_utils import PROJECT_ROOT
+
 HOME = Path.home()
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # Keep data/results/figures separate so generated outputs stay out of source.
 DATA_ROOT = PROJECT_ROOT / "data" / "atera_ffpe_human_brca"
@@ -30,9 +31,7 @@ ANNOTATION_CSV = ATERA_DATA_DIR / "WTA_Preview_FFPE_Breast_Cancer_cell_groups.cs
 REFERENCE_ROOT = HOME / "reference"
 HG38_REFERENCE_DIR = REFERENCE_ROOT / "hg38"
 GENCODE_GTF = HG38_REFERENCE_DIR / "gencode.v49.annotation.sorted.gtf.gz"
-PACBIO_GFF = (
-    PACBIO_DATA_DIR / "PacBio_Breast_Cancer_all_QC_pass_transcripts_unique.gff.gz"
-)
+PACBIO_GFF = PACBIO_DATA_DIR / "PacBio_Breast_Cancer_all_QC_pass_transcripts_unique.gff.gz"
 SQANTI_TXT = PACBIO_DATA_DIR / "Sqanti_annotation_QC_pass_transcripts_unique.txt.gz"
 PACBIO_FL_COUNTS_ZIP = PACBIO_DATA_DIR / "BRCA_superPBID_counts.tsv.zip"
 PACBIO_FL_COUNTS_TSV = PACBIO_DATA_DIR / "BRCA_superPBID_counts.tsv"
@@ -40,9 +39,7 @@ HG38_FASTA = HG38_REFERENCE_DIR / "hg38.genome.fa"
 
 TCGA_BAM_SLICE_DIR = TCGA_DATA_DIR / "bam_slices"
 TCGA_BAM_MANIFEST_TSV = TCGA_DATA_DIR / "tcga_brca_rnaseq_bam_manifest_with_samples.tsv"
-TCGA_CBIO_CLINICAL_SAMPLE_TXT = (
-    TCGA_DATA_DIR / "brca_tcga_pub2015_data_clinical_sample.txt"
-)
+TCGA_CBIO_CLINICAL_SAMPLE_TXT = TCGA_DATA_DIR / "brca_tcga_pub2015_data_clinical_sample.txt"
 TCGA_CBIO_RSEM_TXT = TCGA_DATA_DIR / "brca_tcga_pub2015_data_mrna_seq_v2_rsem.txt"
 TCGA_GDC_CLINICAL_TSV = TCGA_DATA_DIR / "tcga_brca_gdc_clinical.tsv"
 TCGA_GDC_CLINICAL_RAW_JSON = TCGA_DATA_DIR / "tcga_brca_gdc_cases_clinical.raw.json"
@@ -51,12 +48,8 @@ TCGA_GDC_STATUS_JSON = TCGA_DATA_DIR / "gdc_status.json"
 # TCGA analysis tables are generated from the raw source files above and are
 # small enough to live with other workflow results.
 TCGA_ANALYSIS_DIR = RESULT_DIR / "tcga_brca_ankrd30a"
-TCGA_METRIC_TABLE_TSV = (
-    TCGA_ANALYSIS_DIR / "tcga_brca_ankrd30a_pb_probe_metric_table.tsv"
-)
-TCGA_ER_POSITIVE_CORRELATION_CSV = (
-    RESULT_DIR / "tcga_er_positive_regulator_correlations.csv"
-)
+TCGA_METRIC_TABLE_TSV = TCGA_ANALYSIS_DIR / "tcga_brca_ankrd30a_pb_probe_metric_table.tsv"
+TCGA_ER_POSITIVE_CORRELATION_CSV = RESULT_DIR / "tcga_er_positive_regulator_correlations.csv"
 
 # ReMap is a shared reference cache under ~/reference because it can be reused
 # by Atera DU and other human workflows.
@@ -74,9 +67,7 @@ BRCA_LRSEQ_BASE_URL = (
 )
 PACBIO_GFF_URL = f"{BRCA_LRSEQ_BASE_URL}/data/QC_pass/{PACBIO_GFF.name}"
 SQANTI_TXT_URL = f"{BRCA_LRSEQ_BASE_URL}/data/QC_pass/{SQANTI_TXT.name}"
-PACBIO_FL_COUNTS_URL = (
-    f"{BRCA_LRSEQ_BASE_URL}/data/isoforms_before_QC/{PACBIO_FL_COUNTS_ZIP.name}"
-)
+PACBIO_FL_COUNTS_URL = f"{BRCA_LRSEQ_BASE_URL}/data/isoforms_before_QC/{PACBIO_FL_COUNTS_ZIP.name}"
 
 TABLE_CODEWORD = "table_codeword"
 TABLE_GENE = "table"
@@ -113,9 +104,7 @@ ANKRD30A_VISUALIZATION_CACHE_DIR = RESULT_DIR / "ankrd30a_visualization_cache"
 ANKRD30A_TRANSCRIPT_ANNOTATIONS_CSV = (
     ANKRD30A_VISUALIZATION_CACHE_DIR / "ankrd30a_transcript_annotations.csv"
 )
-ANKRD30A_PROBE_MAPPINGS_CSV = (
-    ANKRD30A_VISUALIZATION_CACHE_DIR / "ankrd30a_probe_mappings.csv"
-)
+ANKRD30A_PROBE_MAPPINGS_CSV = ANKRD30A_VISUALIZATION_CACHE_DIR / "ankrd30a_probe_mappings.csv"
 ANKRD30A_REGULATOR_PRIORITY_CSV = (
     ANKRD30A_VISUALIZATION_CACHE_DIR / "ankrd30a_regulator_priority.csv"
 )

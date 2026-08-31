@@ -19,7 +19,17 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
-from .._paths import resolve_cached_data_path
+from scripts.paper_utils import (
+    ensure_directories,
+    format_pvalue,
+    log,
+    parse_gene_list,
+    resolve_cached_data_path,
+)
+from scripts.paper_utils import (
+    save_csv as _save_csv,
+)
+
 from .config import (
     AD_PIG_DROP_PROBES,
     AD_PIG_RENAME_PROBES,
@@ -32,6 +42,8 @@ from .config import (
     PROJECT_ROOT,
     RESULT_DIR,
 )
+
+__all__ = ["format_pvalue", "log", "parse_gene_list"]
 
 logger = logging.getLogger("comparator_benchmark.utils")
 
@@ -47,25 +59,13 @@ def _is_comparison_gene(gene: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def log(message: str) -> None:
-    """Timestamped print, mirrors ``visiumhd_mouse_cbs.utils.log``."""
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
-
-
 def ensure_dirs() -> None:
     """Create the project's result + figure directories if missing."""
-    RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    FIGURE_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_directories(RESULT_DIR, FIGURE_DIR)
 
 
 def save_csv(df: pd.DataFrame, path: Path, index: bool = False) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=index)
-    try:
-        rel = path.relative_to(PROJECT_ROOT)
-    except ValueError:
-        rel = path
-    log(f"wrote {rel} ({df.shape[0]:,} rows)")
+    _save_csv(df, path, project_root=PROJECT_ROOT, index=index)
 
 
 def cache_has_columns(path: Path, required: set[str]) -> bool:
@@ -77,30 +77,6 @@ def cache_has_columns(path: Path, required: set[str]) -> bool:
     except (OSError, pd.errors.EmptyDataError):
         return False
     return required.issubset(df.columns)
-
-
-def format_pvalue(p: float) -> str:
-    """Compact p-value string for small manuscript panels."""
-    p = float(p)
-    if not np.isfinite(p):
-        return "NA"
-    if p == 0:
-        return "<1e-300"
-    if p < 1e-3:
-        exp = int(math.floor(math.log10(p)))
-        mant = p / 10**exp
-        return f"{mant:.1f}e{exp}"
-    return f"{p:.3f}".rstrip("0").rstrip(".")
-
-
-def parse_gene_list(values: Sequence[str] | None) -> list[str]:
-    """Parse CLI-style gene values that may be comma- or whitespace-separated."""
-    if not values:
-        return []
-    genes: list[str] = []
-    for value in values:
-        genes.extend(g.strip() for g in value.replace(",", " ").split())
-    return [gene for gene in genes if gene]
 
 
 def unique(items: Iterable[str]) -> list[str]:
@@ -142,9 +118,7 @@ def scale_visium_spatial_to_spot_diameter_um(
     """Set Visium spatial coordinates in micrometers from raw fullres pixels."""
     spatial_uns = adata.uns.setdefault("spatial", {})
     scalefactors = (
-        spatial_uns.setdefault("scalefactors", {})
-        if isinstance(spatial_uns, dict)
-        else {}
+        spatial_uns.setdefault("scalefactors", {}) if isinstance(spatial_uns, dict) else {}
     )
     fullres_spot_diameter = float(scalefactors.get("spot_diameter_fullres", 0.0))
     if not np.isfinite(fullres_spot_diameter) or fullres_spot_diameter <= 0:
@@ -318,9 +292,7 @@ def build_permutation_nulls(
     if real_set.design_values is not None:
         design = np.asarray(real_set.design_values, dtype=float)
         groups = (
-            None
-            if continuous_groups is None
-            else np.asarray(list(continuous_groups), dtype=str)
+            None if continuous_groups is None else np.asarray(list(continuous_groups), dtype=str)
         )
         if groups is not None and groups.shape[0] != design.shape[0]:
             raise ValueError("continuous_groups must align with design_values")
@@ -377,16 +349,8 @@ def build_permutation_nulls(
         out.append(
             SampleSet(
                 label=f"null_perm_{len(out):02d}",
-                a_paths=[
-                    path
-                    for path, label in zip(pool, permuted, strict=True)
-                    if label == 0
-                ],
-                b_paths=[
-                    path
-                    for path, label in zip(pool, permuted, strict=True)
-                    if label == 1
-                ],
+                a_paths=[path for path, label in zip(pool, permuted, strict=True) if label == 0],
+                b_paths=[path for path, label in zip(pool, permuted, strict=True) if label == 1],
                 is_null=True,
                 null_type="perm",
             )
@@ -506,9 +470,7 @@ def _apply_ad_pig_probe_qc(adata: ad.AnnData) -> ad.AnnData:
     for key in subset.obsm.keys():
         out.obsm[key] = subset.obsm[key].copy()
     for key in subset.layers.keys():
-        out.layers[key] = _aggregate_var_matrix(
-            subset.layers[key], col_idx, len(target_to_col)
-        )
+        out.layers[key] = _aggregate_var_matrix(subset.layers[key], col_idx, len(target_to_col))
     return out
 
 
@@ -527,8 +489,7 @@ def load_panel(
         raise FileNotFoundError(f"No metadata.csv at {meta_path}")
     meta = pd.read_csv(meta_path)
     meta["h5ad_path"] = [
-        str(resolve_cached_data_path(path, meta_path.parent))
-        for path in meta["h5ad_path"]
+        str(resolve_cached_data_path(path, meta_path.parent)) for path in meta["h5ad_path"]
     ]
 
     sets = build_sample_sets(panel, meta)
@@ -611,9 +572,7 @@ def log1p_normalized_samples(samples: dict[Path, ad.AnnData]) -> dict[Path, ad.A
                 raise ValueError(
                     f"{path.name} {source} is not count-like; log normalization expects raw counts"
                 )
-        normalized.X = (
-            matrix.copy() if sparse.issparse(matrix) else np.array(matrix, copy=True)
-        )
+        normalized.X = matrix.copy() if sparse.issparse(matrix) else np.array(matrix, copy=True)
         sc.pp.normalize_total(normalized)
         sc.pp.log1p(normalized)
         out[path] = normalized
@@ -633,12 +592,7 @@ def geometric_frequency_edges(linear_edges: np.ndarray) -> np.ndarray:
     and actual retained bin counts.
     """
     edges = np.asarray(linear_edges, dtype=float)
-    if (
-        edges.ndim != 1
-        or edges.size < 3
-        or edges[0] != 0
-        or np.any(np.diff(edges) <= 0)
-    ):
+    if edges.ndim != 1 or edges.size < 3 or edges[0] != 0 or np.any(np.diff(edges) <= 0):
         raise ValueError("linear_edges must start at 0 and be strictly increasing.")
 
     return np.concatenate(([0.0], np.geomspace(edges[1], edges[-1], edges.size - 1)))

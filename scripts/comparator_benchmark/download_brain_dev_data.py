@@ -215,8 +215,7 @@ def process_sample(
 
     matrix_present = "filtered_feature_bc_matrix.h5" in members
     positions_present = (
-        "spatial/tissue_positions_list.csv" in members
-        or "spatial/tissue_positions.csv" in members
+        "spatial/tissue_positions_list.csv" in members or "spatial/tissue_positions.csv" in members
     )
     if not (matrix_present and positions_present):
         logger.warning(
@@ -239,9 +238,7 @@ def _write_metadata_csv(adata_dir: Path) -> None:
     meta_path = adata_dir.parent / "metadata.csv"
     with meta_path.open("w", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(
-            ["gsm_id", "sample_title", "timepoint", "plane", "replicate", "h5ad_path"]
-        )
+        writer.writerow(["gsm_id", "sample_title", "timepoint", "plane", "replicate", "h5ad_path"])
         for gsm_id, title in sorted(BRAIN_DEV_GSM_TITLES.items()):
             m = SAMPLE_TITLE_RE.match(title)
             if m:
@@ -290,9 +287,7 @@ def main(argv: list[str] | None = None) -> int:
 
     t0 = time.time()
     if raw_path.exists() and raw_path.stat().st_size >= min_bytes:
-        logger.info(
-            "Raw tarball already present (%s).", human_size(raw_path.stat().st_size)
-        )
+        logger.info("Raw tarball already present (%s).", human_size(raw_path.stat().st_size))
     else:
         if raw_path.exists():
             raw_path.unlink()

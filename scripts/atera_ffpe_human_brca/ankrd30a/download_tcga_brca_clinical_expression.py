@@ -38,7 +38,6 @@ import math
 import shutil
 import sys
 import tempfile
-import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterable
@@ -47,6 +46,8 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
     __package__ = "scripts.atera_ffpe_human_brca.ankrd30a"
+
+from scripts.paper_utils import log
 
 from ..config import (
     TCGA_CBIO_CLINICAL_SAMPLE_TXT,
@@ -132,11 +133,6 @@ GDC_CLINICAL_COLUMNS = [
 ]
 
 
-def log(message: str) -> None:
-    """Print a timestamped progress line."""
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
-
-
 def _nonempty(path: Path) -> bool:
     return path.exists() and path.stat().st_size > 0
 
@@ -144,9 +140,7 @@ def _nonempty(path: Path) -> bool:
 def _write_tsv(rows: list[dict[str, object]], path: Path, columns: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(
-            handle, fieldnames=columns, delimiter="\t", extrasaction="ignore"
-        )
+        writer = csv.DictWriter(handle, fieldnames=columns, delimiter="\t", extrasaction="ignore")
         writer.writeheader()
         for row in rows:
             writer.writerow({col: row.get(col, "") for col in columns})
@@ -163,9 +157,7 @@ def download_url(url: str, path: Path, *, force: bool = False) -> Path:
     request = urllib.request.Request(url, headers={"User-Agent": "sonic-paper/atera"})
     with urllib.request.urlopen(request, timeout=120) as response:
         # Use an atomic rename so partial network downloads are never reused.
-        with tempfile.NamedTemporaryFile(
-            "wb", dir=str(path.parent), delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile("wb", dir=str(path.parent), delete=False) as tmp:
             shutil.copyfileobj(response, tmp)
             tmp_path = Path(tmp.name)
     tmp_path.replace(path)
@@ -173,9 +165,7 @@ def download_url(url: str, path: Path, *, force: bool = False) -> Path:
     return path
 
 
-def request_json(
-    url: str, payload: dict[str, object] | None = None
-) -> dict[str, object]:
+def request_json(url: str, payload: dict[str, object] | None = None) -> dict[str, object]:
     """POST or GET JSON from GDC."""
     if payload is None:
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -219,12 +209,8 @@ def _first_nonempty(values: Iterable[object]) -> object:
 def flatten_gdc_case(hit: dict[str, object]) -> dict[str, object]:
     """Flatten one GDC case record into the clinical fields needed by figures."""
     diagnoses = hit.get("diagnoses") if isinstance(hit.get("diagnoses"), list) else []
-    follow_ups = (
-        hit.get("follow_ups") if isinstance(hit.get("follow_ups"), list) else []
-    )
-    demographic = (
-        hit.get("demographic") if isinstance(hit.get("demographic"), dict) else {}
-    )
+    follow_ups = hit.get("follow_ups") if isinstance(hit.get("follow_ups"), list) else []
+    demographic = hit.get("demographic") if isinstance(hit.get("demographic"), dict) else {}
     dx0 = diagnoses[0] if diagnoses and isinstance(diagnoses[0], dict) else {}
 
     vital_status = demographic.get("vital_status")
@@ -255,9 +241,7 @@ def flatten_gdc_case(hit: dict[str, object]) -> dict[str, object]:
         "year_of_birth": demographic.get("year_of_birth", ""),
         "year_of_death": demographic.get("year_of_death", ""),
         "age_at_diagnosis_days": age_days,
-        "age_at_diagnosis_years": (
-            age_days / 365.25 if math.isfinite(age_days) else math.nan
-        ),
+        "age_at_diagnosis_years": (age_days / 365.25 if math.isfinite(age_days) else math.nan),
         "ajcc_pathologic_stage": dx0.get("ajcc_pathologic_stage", ""),
         "ajcc_pathologic_t": dx0.get("ajcc_pathologic_t", ""),
         "ajcc_pathologic_n": dx0.get("ajcc_pathologic_n", ""),
@@ -284,22 +268,14 @@ def flatten_gdc_case(hit: dict[str, object]) -> dict[str, object]:
             )
         ),
         "progression_or_recurrence": _first_nonempty(
-            fu.get("progression_or_recurrence")
-            for fu in follow_ups
-            if isinstance(fu, dict)
+            fu.get("progression_or_recurrence") for fu in follow_ups if isinstance(fu, dict)
         ),
     }
 
 
-def fetch_gdc_clinical(
-    *, force: bool = False, api_base: str = DEFAULT_GDC_API_BASE
-) -> Path:
+def fetch_gdc_clinical(*, force: bool = False, api_base: str = DEFAULT_GDC_API_BASE) -> Path:
     """Fetch GDC TCGA-BRCA case-level clinical metadata into the Atera data cache."""
-    if (
-        _nonempty(TCGA_GDC_CLINICAL_TSV)
-        and _nonempty(TCGA_GDC_CLINICAL_RAW_JSON)
-        and not force
-    ):
+    if _nonempty(TCGA_GDC_CLINICAL_TSV) and _nonempty(TCGA_GDC_CLINICAL_RAW_JSON) and not force:
         log(f"reuse {project_path(TCGA_GDC_CLINICAL_TSV)}")
         return TCGA_GDC_CLINICAL_TSV
 
@@ -319,9 +295,7 @@ def fetch_gdc_clinical(
         "size": 2000,
     }
     response = request_json(f"{api_base.rstrip('/')}/cases", payload)
-    TCGA_GDC_CLINICAL_RAW_JSON.write_text(
-        json.dumps(response, indent=2, sort_keys=True) + "\n"
-    )
+    TCGA_GDC_CLINICAL_RAW_JSON.write_text(json.dumps(response, indent=2, sort_keys=True) + "\n")
     hits = response.get("data", {}).get("hits", [])
     rows = [flatten_gdc_case(hit) for hit in hits if isinstance(hit, dict)]
     _write_tsv(rows, TCGA_GDC_CLINICAL_TSV, GDC_CLINICAL_COLUMNS)
@@ -339,18 +313,12 @@ def ensure_tcga_clinical_expression_data(
     TCGA_DATA_DIR.mkdir(parents=True, exist_ok=True)
     status: dict[str, str] = {}
     status["cbio_clinical_sample"] = str(
-        download_url(
-            CBIO_CLINICAL_SAMPLE_URL, TCGA_CBIO_CLINICAL_SAMPLE_TXT, force=force
-        )
+        download_url(CBIO_CLINICAL_SAMPLE_URL, TCGA_CBIO_CLINICAL_SAMPLE_TXT, force=force)
     )
     if include_expression:
-        status["cbio_rsem"] = str(
-            download_url(CBIO_RSEM_URL, TCGA_CBIO_RSEM_TXT, force=force)
-        )
+        status["cbio_rsem"] = str(download_url(CBIO_RSEM_URL, TCGA_CBIO_RSEM_TXT, force=force))
     if include_gdc_clinical:
-        status["gdc_clinical"] = str(
-            fetch_gdc_clinical(force=force, api_base=gdc_api_base)
-        )
+        status["gdc_clinical"] = str(fetch_gdc_clinical(force=force, api_base=gdc_api_base))
     return status
 
 
@@ -358,9 +326,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Download TCGA-BRCA clinical and gene-expression inputs."
     )
-    parser.add_argument(
-        "--force", action="store_true", help="Redownload existing non-empty files."
-    )
+    parser.add_argument("--force", action="store_true", help="Redownload existing non-empty files.")
     parser.add_argument(
         "--skip-expression",
         action="store_true",

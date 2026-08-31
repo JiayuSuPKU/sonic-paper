@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from scripts.paper_utils import PROJECT_ROOT
+
 HOME = Path.home()
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = HOME / "Projects" / "SPLISOSM_paper" / "data"
 REFERENCE_ROOT = HOME / "reference" / "mm39"
 
@@ -81,10 +82,7 @@ DATASETS = {
         min_bin_pct=0.001,
         structure_kind="trend_peak_bed12",
         bin_prefix="_",
-        bed12_file=DATA_ROOT
-        / "visiumhd_3p_mouse_cbs"
-        / "sierra_peaks"
-        / "peak.txt.bed12",
+        bed12_file=DATA_ROOT / "visiumhd_3p_mouse_cbs" / "sierra_peaks" / "peak.txt.bed12",
     ),
     "ffpe_probe": DatasetConfig(
         key="ffpe_probe",
@@ -114,9 +112,7 @@ DATASETS = {
         min_bin_pct=0.001,
         structure_kind="ont_gff",
         bin_prefix="_",
-        gff_file=DATA_ROOT
-        / "visiumhd_ont_mouse_cbs"
-        / "SAMPLE_S1_L001.transcriptome.gff.gz",
+        gff_file=DATA_ROOT / "visiumhd_ont_mouse_cbs" / "SAMPLE_S1_L001.transcriptome.gff.gz",
     ),
 }
 

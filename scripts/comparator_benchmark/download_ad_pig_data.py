@@ -66,9 +66,7 @@ def _split_and_convert(raw_counts: Path, adata_dir: Path) -> tuple[int, int]:
 
     expected_h5ads = [adata_dir / f"{s[0]}.h5ad" for s in AD_PIG_SAMPLES]
     if all(p.exists() and p.stat().st_size > 0 for p in expected_h5ads):
-        logger.info(
-            "All %d per-sample .h5ad files already present.", len(AD_PIG_SAMPLES)
-        )
+        logger.info("All %d per-sample .h5ad files already present.", len(AD_PIG_SAMPLES))
         return 0, len(AD_PIG_SAMPLES)
 
     logger.info("Reading %s (this may take a minute) ...", raw_counts.name)
@@ -196,9 +194,7 @@ def main(argv: list[str] | None = None) -> int:
 
     t0 = time.time()
     if raw_path.exists() and raw_path.stat().st_size >= min_bytes:
-        logger.info(
-            "Raw counts already present (%s).", human_size(raw_path.stat().st_size)
-        )
+        logger.info("Raw counts already present (%s).", human_size(raw_path.stat().st_size))
     else:
         if raw_path.exists():
             raw_path.unlink()

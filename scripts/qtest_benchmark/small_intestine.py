@@ -34,9 +34,7 @@ CACHE_INPUTS = (Path(__file__), Path(__file__).with_name("config.py"))
 def _gene_indices(table, genes: tuple[str, ...]) -> np.ndarray:
     indices = table.var_names.get_indexer(genes)
     if (indices < 0).any():
-        missing = [
-            gene for gene, index in zip(genes, indices, strict=True) if index < 0
-        ]
+        missing = [gene for gene, index in zip(genes, indices, strict=True) if index < 0]
         raise ValueError(f"Missing configured genes in square_016um: {missing}")
     return indices
 
@@ -160,16 +158,14 @@ def cache_small_intestine_kernel_results(
     panel_maps[:, rows, cols] = table[:, panel_indices].X.toarray().T
     standardized = mean_fill_structural_holes(panel_maps, mask)
     standardized -= standardized.mean(axis=(1, 2), keepdims=True)
-    standardized /= (
-        standardized.std(axis=(1, 2), ddof=1, keepdims=True) + np.finfo(float).eps
-    )
+    standardized /= standardized.std(axis=(1, 2), ddof=1, keepdims=True) + np.finfo(float).eps
     pattern_templates = {
         "Swiss-roll artifact": standardized[
             [panel_genes.index(gene) for gene in ARTIFACT_GENES]
         ].mean(axis=0),
-        "Immune cluster": standardized[
-            [panel_genes.index(gene) for gene in IMMUNE_GENES]
-        ].mean(axis=0),
+        "Immune cluster": standardized[[panel_genes.index(gene) for gene in IMMUNE_GENES]].mean(
+            axis=0
+        ),
     }
     fit_metrics: dict[str, tuple[float, float]] = {}
     for target, contrast in (
@@ -195,9 +191,7 @@ def cache_small_intestine_kernel_results(
         data = np.moveaxis(maps, 0, -1)
         for key, kernel in kernels.items():
             q = np.asarray(spatial_q_test(data, kernel, return_pval=False))
-            z_scores[key][start:end] = (q - kernel.trace()) / np.sqrt(
-                2.0 * kernel.square_trace()
-            )
+            z_scores[key][start:end] = (q - kernel.trace()) / np.sqrt(2.0 * kernel.square_trace())
 
     result = pd.DataFrame(
         {
@@ -224,9 +218,7 @@ def cache_small_intestine_kernel_results(
                     "group": group,
                     "median_transcriptome_rank": float(ranks[selected].median()),
                     "fit_seconds": fit_metrics[key][0] if is_target_fit else np.nan,
-                    "spectral_storage_mb": (
-                        fit_metrics[key][1] if is_target_fit else np.nan
-                    ),
+                    "spectral_storage_mb": (fit_metrics[key][1] if is_target_fit else np.nan),
                 }
             )
     result.to_csv(SMALL_INTESTINE_SCORES_FILE, index=False)
@@ -248,9 +240,7 @@ def design_contrastive_pattern_kernel(
         filled[~mask] = float(pattern[mask].mean())
         filled -= filled.mean()
         filled /= filled.std(ddof=1) + np.finfo(float).eps
-        power = gaussian_filter(
-            np.abs(scipy.fft.fft2(filled, workers=1)) ** 2, 1.25, mode="wrap"
-        )
+        power = gaussian_filter(np.abs(scipy.fft.fft2(filled, workers=1)) ** 2, 1.25, mode="wrap")
         power[0, 0] = 0.0
         power_total = power.sum()
         if not np.isfinite(power_total) or power_total <= 0:

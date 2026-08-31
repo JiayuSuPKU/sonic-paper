@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from scripts.paper_utils import PROJECT_ROOT
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ANALYSIS_SLUG = "visium_glioma_idh_status"
 DATA_ROOT = PROJECT_ROOT / "data" / ANALYSIS_SLUG
 
@@ -36,9 +35,7 @@ CACHE_SUMMARY_FILE = RESULT_DIR / "idh_status_cache_summary.json"
 MAIN_FIGURE_PDF = FIGURE_DIR / "idh_main.pdf"
 SUPPLEMENTARY_DIAGNOSTICS_PDF = FIGURE_DIR / "idh_supp.pdf"
 ENRICHMENT_TERMS_FILE = RESULT_DIR / "idh_status_clusterprofiler_enrichment.csv"
-META_PROGRAM_GENE_MAP_FILE = (
-    RESULT_DIR / "idh_status_df_norm_top100_metaprogram_map.csv"
-)
+META_PROGRAM_GENE_MAP_FILE = RESULT_DIR / "idh_status_df_norm_top100_metaprogram_map.csv"
 
 # Main spatial-profile genes ordered from established programs to novel findings.
 FIGURE_GENES: tuple[str, ...] = ("NDRG1", "C3", "S100A10", "FN1")

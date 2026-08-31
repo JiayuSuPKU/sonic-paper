@@ -71,16 +71,12 @@ def build_sample_manifest() -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     # One processed GEO track pair exists per timepoint: plus and minus strand,
     # already combined across biological replicates by the source study.
-    for order, (timepoint, time_hours, geo_timepoint) in enumerate(
-        TRPS1_PROSEQ_TIMEPOINTS
-    ):
+    for order, (timepoint, time_hours, geo_timepoint) in enumerate(TRPS1_PROSEQ_TIMEPOINTS):
         pos_name = (
-            f"{TRPS1_PROSEQ_GEO_ACCESSION}_T47D_"
-            f"{geo_timepoint}_plus_combined_normalized.bigWig"
+            f"{TRPS1_PROSEQ_GEO_ACCESSION}_T47D_{geo_timepoint}_plus_combined_normalized.bigWig"
         )
         neg_name = (
-            f"{TRPS1_PROSEQ_GEO_ACCESSION}_T47D_"
-            f"{geo_timepoint}_minus_combined_normalized.bigWig"
+            f"{TRPS1_PROSEQ_GEO_ACCESSION}_T47D_{geo_timepoint}_minus_combined_normalized.bigWig"
         )
         rows.append(
             {
@@ -126,9 +122,7 @@ def build_ankrd30a_signal_windows() -> pd.DataFrame:
     """Build the PB TSS and gene-body windows used for PRO-seq quantification."""
     tx = _selected_transcripts()
     rows: list[dict[str, object]] = []
-    plot_order = {
-        transcript_id: i for i, transcript_id in enumerate(PB_EVENT_CLASS_BY_TRANSCRIPT)
-    }
+    plot_order = {transcript_id: i for i, transcript_id in enumerate(PB_EVENT_CLASS_BY_TRANSCRIPT)}
     strands = tx["strand"].dropna().astype(str).unique()
     gene_strand = strands[0] if len(strands) else "+"
     for _, row in tx.iterrows():
@@ -156,9 +150,7 @@ def build_ankrd30a_signal_windows() -> pd.DataFrame:
                 "start_1based": start_0 + 1,
                 "end_1based": end_0,
                 "window_length_bp": end_0 - start_0,
-                "window_label": (
-                    f"+/-{TRPS1_PROSEQ_TSS_HALF_WINDOW_BP:,} bp around PB TSS"
-                ),
+                "window_label": (f"+/-{TRPS1_PROSEQ_TSS_HALF_WINDOW_BP:,} bp around PB TSS"),
             }
         )
 
@@ -396,9 +388,7 @@ def quantify_signal_changes(
                 "Missing processed bigWig files for "
                 f"{sample['sample_label']}: {pos_path}, {neg_path}"
             )
-        with pyBigWig.open(str(pos_path)) as pos_bw, pyBigWig.open(
-            str(neg_path)
-        ) as neg_bw:
+        with pyBigWig.open(str(pos_path)) as pos_bw, pyBigWig.open(str(neg_path)) as neg_bw:
             for _, window in windows.iterrows():
                 signal = _combined_signal(
                     pos_bw,
@@ -412,13 +402,11 @@ def quantify_signal_changes(
     out = pd.DataFrame(rows)
     # Every timepoint is compared with the 0h combined track for the same
     # feature, giving descriptive deltas/log2 fold changes.
-    baseline = out[out["timepoint"].eq("0h")][
-        ["feature_id", "combined_abs_sum"]
-    ].rename(columns={"combined_abs_sum": "baseline_combined_abs_sum"})
-    out = out.merge(baseline, on="feature_id", how="left")
-    out["delta_combined_abs_sum_vs_0h"] = (
-        out["combined_abs_sum"] - out["baseline_combined_abs_sum"]
+    baseline = out[out["timepoint"].eq("0h")][["feature_id", "combined_abs_sum"]].rename(
+        columns={"combined_abs_sum": "baseline_combined_abs_sum"}
     )
+    out = out.merge(baseline, on="feature_id", how="left")
+    out["delta_combined_abs_sum_vs_0h"] = out["combined_abs_sum"] - out["baseline_combined_abs_sum"]
     out["log2fc_combined_abs_sum_vs_0h"] = np.log2(
         (out["combined_abs_sum"] + TRPS1_PROSEQ_SIGNAL_EPSILON)
         / (out["baseline_combined_abs_sum"] + TRPS1_PROSEQ_SIGNAL_EPSILON)
@@ -489,9 +477,7 @@ def run_trps1_proseq(
         "n_signal_rows": int(signal.shape[0]),
         "n_signal_windows": int(windows.shape[0]),
         "n_bigwigs": int(download_status.shape[0]),
-        "n_bigwigs_cached": int(
-            download_status["status"].astype(str).eq("cached").sum()
-        ),
+        "n_bigwigs_cached": int(download_status["status"].astype(str).eq("cached").sum()),
         "n_bigwigs_downloaded": int(
             download_status["status"].astype(str).eq("downloaded_region").sum()
         ),
@@ -508,8 +494,7 @@ def parse_args() -> argparse.Namespace:
     """Parse the standalone TRPS1 PRO-seq cache workflow CLI."""
     parser = argparse.ArgumentParser(
         description=(
-            "Download GSE236172 ANKRD30A-region bigWigs and quantify PB TSS "
-            "PRO-seq signal changes."
+            "Download GSE236172 ANKRD30A-region bigWigs and quantify PB TSS PRO-seq signal changes."
         )
     )
     parser.add_argument("--force", action="store_true", help="Recompute all caches.")

@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-import resource
-import time
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +7,21 @@ import numpy as np
 import pandas as pd
 import spatialdata as sd
 from splisosm import SplisosmFFT
+
+from scripts.paper_utils import (
+    ensure_directories,
+    log,
+    max_rss_gb,
+    neglog10,
+    normalize_gene_symbol,
+    time_call,
+)
+from scripts.paper_utils import (
+    save_csv as _save_csv,
+)
+from scripts.paper_utils import (
+    save_json as _save_json,
+)
 
 from .config import (
     DATASETS,
@@ -24,46 +36,21 @@ from .config import (
     DatasetConfig,
 )
 
-
-def log(message: str) -> None:
-    """Timestamped stdout logging for long workflow runs."""
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+__all__ = ["log", "max_rss_gb", "normalize_gene_symbol", "time_call"]
 
 
 def ensure_dirs() -> None:
     """Create the workflow output directories."""
-    RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    FIGURE_DIR.mkdir(parents=True, exist_ok=True)
-    SCRIPT_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def max_rss_gb() -> float:
-    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    if rss > 10**9:
-        return rss / 1024**3
-    return rss / 1024**2
+    ensure_directories(RESULT_DIR, FIGURE_DIR, SCRIPT_DIR)
 
 
 def save_csv(df: pd.DataFrame, path: Path, index: bool = False) -> None:
     """Write a CSV and log a project-relative path when possible."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=index)
-    try:
-        display_path = path.relative_to(PROJECT_ROOT)
-    except ValueError:
-        display_path = path
-    log(f"wrote {display_path} ({df.shape[0]:,} rows)")
+    _save_csv(df, path, project_root=PROJECT_ROOT, index=index)
 
 
 def save_json(data: dict[str, Any], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
-    log(f"wrote {path.relative_to(PROJECT_ROOT)}")
-
-
-def normalize_gene_symbol(value: object) -> str:
-    """Normalize gene symbols/IDs for case-insensitive joins."""
-    return str(value).strip().casefold()
+    _save_json(data, path, project_root=PROJECT_ROOT)
 
 
 def neighbor_degrees_by_res() -> dict[tuple[str, str], int]:
@@ -98,26 +85,20 @@ def resolve_bin_element(sdata, cfg: DatasetConfig, resolution: str) -> str:
     suffix_matches = sorted(name for name in shapes if name.endswith(table))
     if len(suffix_matches) == 1:
         return suffix_matches[0]
-    raise ValueError(
-        f"Could not resolve bins for {cfg.key} {resolution}: {sorted(shapes)}"
-    )
+    raise ValueError(f"Could not resolve bins for {cfg.key} {resolution}: {sorted(shapes)}")
 
 
 def resolve_table_config(cfg: DatasetConfig, sdata, resolution: str) -> dict[str, Any]:
     """Resolve the table, shape element, and annotation columns for one grid."""
     table = RESOLUTION_TABLE[resolution]
     if table not in sdata.tables:
-        raise ValueError(
-            f"{table!r} not found in {cfg.key}: {sorted(sdata.tables.keys())}"
-        )
+        raise ValueError(f"{table!r} not found in {cfg.key}: {sorted(sdata.tables.keys())}")
 
     adata = sdata.tables[table]
     var_cols = list(adata.var.columns)
     group_iso_by = cfg.group_iso_by if cfg.group_iso_by in var_cols else None
     if group_iso_by is None:
-        raise ValueError(
-            f"Could not infer group_iso_by for {cfg.key} {resolution}: {var_cols}"
-        )
+        raise ValueError(f"Could not infer group_iso_by for {cfg.key} {resolution}: {var_cols}")
 
     gene_names = cfg.gene_names if cfg.gene_names in var_cols else None
 
@@ -172,9 +153,7 @@ def model_feature_rows(model: SplisosmFFT, table_cfg: dict[str, Any]) -> pd.Data
     rows = []
     var = model._adata.var
     group_col = table_cfg["group_iso_by"]
-    for gene_name, iso_names in zip(
-        model.gene_names, model._gene_iso_names, strict=True
-    ):
+    for gene_name, iso_names in zip(model.gene_names, model._gene_iso_names, strict=True):
         group_id = str(var.loc[iso_names[0], group_col])
         for iso in iso_names:
             rows.append(
@@ -188,19 +167,6 @@ def model_feature_rows(model: SplisosmFFT, table_cfg: dict[str, Any]) -> pd.Data
     return pd.DataFrame(rows)
 
 
-def time_call(label: str, fn) -> tuple[Any, float, float]:
-    """Run a callable and return `(value, elapsed_seconds, max_rss_gb)`."""
-    log(f"START {label}")
-    t0 = time.perf_counter()
-    value = fn()
-    elapsed = time.perf_counter() - t0
-    rss = max_rss_gb()
-    log(f"END {label}: {elapsed:.2f}s, max_rss={rss:.2f} GB")
-    return value, elapsed, rss
-
-
 def minus_log10_p(values: Any) -> np.ndarray:
     """Numerically stable `-log10(p)` for plotting and correlations."""
-    p = np.asarray(values, dtype=float)
-    p = np.clip(p, np.finfo(float).tiny, 1.0)
-    return -np.log10(p)
+    return neglog10(values, floor=np.finfo(float).tiny)
