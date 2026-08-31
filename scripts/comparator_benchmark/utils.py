@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
+from .._paths import resolve_cached_data_path
 from .config import (
     AD_PIG_DROP_PROBES,
     AD_PIG_RENAME_PROBES,
@@ -525,6 +526,10 @@ def load_panel(
     if not meta_path.exists():
         raise FileNotFoundError(f"No metadata.csv at {meta_path}")
     meta = pd.read_csv(meta_path)
+    meta["h5ad_path"] = [
+        str(resolve_cached_data_path(path, meta_path.parent))
+        for path in meta["h5ad_path"]
+    ]
 
     sets = build_sample_sets(panel, meta)
     needed_paths = sorted({p for s in sets for p in (*s.a_paths, *s.b_paths)})
@@ -542,6 +547,8 @@ def load_panel(
         else:
             a.var_names_make_unique()
         samples[p] = a
+    if not samples:
+        raise FileNotFoundError(f"No non-empty .h5ad samples found for {panel!r}")
     return samples, meta, sets
 
 
@@ -602,8 +609,7 @@ def log1p_normalized_samples(samples: dict[Path, ad.AnnData]) -> dict[Path, ad.A
             max_fractional = np.nanmax(np.abs(values - np.rint(values)))
             if max_fractional > 1e-4:
                 raise ValueError(
-                    f"{path.name} {source} is not count-like; "
-                    "log normalization expects raw counts"
+                    f"{path.name} {source} is not count-like; log normalization expects raw counts"
                 )
         normalized.X = (
             matrix.copy() if sparse.issparse(matrix) else np.array(matrix, copy=True)

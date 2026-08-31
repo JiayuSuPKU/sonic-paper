@@ -960,7 +960,13 @@ def run_idh_status_comparison_cache(
             [GROUP_LABELS[group] for group in groups],
             dtype=object,
         ),
-        h5ad_paths=meta["h5ad_path"].astype(str).to_numpy(dtype=object),
+        h5ad_paths=np.asarray(
+            [
+                str(Path(path).relative_to(resolved_data_root))
+                for path in meta["h5ad_path"]
+            ],
+            dtype=object,
+        ),
         genes=np.asarray(genes, dtype=object),
     )
     log(f"wrote {project_relative(SPECTRA_FILE)}")

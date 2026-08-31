@@ -378,8 +378,7 @@ PANELS: dict[str, PanelConfig] = {
         pos_controls=(),  # to be defined later from manual + Table S4 cNMF genes
         geo_accession="GSE313896",
         raw_url=(
-            "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE313nnn/"
-            "GSE313896/suppl/GSE313896_RAW.tar"
+            "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE313nnn/GSE313896/suppl/GSE313896_RAW.tar"
         ),
         raw_min_bytes=2_000_000_000,  # ~2.4 GB expected
     ),

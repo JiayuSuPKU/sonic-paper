@@ -252,7 +252,7 @@ def _write_metadata_csv(adata_dir: Path) -> None:
                         m.group("timepoint"),
                         m.group("plane"),
                         m.group("rep"),
-                        str(adata_dir / f"{title}.h5ad"),
+                        f"adata/{title}.h5ad",
                     ]
                 )
     logger.info("Wrote %s", meta_path)

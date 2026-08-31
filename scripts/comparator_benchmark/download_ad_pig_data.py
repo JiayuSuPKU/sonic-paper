@@ -162,7 +162,7 @@ def _write_metadata_csv(adata_dir: Path) -> None:
         writer = csv.writer(fh)
         writer.writerow(["sample", "genotype", "age_months", "h5ad_path"])
         for sample, genotype, age in AD_PIG_SAMPLES:
-            writer.writerow([sample, genotype, age, str(adata_dir / f"{sample}.h5ad")])
+            writer.writerow([sample, genotype, age, f"adata/{sample}.h5ad"])
     logger.info("Wrote %s", meta_path)
 
 

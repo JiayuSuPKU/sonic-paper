@@ -560,8 +560,7 @@ def run_ad_pig_full_scenarios(  # noqa: C901
                 )
                 if actual_n_bins != N_RADIAL_BINS:
                     log(
-                        f"  adapted requested {N_RADIAL_BINS} bins "
-                        f"to actual {actual_n_bins} bins"
+                        f"  adapted requested {N_RADIAL_BINS} bins to actual {actual_n_bins} bins"
                     )
                 suffix = f"bins{actual_n_bins}"
                 if actual_n_bins != N_RADIAL_BINS:
@@ -866,8 +865,7 @@ def run_ad_pig_spectral_replicate_distance_cache(
     }
 
     log(
-        "AD/PIG spectral replicate distances "
-        f"samples={len(paths_order)} genes={len(genes)}"
+        f"AD/PIG spectral replicate distances samples={len(paths_order)} genes={len(genes)}"
     )
     # Compute binned radial spectra across genes and samples.
     comparator, paths_order = fit_all_samples(
@@ -1566,8 +1564,7 @@ def _run_brain_dev_full_scenarios(
             meta = {
                 "panel": "brain_dev",
                 "scenario_id": (
-                    f"{input_transform}_{BRAIN_DEV_REFERENCE_BINNING}_"
-                    f"{feature_mode}_{suffix}"
+                    f"{input_transform}_{BRAIN_DEV_REFERENCE_BINNING}_{feature_mode}_{suffix}"
                 ),
                 "input": input_transform,
                 "binning": BRAIN_DEV_REFERENCE_BINNING,

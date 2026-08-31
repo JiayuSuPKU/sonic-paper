@@ -11,7 +11,9 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
+from .._paths import resolve_cached_data_path
 from .config import (
+    DATA_ROOT,
     FIGURE_DIR,
     GROUP_LABELS,
     PROJECT_ROOT,
@@ -85,6 +87,10 @@ def _load_normalized_samples_from_meta(
     """Load h5ad paths from a metadata table and return log-normalized objects."""
     if "h5ad_path" not in meta.columns:
         raise KeyError("Sample metadata must include an 'h5ad_path' column.")
+    meta = meta.copy()
+    meta["h5ad_path"] = [
+        str(resolve_cached_data_path(path, DATA_ROOT)) for path in meta["h5ad_path"]
+    ]
     missing = [Path(p) for p in meta["h5ad_path"] if not Path(p).exists()]
     if missing:
         formatted = "\n".join(f"  - {p}" for p in missing[:8])
