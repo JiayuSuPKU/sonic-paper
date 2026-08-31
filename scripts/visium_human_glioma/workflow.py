@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,11 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     __package__ = "scripts.visium_human_glioma"
 
-from scripts.paper_utils import CLUSTERPROFILER_SCRIPT, clusterprofiler_command
+from scripts.paper_utils import (
+    CLUSTERPROFILER_SCRIPT,
+    clusterprofiler_command,
+    write_workflow_manifest,
+)
 
 from .config import (
     CACHE_SUMMARY_FILE,
@@ -968,8 +973,13 @@ def run_workflow(
     run_enrichment: bool = True,
 ) -> dict[str, Any]:
     """Compute/cache the analysis inputs consumed by ``visualization.ipynb``."""
+    started_at = time.perf_counter()
+    resolved_data_root = resolve_data_root(data_root)
+    reused = [not force and _idh_status_comparison_cache_ready(resolved_data_root)]
+    if run_enrichment:
+        reused.append(not force and _enrichment_cache_ready())
     outputs = run_idh_status_comparison_cache(
-        data_root=data_root,
+        data_root=resolved_data_root,
         force=force,
         n_jobs=n_jobs,
     )
@@ -977,6 +987,21 @@ def run_workflow(
         outputs.update(run_enrichment_cache(force=force))
         outputs.update(run_metaprogram_gene_map_cache())
     outputs["cache_summary"] = project_relative(CACHE_SUMMARY_FILE)
+    manifest_path = write_workflow_manifest(
+        "visium_human_glioma",
+        CACHE_SUMMARY_FILE.parent,
+        started_at=started_at,
+        parameters={
+            "data_root": str(data_root) if data_root is not None else None,
+            "force": force,
+            "n_jobs": n_jobs,
+            "run_enrichment": run_enrichment,
+        },
+        outputs=outputs,
+        summary={"n_outputs": len(outputs)},
+        cache_status="reused" if all(reused) else "mixed" if any(reused) else "computed",
+    )
+    outputs["workflow_manifest"] = project_relative(manifest_path)
     return {"outputs": outputs}
 
 

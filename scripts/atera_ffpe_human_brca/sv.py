@@ -7,6 +7,14 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    installed_version,
+    path_fingerprint,
+    update_cache_entry,
+)
+
 from .config import (
     FDR_THRESHOLD,
     GENE_COL_CODEWORD,
@@ -15,7 +23,9 @@ from .config import (
     MIN_BIN_PCT,
     MIN_COMPONENT_SIZE,
     MIN_COUNTS,
+    RESULT_DIR,
     RHO,
+    SDATA_ZARR,
     SPATIAL_KEY,
     SV_CSV,
     SV_METHOD,
@@ -31,6 +41,31 @@ from .utils import (
     save_json,
     time_call,
 )
+
+
+def _sv_cache_signature() -> str:
+    return cache_signature(
+        {
+            "inputs": [
+                path_fingerprint(SDATA_ZARR),
+                path_fingerprint(Path(__file__)),
+                path_fingerprint(Path(__file__).with_name("config.py")),
+                path_fingerprint(Path(__file__).with_name("utils.py")),
+            ],
+            "parameters": {
+                "method": SV_METHOD,
+                "table": TABLE_CODEWORD,
+                "layer": LAYER,
+                "group_iso_by": GENE_COL_CODEWORD,
+                "min_counts": MIN_COUNTS,
+                "min_bin_pct": MIN_BIN_PCT,
+                "min_component_size": MIN_COMPONENT_SIZE,
+                "k_neighbors": K_NEIGHBORS,
+                "rho": RHO,
+            },
+            "splisosm_version": installed_version("splisosm"),
+        }
+    )
 
 
 def _valid_canonical_metrics(metrics: pd.DataFrame) -> bool:
@@ -80,7 +115,14 @@ def _write_summary(svp: pd.DataFrame, metrics: pd.DataFrame) -> None:
 
 def run_sv(*, force: bool = False, n_jobs: int = 8) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run/load canonical segmented SVP calls."""
-    if SV_CSV.exists() and SV_METRICS_CSV.exists() and not force:
+    signature = _sv_cache_signature()
+    outputs = (SV_CSV, SV_METRICS_CSV, SV_SUMMARY_JSON)
+    if not force and cache_entry_is_current(
+        RESULT_DIR,
+        "sv",
+        signature,
+        outputs=outputs,
+    ):
         svp, metrics = _load_cached(SV_CSV, SV_METRICS_CSV)
         if _valid_canonical_metrics(metrics):
             return svp, metrics
@@ -152,6 +194,7 @@ def run_sv(*, force: bool = False, n_jobs: int = 8) -> tuple[pd.DataFrame, pd.Da
     save_csv(svp.drop(columns=["gene_key"], errors="ignore"), SV_CSV)
     save_csv(metrics, SV_METRICS_CSV)
     _write_summary(svp, metrics)
+    update_cache_entry(RESULT_DIR, "sv", signature, outputs)
     log(f"SVP genes at FDR < {FDR_THRESHOLD:g}: {(svp['pvalue_adj'] < FDR_THRESHOLD).sum():,}")
     return svp, metrics
 

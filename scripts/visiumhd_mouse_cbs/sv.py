@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 from functools import partial
 from itertools import combinations, product
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -10,6 +11,14 @@ import pandas as pd
 from anndata import AnnData
 from scipy.stats import spearmanr
 from spatialdata.models import TableModel
+
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    installed_version,
+    path_fingerprint,
+    update_cache_entry,
+)
 
 from .config import (
     DATASETS,
@@ -31,6 +40,36 @@ from .utils import (
     setup_fft_model,
     time_call,
 )
+
+
+def _sv_cache_signature(
+    cfg: DatasetConfig,
+    resolution: str,
+    neighbor_degree: int,
+    eligible_isoforms: list[str] | None,
+    gene_subset: tuple[str, ...] | None,
+) -> str:
+    return cache_signature(
+        {
+            "inputs": [
+                path_fingerprint(cfg.sdata_zarr),
+                path_fingerprint(Path(__file__)),
+                path_fingerprint(Path(__file__).with_name("config.py")),
+                path_fingerprint(Path(__file__).with_name("utils.py")),
+            ],
+            "parameters": {
+                "dataset": cfg.key,
+                "resolution": resolution,
+                "neighbor_degree": neighbor_degree,
+                "method": SV_METHOD,
+                "min_counts": cfg.min_counts,
+                "min_bin_pct": cfg.min_bin_pct,
+                "eligible_isoforms": eligible_isoforms,
+                "gene_subset": gene_subset,
+            },
+            "splisosm_version": installed_version("splisosm"),
+        }
+    )
 
 
 def _merge_metric_cache(new_metrics: pd.DataFrame, *, force: bool) -> pd.DataFrame:
@@ -100,8 +139,22 @@ def run_sv_one(
     result_path = RESULT_DIR / f"sv_{cfg.key}_{resolution}_hsic_ir.csv"
     eligible_path = RESULT_DIR / f"eligible_16um_features_{cfg.key}.csv"
     metric_rows: list[dict[str, Any]] = []
+    signature = _sv_cache_signature(
+        cfg,
+        resolution,
+        neighbor_degree,
+        eligible_isoforms,
+        gene_subset,
+    )
+    section = f"sv:{cfg.key}:{resolution}"
+    outputs = (result_path, eligible_path) if resolution == "16um" else (result_path,)
 
-    if result_path.exists() and not force:
+    if not force and cache_entry_is_current(
+        RESULT_DIR,
+        section,
+        signature,
+        outputs=outputs,
+    ):
         # Cache hits should be transparent: load results but do not synthesize
         # runtime/memory rows that would overwrite the benchmark cache.
         res = pd.read_csv(result_path)
@@ -203,6 +256,7 @@ def run_sv_one(
     features = model_feature_rows(model, table_cfg)
     if resolution == "16um":
         save_csv(features, eligible_path)
+    update_cache_entry(RESULT_DIR, section, signature, outputs)
 
     del model, sdata
     gc.collect()

@@ -4,6 +4,7 @@ import gc
 import warnings
 from functools import partial
 from itertools import combinations
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -12,6 +13,14 @@ import scipy.sparse as sp
 from anndata import AnnData
 from scipy.stats import spearmanr
 from spatialdata.models import TableModel
+
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    installed_version,
+    path_fingerprint,
+    update_cache_entry,
+)
 
 from .config import (
     DATASETS,
@@ -37,6 +46,40 @@ from .utils import (
     setup_fft_model,
     time_call,
 )
+
+
+def _du_cache_signature(
+    cfg: DatasetConfig,
+    svp_keys: set[str],
+    covariate_keys: set[str],
+    neighbor_degree: int,
+) -> str:
+    return cache_signature(
+        {
+            "inputs": [
+                path_fingerprint(cfg.sdata_zarr),
+                path_fingerprint(Path(__file__)),
+                path_fingerprint(Path(__file__).with_name("config.py")),
+                path_fingerprint(Path(__file__).with_name("utils.py")),
+                path_fingerprint(Path(__file__).with_name("reference_annotations.py")),
+            ],
+            "parameters": {
+                "dataset": cfg.key,
+                "resolution": "16um",
+                "neighbor_degree": neighbor_degree,
+                "method": DU_METHOD,
+                "residualize": "cov_only",
+                "min_covariate_counts": DU_COVARIATE_MIN_COUNTS,
+                "min_covariate_bin_pct": DU_COVARIATE_MIN_BIN_PCT,
+                "target_gene_keys": sorted(svp_keys),
+                "covariate_gene_keys": sorted(covariate_keys),
+                "target_subset": DU_TARGET_GENE_SUBSET,
+                "rbp_subset": DU_RBP_SUBSET,
+                "tf_subset": DU_TF_SUBSET,
+            },
+            "splisosm_version": installed_version("splisosm"),
+        }
+    )
 
 
 def build_gene_expression_table(
@@ -282,8 +325,20 @@ def run_du_suite(
             adata, table_cfg["gene_names"], covariate_genes
         )
         filtered_covariate_keys = set(covariate_adata.var["gene_key"].astype(str))
+        section = f"du:{cfg.key}:16um"
+        signature = _du_cache_signature(
+            cfg,
+            svp_keys,
+            filtered_covariate_keys,
+            degrees[(cfg.key, "16um")],
+        )
 
-        if out_path.exists() and not force:
+        if not force and cache_entry_is_current(
+            RESULT_DIR,
+            section,
+            signature,
+            outputs=(out_path,),
+        ):
             # A cache hit is valid only if both the DU targets and filtered
             # regulator covariates match the current dataset/config state.
             cached = _ensure_du_keys(pd.read_csv(out_path))
@@ -393,6 +448,7 @@ def run_du_suite(
         du["residualize"] = "cov_only"
         du = du[_du_output_columns(du)]
         save_csv(du, out_path)
+        update_cache_entry(RESULT_DIR, section, signature, (out_path,))
         results[cfg.key] = du
         del model, sdata
         gc.collect()

@@ -14,6 +14,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +29,18 @@ if __package__ in {None, ""}:
 
 from sonic.statistics import apply_bh_correction
 
-from scripts.paper_utils import CLUSTERPROFILER_SCRIPT, clusterprofiler_command
+from scripts.paper_utils import (
+    CLUSTERPROFILER_SCRIPT,
+    cache_entry_is_current,
+    cache_signature,
+    clusterprofiler_command,
+    installed_version,
+    path_fingerprint,
+    project_relative,
+    resolve_cached_data_path,
+    update_cache_entry,
+    write_workflow_manifest,
+)
 
 from .ad_pig_helpers import (
     ad_pig_anisotropy_cache_ready,
@@ -92,6 +105,71 @@ from .utils import (
     save_csv,
     select_gene_panel,
 )
+
+
+def _panel_cache_signature(
+    panel: str,
+    *,
+    presence_threshold: float,
+    max_genes: int,
+) -> str:
+    panel_config = PANELS[panel]
+    module_dir = Path(__file__).resolve().parent
+    inputs = [
+        panel_config.metadata_csv,
+        Path(__file__),
+        module_dir / "config.py",
+        module_dir / "utils.py",
+        module_dir / "ad_pig_helpers.py",
+        module_dir / "brain_dev_helpers.py",
+    ]
+    if panel_config.metadata_csv.exists():
+        try:
+            metadata = pd.read_csv(panel_config.metadata_csv, usecols=["h5ad_path"])
+        except (OSError, ValueError, pd.errors.EmptyDataError):
+            pass
+        else:
+            inputs.extend(
+                resolve_cached_data_path(path, panel_config.metadata_csv.parent)
+                for path in metadata["h5ad_path"].dropna().astype(str)
+            )
+    return cache_signature(
+        {
+            "inputs": [path_fingerprint(path) for path in inputs],
+            "parameters": {
+                "panel": panel,
+                "presence_threshold": presence_threshold,
+                "max_genes": max_genes,
+            },
+            "sonic_version": installed_version("sonic-spatial"),
+        }
+    )
+
+
+def _run_guarded_panel(
+    panel: str,
+    runner: Callable[..., dict[str, Any]],
+    *,
+    force: bool,
+    presence_threshold: float,
+    max_genes: int,
+) -> dict[str, Any]:
+    signature = _panel_cache_signature(
+        panel,
+        presence_threshold=presence_threshold,
+        max_genes=max_genes,
+    )
+    refresh = force or not cache_entry_is_current(RESULT_DIR, panel, signature)
+    result = runner(
+        force=refresh,
+        presence_threshold=presence_threshold,
+        max_genes=max_genes,
+    )
+    owned_outputs = [
+        output for output in result["outputs"].values() if isinstance(output, (str, Path))
+    ]
+    update_cache_entry(RESULT_DIR, panel, signature, owned_outputs)
+    return result
 
 
 def _ad_pig_full_cache_ready(test_path: Path, null_path: Path) -> bool:
@@ -1612,31 +1690,58 @@ def run_workflow(
     max_genes: int = MAX_GENES,
 ) -> dict[str, Any]:
     """Run one of the panel-specific comparator-benchmark workflows."""
+    started_at = time.perf_counter()
     if analysis == "ad-pig":
-        return run_ad_pig_workflow(
+        result = _run_guarded_panel(
+            "ad_pig",
+            run_ad_pig_workflow,
             force=force,
             presence_threshold=presence_threshold,
             max_genes=max_genes,
         )
-    if analysis == "brain-dev":
-        return run_brain_dev_workflow(
+    elif analysis == "brain-dev":
+        result = _run_guarded_panel(
+            "brain_dev",
+            run_brain_dev_workflow,
             force=force,
             presence_threshold=presence_threshold,
             max_genes=max_genes,
         )
-    if analysis == "all":
-        ad = run_ad_pig_workflow(
+    elif analysis == "all":
+        ad = _run_guarded_panel(
+            "ad_pig",
+            run_ad_pig_workflow,
             force=force,
             presence_threshold=presence_threshold,
             max_genes=max_genes,
         )
-        brain = run_brain_dev_workflow(
+        brain = _run_guarded_panel(
+            "brain_dev",
+            run_brain_dev_workflow,
             force=force,
             presence_threshold=presence_threshold,
             max_genes=max_genes,
         )
-        return {"outputs": {**ad["outputs"], **brain["outputs"]}}
-    raise ValueError(f"Unknown analysis mode: {analysis!r}")
+        result = {"outputs": {**ad["outputs"], **brain["outputs"]}}
+    else:
+        raise ValueError(f"Unknown analysis mode: {analysis!r}")
+
+    result["outputs"]["cache_manifest"] = project_relative(RESULT_DIR / "cache_manifest.json")
+    manifest_path = write_workflow_manifest(
+        "comparator_benchmark",
+        RESULT_DIR,
+        started_at=started_at,
+        parameters={
+            "analysis": analysis,
+            "force": force,
+            "presence_threshold": presence_threshold,
+            "max_genes": max_genes,
+        },
+        outputs=result["outputs"],
+        summary={"n_outputs": len(result["outputs"])},
+    )
+    result["outputs"]["workflow_manifest"] = project_relative(manifest_path)
+    return result
 
 
 def parse_args() -> argparse.Namespace:

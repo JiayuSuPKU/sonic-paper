@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,8 @@ if __package__ in {None, ""}:
     __package__ = "scripts.atera_ffpe_human_brca"
 
 import pandas as pd
+
+from scripts.paper_utils import write_workflow_manifest
 
 from .config import (
     DU_GPR_BACKEND,
@@ -40,6 +43,7 @@ def run_workflow(
     run_ankrd30a: bool = True,
 ) -> dict[str, Any]:
     """Build canonical caches and the default downstream inspection outputs."""
+    started_at = time.perf_counter()
     ensure_dirs()
 
     # SPLISOSM is the only statistical engine in this workflow; everything
@@ -121,6 +125,7 @@ def run_workflow(
         "outputs": {
             "results": project_path(RESULT_DIR),
             "figures": project_path(FIGURE_DIR),
+            "cache_manifest": project_path(RESULT_DIR / "cache_manifest.json"),
             "svp_probe_mapping_cache": project_path(svp_probe_cache["mapping"]),
             "ankrd30a_visualization_cache": ankrd30a_status.get(
                 "visualization_cache_status", {}
@@ -131,6 +136,20 @@ def run_workflow(
         },
     }
     save_json(summary, RESULT_DIR / "summary.json")
+    manifest_path = write_workflow_manifest(
+        "atera_ffpe_human_brca",
+        RESULT_DIR,
+        started_at=started_at,
+        parameters={
+            "force": force,
+            "n_jobs": n_jobs,
+            "run_top20": run_top20,
+            "run_ankrd30a": run_ankrd30a,
+        },
+        outputs=summary["outputs"],
+        summary={key: value for key, value in summary.items() if key != "outputs"},
+    )
+    summary["outputs"]["workflow_manifest"] = project_path(manifest_path)
     return summary
 
 

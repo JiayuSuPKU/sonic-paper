@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ if __package__ in {None, ""}:
 import pandas as pd
 import splisosm
 
+from scripts.paper_utils import write_workflow_manifest
 from scripts.visiumhd_mouse_cbs.config import (
     DATASETS,
     DU_COVARIATE_MIN_BIN_PCT,
@@ -51,6 +53,7 @@ def run_workflow(*, force: bool = False, n_jobs: int = 8) -> dict[str, Any]:
     This intentionally does not render figures. The notebook owns all plotting so
     final panels and custom exploratory visualizations stay inspectable together.
     """
+    started_at = time.perf_counter()
     ensure_dirs()
     log(f"splisosm: {getattr(splisosm, '__version__', 'unknown')} ({splisosm.__file__})")
     log(f"force={force}, n_jobs={n_jobs}")
@@ -124,9 +127,19 @@ def run_workflow(*, force: bool = False, n_jobs: int = 8) -> dict[str, Any]:
         "outputs": {
             "results": str(RESULT_DIR.relative_to(PROJECT_ROOT)),
             "figures": str(FIGURE_DIR.relative_to(PROJECT_ROOT)),
+            "cache_manifest": str((RESULT_DIR / "cache_manifest.json").relative_to(PROJECT_ROOT)),
         },
     }
     save_json(summary, RESULT_DIR / "summary.json")
+    manifest_path = write_workflow_manifest(
+        "visiumhd_mouse_cbs",
+        RESULT_DIR,
+        started_at=started_at,
+        parameters={"force": force, "n_jobs": n_jobs},
+        outputs=summary["outputs"],
+        summary={key: value for key, value in summary.items() if key != "outputs"},
+    )
+    summary["outputs"]["workflow_manifest"] = str(manifest_path.relative_to(PROJECT_ROOT))
     return summary
 
 

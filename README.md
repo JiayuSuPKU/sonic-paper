@@ -24,3 +24,15 @@ published installation with the sibling source checkout:
 ```bash
 conda run -n sonic_paper python -m pip install --no-build-isolation -e ../sonic
 ```
+
+## Run analysis caches
+
+Run every tracked cache workflow in its documented Conda environment:
+
+```bash
+conda run -n sonic_paper python -m scripts.run_all_analyses
+```
+
+Use `--dry-run` to inspect the commands without starting analyses, or name one
+or more workflows to run only those. Pass `--force` only when all selected
+workflows should recompute their derived caches.

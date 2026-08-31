@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import argparse
 import logging
+import time
+
+from scripts.paper_utils import project_relative, write_workflow_manifest
 
 from . import config as C
 from . import (
@@ -35,6 +38,14 @@ def run(
     download_workers: int = 6,
 ) -> dict:
     """Build or validate the complete analysis cache in dependency order."""
+    started_at = time.perf_counter()
+    stage_manifests = (
+        metrics.RESULT_DIR / "manifest.json",
+        temporal.RESULT_DIR / "manifest.json",
+    )
+    previous_mtimes = {
+        path: path.stat().st_mtime_ns if path.exists() else None for path in stage_manifests
+    }
     C.ensure_output_dirs()
 
     LOGGER.info("Step 1/7: configured MOSTA and HESTA downloads")
@@ -77,10 +88,39 @@ def run(
 
     LOGGER.info("Step 7/7: global temporal variation and stage transitions")
     temporal_manifest = temporal.run(embedding, force=rebuild_derived)
-    return {
+    result = {
         "metrics": metrics_manifest,
         "temporal": temporal_manifest,
     }
+    reused = [
+        previous_mtimes[path] is not None
+        and path.exists()
+        and path.stat().st_mtime_ns == previous_mtimes[path]
+        for path in stage_manifests
+    ]
+    cache_status = "reused" if all(reused) else "mixed" if any(reused) else "computed"
+    manifest_path = write_workflow_manifest(
+        "embryo_xspecies",
+        C.RESULT_DIR,
+        started_at=started_at,
+        parameters={
+            "force": force,
+            "force_download": force_download,
+            "progress": progress,
+            "download_workers": download_workers,
+        },
+        outputs={
+            "metrics_manifest": project_relative(metrics.RESULT_DIR / "manifest.json"),
+            "temporal_manifest": project_relative(temporal.RESULT_DIR / "manifest.json"),
+        },
+        summary={
+            "metrics": metrics_manifest.get("embedding", {}),
+            "temporal": temporal_manifest.get("global_variation", {}),
+        },
+        cache_status=cache_status,
+    )
+    result["workflow_manifest"] = project_relative(manifest_path)
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
