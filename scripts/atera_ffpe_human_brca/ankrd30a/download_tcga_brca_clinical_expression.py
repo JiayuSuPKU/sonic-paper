@@ -160,7 +160,7 @@ def download_url(url: str, path: Path, *, force: bool = False) -> Path:
         return path
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    request = urllib.request.Request(url, headers={"User-Agent": "quadsv-paper/atera"})
+    request = urllib.request.Request(url, headers={"User-Agent": "sonic-paper/atera"})
     with urllib.request.urlopen(request, timeout=120) as response:
         # Use an atomic rename so partial network downloads are never reused.
         with tempfile.NamedTemporaryFile(

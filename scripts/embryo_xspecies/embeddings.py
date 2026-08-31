@@ -60,7 +60,7 @@ def _section_manifest(
     metadata_row: Any,
     freq_edges: np.ndarray,
 ) -> dict[str, Any]:
-    import quadsv
+    import sonic
 
     # Each section's npz will include its own manifest json
     gene_qc = Path(cfg.RESULT_DIR) / "gene_qc.csv"
@@ -74,7 +74,7 @@ def _section_manifest(
         "normalization_target_sum": C.ANALYSIS_NORMALIZATION_TARGET_SUM,
         "min_gene_detected_bin_fraction": C.MIN_GENE_DETECTED_BIN_FRACTION,
         "background_normalized": True,
-        "quadsv_version": quadsv.__version__,
+        "sonic_version": sonic.__version__,
         "bin_size_um": C.BIN_SIZE_UM,
         "n_radial_bins_requested": C.N_RADIAL_BINS,
         "frequency_spacing": C.FREQ_SPACING,
@@ -327,7 +327,7 @@ def comparator_from_cached_spectra(
 ) -> Any:
     """Restore a fitted comparator view for selected sections and genes.
 
-    Prepared expression is loaded only for the requested sections so QuadSV's
+    Prepared expression is loaded only for the requested sections so SONIC's
     public differential-test methods can operate on the cached spectral state
     without recomputing FFTs or materializing every section at once.
     """

@@ -652,10 +652,10 @@ def fit_all_samples(
     agnostic with cached ``cmp.spectra_`` array sub-indexed by sample
     and passed to any binary or GLM contrast at call time via
     ``compare_two_groups`` / ``compare_glm``. Frequency bins are adaptive by
-    default so empty radial bins are merged by QuadSV and the fitted comparator
+    default so empty radial bins are merged by SONIC and the fitted comparator
     records the actual retained bin count.
     """
-    from quadsv import ComparatorIrregular
+    from sonic import ComparatorIrregular
 
     paths_order = sorted(samples.keys())
     adatas = [samples[p][:, common_genes].copy() for p in paths_order]
@@ -693,9 +693,9 @@ def de_test_binary(
     ``compare_two_groups_scalar``. Returns a ``Feature / Statistic /
     P_value / P_adj`` DataFrame matching the DF-test output schema.
 
-    The QuadSV scalar companion uses an analytic Welch t null.
+    The SONIC scalar companion uses an analytic Welch t null.
     """
-    from quadsv.comparators.multisample import compare_two_groups_scalar
+    from sonic.comparators.multisample import compare_two_groups_scalar
 
     return compare_two_groups_scalar(
         dc_values,
@@ -712,7 +712,7 @@ def de_test_continuous(
 ) -> pd.DataFrame:
     """Per-gene scalar GLM between DC scalars and a continuous covariate.
 
-    Thin wrapper around QuadSV's ``compare_glm_scalar``. Returns the same
+    Thin wrapper around SONIC's ``compare_glm_scalar``. Returns the same
     ``Feature / Statistic / P_value / P_adj`` schema as the binary helper;
     ``Statistic`` is ``abs(t)`` for the one-DOF OLS contrast.
 
@@ -720,7 +720,7 @@ def de_test_continuous(
     continuous postnatal-time regression — every gene whose mean
     expression scales with ``log_pn_day`` shows up here.
     """
-    from quadsv.comparators.multisample import compare_glm_scalar
+    from sonic.comparators.multisample import compare_glm_scalar
 
     design = pd.DataFrame({design_name: np.asarray(covariate, dtype=float)})
     return compare_glm_scalar(

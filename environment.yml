@@ -1,4 +1,4 @@
-name: quadsv_paper
+name: sonic_paper
 channels:
   - conda-forge
   - bioconda
@@ -28,3 +28,5 @@ dependencies:
   - wheel
   - pip
   - adjusttext
+  - pip:
+      - sonic-spatial==1.0.0rc1

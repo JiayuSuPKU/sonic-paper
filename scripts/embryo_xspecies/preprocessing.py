@@ -147,7 +147,7 @@ def _require_existing_bin_lattice(
     The released MOSTA/HESTA inputs are expected to contain one observation per
     observed bin50 location. Unexpected off-lattice coordinates or duplicate
     lattice positions are hard errors so preprocessing cannot silently reshape
-    the tissue geometry before ``quadsv`` handles structural missing bins.
+    the tissue geometry before ``sonic`` handles structural missing bins.
     """
     xy = np.asarray(adata.obsm["spatial"], dtype=np.float64)
     if xy.ndim != 2 or xy.shape[1] != 2:

@@ -18,7 +18,7 @@ Idempotent pipeline:
    (e.g. ``P5_THALAMIC_PLANE_REP1``) via ``config.BRAIN_DEV_GSM_TITLES``.
 3. Reshapes each sample's files into the canonical Space Ranger
    ``outs/`` + ``outs/spatial/`` layout so
-   :func:`quadsv.utils.load_visium_sample` can ingest them.
+   :func:`sonic.utils.load_visium_sample` can ingest them.
 4. Writes ``<data_root>/adata/<sample_title>.h5ad`` carrying ``timepoint``,
    ``plane``, and ``replicate`` annotations on ``adata.obs``.
 
@@ -167,9 +167,9 @@ def _convert_to_h5ad(
     h5ad_path: Path,
 ) -> bool:
     try:
-        from quadsv.utils import load_visium_sample
+        from sonic.utils import load_visium_sample
     except ImportError as e:
-        logger.error("Cannot import quadsv: %s.", e)
+        logger.error("Cannot import sonic: %s.", e)
         return False
     try:
         adata = load_visium_sample(sample_dir / "outs")

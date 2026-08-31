@@ -12,14 +12,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import scipy.fft
-from quadsv.kernels import MatrixKernel
-from quadsv.kernels.fft import FFTKernel
-from quadsv.kernels.nufft import NUFFTKernel
-from quadsv.statistics import compute_null_params, spatial_q_test
-from quadsv.utils import compute_torus_distance_matrix
 from scipy.fft import prev_fast_len
 from scipy.ndimage import map_coordinates
 from scipy.special import gamma, kv
+from sonic.kernels import MatrixKernel
+from sonic.kernels.fft import FFTKernel
+from sonic.kernels.nufft import NUFFTKernel
+from sonic.statistics import compute_null_params, spatial_q_test
+from sonic.utils import compute_torus_distance_matrix
 
 from .config import (
     BENCHMARK_PROJECTION_FILE,

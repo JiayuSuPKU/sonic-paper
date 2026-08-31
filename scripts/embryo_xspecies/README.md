@@ -10,11 +10,11 @@ and HESTA human embryo Stereo-seq sections.
 
 ## How to Run
 
-Run from the project root with the `quadsv_paper` environment from
+Run from the project root with the `sonic_paper` environment from
 [`environment.yml`](../../environment.yml):
 
 ```bash
-conda run -n quadsv_paper \
+conda run -n sonic_paper \
   python -m scripts.embryo_xspecies.workflow --progress
 ```
 
@@ -28,7 +28,7 @@ The workflow runs seven stages in dependency order:
 1. Download the configured MOSTA and HESTA sections and update species metadata.
 2. Prepare observed-bin SpatialData zarrs and species-level gene QC.
 3. Build or validate the strict MGI human-mouse 1:1 orthology table.
-4. Cache per-section QuadSV spatial-variability tests for all eligible genes.
+4. Cache per-section SONIC spatial-variability tests for all eligible genes.
 5. Cache per-section radial spectra on one shared frequency grid and fit joint PCA.
 6. Cache embedding annotations, clustering, GO enrichment, and local mixing.
 7. Cache global temporal variation and consecutive-stage expression,
@@ -60,11 +60,11 @@ memory and are not cached.
 After the workflow completes, execute the notebook:
 
 ```bash
-conda run -n quadsv_paper python -m jupyter nbconvert --to notebook --execute \
+conda run -n sonic_paper python -m jupyter nbconvert --to notebook --execute \
   scripts/embryo_xspecies/visualization.ipynb \
   --output /private/tmp/embryo_xspecies_visualization.executed.ipynb \
   --ExecutePreprocessor.timeout=1800 \
-  --ExecutePreprocessor.kernel_name=quadsv_paper
+  --ExecutePreprocessor.kernel_name=sonic_paper
 ```
 
 The notebook previews every panel before saving flat under

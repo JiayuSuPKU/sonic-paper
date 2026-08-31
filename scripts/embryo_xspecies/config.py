@@ -33,7 +33,7 @@ ANALYSIS_EXPRESSION_MODE = "log1p_norm"
 ANALYSIS_NORMALIZATION_TARGET_SUM = 1e4
 MIN_GENE_DETECTED_BIN_FRACTION = 0.01
 
-# --- QuadSV spatial-variability detector configuration ----------------------
+# --- SONIC spatial-variability detector configuration ----------------------
 # Each species config exposes ``SV_RESULT_DIR`` and ``SV_MANIFEST_JSON`` under
 # its mouse-only or human-only result directory. Every gene returned by the
 # default panel selector is tested; raw Q, Z, and p-values are retained without

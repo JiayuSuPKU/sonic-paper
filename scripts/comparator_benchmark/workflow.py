@@ -26,7 +26,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     __package__ = "scripts.comparator_benchmark"
 
-from quadsv.statistics import apply_bh_correction
+from sonic.statistics import apply_bh_correction
 
 from .ad_pig_helpers import (
     ad_pig_anisotropy_cache_ready,
@@ -484,7 +484,7 @@ def _fit_scenario_samples(
     # Build log edges from the radial grid first, then reuse those frequency
     # edges for either radial or 2D feature extraction in the scenario grid.
     # This temporary fit is only used to recover the requested physical
-    # frequency range; the actual scenario fit below lets QuadSV adapt bins.
+    # frequency range; the actual scenario fit below lets SONIC adapt bins.
     linear_cmp, _paths = fit_all_samples(
         samples,
         genes,
@@ -956,8 +956,8 @@ def _raw_2d_anisotropy_scores(
     gene_set_by_gene: dict[str, str],
 ) -> pd.DataFrame:
     """Compute raw per-sample/gene 2D spectrum anisotropy before radial collapse."""
-    from quadsv import ComparatorIrregular
-    from quadsv.comparators.features import power_spectrum_anisotropy
+    from sonic import ComparatorIrregular
+    from sonic.comparators.features import power_spectrum_anisotropy
 
     adatas = [samples[path_i][:, genes].copy() for path_i in paths_order]
     comparator = ComparatorIrregular(
@@ -971,7 +971,7 @@ def _raw_2d_anisotropy_scores(
 
     rows: list[pd.DataFrame] = []
     for sample_idx, path_i in enumerate(paths_order):
-        # Use QuadSV's raw spectrum chunker directly: these are 2D spectra
+        # Use SONIC's raw spectrum chunker directly: these are 2D spectra
         # before any rotational alignment or radial bin collapse.
         spectrum_chunker, _dc, _presence, n_genes, grid_shape = (
             comparator._nufft_spectrum_chunker(sample_idx)
@@ -1180,7 +1180,7 @@ def _clusterprofiler_command() -> list[str]:
             conda,
             "run",
             "-n",
-            os.environ.get("CLUSTERPROFILER_CONDA_ENV", "quadsv_paper"),
+            os.environ.get("CLUSTERPROFILER_CONDA_ENV", "sonic_paper"),
             "Rscript",
         ]
     path_rscript = shutil.which("Rscript")

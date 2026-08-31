@@ -130,7 +130,7 @@ def _output_fingerprints(
 
 def _comparison_signature(data_root: Path) -> dict[str, Any]:
     """Describe every input that changes the IDH-status comparison."""
-    import quadsv
+    import sonic
 
     meta = sample_metadata(data_root)
     inputs = []
@@ -145,7 +145,7 @@ def _comparison_signature(data_root: Path) -> dict[str, Any]:
     return {
         "data_root": str(data_root.resolve()),
         "inputs": inputs,
-        "quadsv_version": quadsv.__version__,
+        "sonic_version": sonic.__version__,
         "parameters": {
             "n_genes": N_GENES,
             "spot_min_counts": SPOT_MIN_COUNTS,
@@ -181,7 +181,7 @@ def _fit_radial_comparator(
     *,
     n_jobs: int,
 ) -> Any:
-    from quadsv import ComparatorIrregular
+    from sonic import ComparatorIrregular
 
     panel = [aligned_samples[sid] for sid in sample_ids]
     cmp = ComparatorIrregular(
@@ -289,7 +289,7 @@ def _permuted_group_labels(
 
 def _permutation_null_table(comparator: Any, groups: np.ndarray) -> pd.DataFrame:
     """Test DF and DF-norm after sample-label shuffling for null calibration."""
-    from quadsv.statistics import apply_bh_correction
+    from sonic.statistics import apply_bh_correction
 
     rows: list[pd.DataFrame] = []
     for perm_idx, shuffled in enumerate(_permuted_group_labels(groups)):
@@ -350,7 +350,7 @@ def _spatial_diagnostics_table(
     genes: list[str],
 ) -> pd.DataFrame:
     """Per-sample anisotropy and expression/spectrum covariance effective ranks."""
-    from quadsv.comparators.features import power_spectrum_anisotropy
+    from sonic.comparators.features import power_spectrum_anisotropy
 
     rows: list[pd.DataFrame] = []
     for sample_idx, sample_id in enumerate(sample_ids):
@@ -912,7 +912,7 @@ def run_idh_status_comparison_cache(
         raise RuntimeError("No genes passed the configured detection filters.")
     log(f"gene panel candidates summarized in memory ({gene_summary.shape[0]:,} genes)")
 
-    # QuadSV expects every sample to expose the same feature order.
+    # SONIC expects every sample to expose the same feature order.
     log("aligning samples to the selected gene panel")
     aligned_abundance = align_samples_to_genes(samples, genes)
     log(
@@ -922,7 +922,7 @@ def run_idh_status_comparison_cache(
     cmp = _fit_radial_comparator(aligned_abundance, sample_ids, genes, n_jobs=n_jobs)
 
     log("testing DE on abundance and DF/DF-norm on centered relative expression")
-    from quadsv.comparators.multisample import compare_two_groups_scalar
+    from sonic.comparators.multisample import compare_two_groups_scalar
 
     de = compare_two_groups_scalar(
         _sample_gene_means(aligned_abundance, sample_ids),

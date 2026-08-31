@@ -1,6 +1,6 @@
 # Benchmark pattern comparison on datasets with curated positive controls
 
-This folder builds the comparator-benchmark figures for the QuadSV paper.
+This folder builds the comparator-benchmark figures for the SONIC paper.
 The analysis compares cross-sample differential frequency (DF) tests,
 implemented by the `Comparator` class, against a pseudo-bulk differential
 expression (DE) baseline for both AD/PIG and brain-development benchmarks.
@@ -10,10 +10,11 @@ expression (DE) baseline for both AD/PIG and brain-development benchmarks.
 - `visualization.ipynb` generates the manuscript-style main and supplementary
   figures under `figures/comparator_benchmark/`.
 
-## Minimal Dependencies
+## Environment
 
-Install the non-`quadsv` dependencies from the root environment YAML file.
-Apply any additional `env*.yml` overlays the same way.
+The root environment installs the published `sonic-spatial==1.0.0rc1`
+distribution and all shared analysis dependencies. Apply any additional
+`env*.yml` overlays the same way.
 
 ```bash
 mamba env create -f environment.yml
@@ -22,16 +23,15 @@ mamba env create -f environment.yml
 For an existing environment:
 
 ```bash
-mamba env update -n quadsv_paper -f environment.yml --prune
+mamba env update -n sonic_paper -f environment.yml --prune
 ```
 
-Install `quadsv` interactively from the local source checkout with its dev and
-docs optional dependencies. By default `config.py` records the source path as
-`../quadsv`; override `QUADSV_SRC` if needed.
+For active SONIC development, replace the published installation with an
+editable sibling checkout:
 
 ```bash
-QUADSV_SRC="${QUADSV_SRC:-$(cd .. && pwd)/quadsv}"
-conda run -n quadsv_paper python -m pip install --no-build-isolation -e "${QUADSV_SRC}[dev,docs]"
+SONIC_SRC="${SONIC_SRC:-$(cd .. && pwd)/sonic}"
+conda run -n sonic_paper python -m pip install --no-build-isolation -e "${SONIC_SRC}"
 ```
 
 On this machine, full comparator runs are most stable with the thread limits
@@ -48,7 +48,7 @@ Define the common runtime wrapper once per shell:
 ```bash
 mkdir -p /private/tmp/mplconfig /private/tmp/xdg-cache
 
-run_quadsv_paper() {
+run_sonic_paper() {
   env \
     OMP_NUM_THREADS=1 \
     OPENBLAS_NUM_THREADS=1 \
@@ -58,22 +58,22 @@ run_quadsv_paper() {
     MPLBACKEND=Agg \
     MPLCONFIGDIR=/private/tmp/mplconfig \
     XDG_CACHE_HOME=/private/tmp/xdg-cache \
-    conda run -n quadsv_paper "$@"
+    conda run -n sonic_paper "$@"
 }
 ```
 
 Prepare the local data cache when needed:
 
 ```bash
-run_quadsv_paper python -m scripts.comparator_benchmark.download_ad_pig_data
+run_sonic_paper python -m scripts.comparator_benchmark.download_ad_pig_data
 
-run_quadsv_paper python -m scripts.comparator_benchmark.download_brain_dev_data
+run_sonic_paper python -m scripts.comparator_benchmark.download_brain_dev_data
 ```
 
 Run the cached AD/PIG analysis workflow:
 
 ```bash
-run_quadsv_paper python -m scripts.comparator_benchmark.workflow --analysis ad-pig
+run_sonic_paper python -m scripts.comparator_benchmark.workflow --analysis ad-pig
 ```
 
 The AD/PIG workflow runs three high-level analysis components used by
@@ -90,7 +90,7 @@ The AD/PIG workflow runs three high-level analysis components used by
 Run the continuous-design brain-development workflow:
 
 ```bash
-run_quadsv_paper python -m scripts.comparator_benchmark.workflow --analysis brain-dev
+run_sonic_paper python -m scripts.comparator_benchmark.workflow --analysis brain-dev
 ```
 
 It uses anterior-plane Visium samples, `log10(PN day + 1)` as the continuous
@@ -107,31 +107,31 @@ Run all currently implemented workflows. This is the default when `--analysis`
 is omitted:
 
 ```bash
-run_quadsv_paper python -m scripts.comparator_benchmark.workflow
+run_sonic_paper python -m scripts.comparator_benchmark.workflow
 ```
 
 Use `--force` to recompute cached outputs for the selected analysis:
 
 ```bash
-run_quadsv_paper python -m scripts.comparator_benchmark.workflow --analysis ad-pig --force
+run_sonic_paper python -m scripts.comparator_benchmark.workflow --analysis ad-pig --force
 ```
 
 Use `--max-genes` or `--presence-threshold` for smaller local runs. For a fast
 smoke test without overwriting existing caches, use a small gene cap:
 
 ```bash
-run_quadsv_paper python -m scripts.comparator_benchmark.workflow --analysis brain-dev --max-genes 25
+run_sonic_paper python -m scripts.comparator_benchmark.workflow --analysis brain-dev --max-genes 25
 ```
 
 Render the manuscript figures from the notebook after the relevant workflow
 mode has completed:
 
 ```bash
-run_quadsv_paper python -m jupyter nbconvert --to notebook --execute \
+run_sonic_paper python -m jupyter nbconvert --to notebook --execute \
   scripts/comparator_benchmark/visualization.ipynb \
   --output /private/tmp/comparator_benchmark_visualization.executed.ipynb \
   --ExecutePreprocessor.timeout=1200 \
-  --ExecutePreprocessor.kernel_name=quadsv_paper
+  --ExecutePreprocessor.kernel_name=sonic_paper
 ```
 
 The notebook writes PDF figures under `figures/comparator_benchmark/`.
@@ -141,7 +141,7 @@ it does not choose a gene panel or output filename. Use it for custom follow-up
 profiles after the workflow caches exist:
 
 ```bash
-run_quadsv_paper python -m scripts.comparator_benchmark.plot_ad_pig_gene_profiles \
+run_sonic_paper python -m scripts.comparator_benchmark.plot_ad_pig_gene_profiles \
   --genes Apoe Tyrobp \
   --output figures/comparator_benchmark/ad_gene_profile_custom.pdf
 ```
@@ -149,7 +149,7 @@ run_quadsv_paper python -m scripts.comparator_benchmark.plot_ad_pig_gene_profile
 The brain-development profile plotter follows the same pattern:
 
 ```bash
-run_quadsv_paper python -m scripts.comparator_benchmark.plot_brain_dev_gene_profiles \
+run_sonic_paper python -m scripts.comparator_benchmark.plot_brain_dev_gene_profiles \
   --genes Fabp7 Synpr \
   --output figures/comparator_benchmark/brain_dev_gene_profile_custom.pdf
 ```
@@ -224,9 +224,9 @@ current figure outputs.
 
 For these cached figure inputs, the workflow runs:
 
-- Spatial pattern test: `log_l2` with QuadSV's analytic null on
+- Spatial pattern test: `log_l2` with SONIC's analytic null on
   `cmp.spectra_`.
-- DE companion: Welch t for binary panels or QuadSV scalar GLM for the
+- DE companion: Welch t for binary panels or SONIC scalar GLM for the
   continuous panel on `cmp.dc_`.
 
 The full-test table stores observed DE, DF, and DF-norm p-values. The
@@ -254,9 +254,9 @@ The benchmark expects per-sample `.h5ad` files and metadata CSVs under
 the local data cache:
 
 ```bash
-run_quadsv_paper python -m scripts.comparator_benchmark.download_ad_pig_data
+run_sonic_paper python -m scripts.comparator_benchmark.download_ad_pig_data
 
-run_quadsv_paper python -m scripts.comparator_benchmark.download_brain_dev_data
+run_sonic_paper python -m scripts.comparator_benchmark.download_brain_dev_data
 ```
 
 AD/PIG probe QC is applied when `load_panel("ad_pig")` reads those `.h5ad`
@@ -295,6 +295,6 @@ scripts/comparator_benchmark/
 ## Code Checks
 
 ```bash
-conda run -n quadsv_paper python -m compileall -q scripts/comparator_benchmark
-conda run -n quadsv_paper python -m scripts.comparator_benchmark.workflow --help
+conda run -n sonic_paper python -m compileall -q scripts/comparator_benchmark
+conda run -n sonic_paper python -m scripts.comparator_benchmark.workflow --help
 ```

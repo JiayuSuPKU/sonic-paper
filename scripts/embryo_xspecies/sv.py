@@ -1,4 +1,4 @@
-"""Cache per-section QuadSV spatial-variability tests for all eligible genes.
+"""Cache per-section SONIC spatial-variability tests for all eligible genes.
 
 Each species cache contains one compressed table per configured section. The
 feature universe is always the complete panel returned by
@@ -43,13 +43,13 @@ def _feature_hash(features: Sequence[str]) -> str:
 
 
 def _analysis_config() -> dict[str, Any]:
-    import quadsv
+    import sonic
 
     return {
         "schema_version": 2,
         "expression_mode": C.ANALYSIS_EXPRESSION_MODE,
         "normalization_target_sum": C.ANALYSIS_NORMALIZATION_TARGET_SUM,
-        "quadsv_version": quadsv.__version__,
+        "sonic_version": sonic.__version__,
         "detector": {
             "kernel_method": C.SV_KERNEL_METHOD,
             "rho": C.SV_RHO,
@@ -166,7 +166,7 @@ def _validate_frame(
             raise ValueError(f"{source} has inconsistent {column!r} values.")
     statistics = frame.loc[:, STAT_COLUMNS].to_numpy(dtype=float)
     if not np.isfinite(statistics).all():
-        raise ValueError(f"{source} contains non-finite QuadSV statistics.")
+        raise ValueError(f"{source} contains non-finite SONIC statistics.")
     if not frame["P_value"].between(0.0, 1.0).all():
         raise ValueError(f"{source} contains p-values outside [0, 1].")
     return (
@@ -215,8 +215,8 @@ def _compute_slide(
     timepoint: str,
     features: list[str],
 ) -> pd.DataFrame:
-    """Compute a single section's SV results using quadsv Q-test."""
-    from quadsv import DetectorGrid
+    """Compute a single section's SV results using sonic Q-test."""
+    from sonic import DetectorGrid
 
     prepared, _, panel, _ = utils.load_prepared_sections(
         cfg,
@@ -294,7 +294,7 @@ def _run_species(cfg: Any, *, force: bool) -> dict[str, int]:
             _load_slide(cfg, section_id, timepoint, features)
             continue
         LOGGER.info(
-            "QuadSV spatial variability: %s %s (%d genes)",
+            "SONIC spatial variability: %s %s (%d genes)",
             cfg.PANEL_KEY,
             section_id,
             len(features),

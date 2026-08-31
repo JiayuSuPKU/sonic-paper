@@ -8,7 +8,7 @@ Idempotent pipeline:
 1. Downloads every ``IDHm_*.tar.gz`` / ``GBM_*.tar.gz`` from Zenodo record
    12624860 into ``<data_root>/raw/``.
 2. Extracts each tarball into ``<data_root>/spaceranger/<sample>/``.
-3. Loads each sample via :func:`quadsv.utils.load_visium_sample`, converts
+3. Loads each sample via :func:`sonic.utils.load_visium_sample`, converts
    Visium full-resolution pixel coordinates to micrometers using the 55 um
    capture-spot diameter, and writes ``<data_root>/adata/<sample>.h5ad`` for
    fast reloading in notebooks.
@@ -212,7 +212,7 @@ def _normalize_to_spaceranger_layout(extracted_root: Path) -> Path | None:
     directory and is prefixed with a per-sample lowercase tag (e.g.
     ``mgh258_filtered_feature_bc_matrix.h5``). We copy (hard-link when possible)
     the relevant files into an ``outs/`` + ``outs/spatial/`` tree with the
-    standard filenames so :func:`quadsv.utils.load_visium_sample` can ingest them.
+    standard filenames so :func:`sonic.utils.load_visium_sample` can ingest them.
     Idempotent — skips the reshape if ``outs/filtered_feature_bc_matrix.h5``
     already exists.
     """
@@ -364,10 +364,10 @@ def _convert_to_h5ad(spaceranger_dir: Path, out_path: Path, sample: str) -> bool
     """Load a Space Ranger sample dir and write it as .h5ad. Returns True on success."""
     try:
         # local import so --help doesn't need it
-        from quadsv.utils import load_visium_sample
+        from sonic.utils import load_visium_sample
     except ImportError as e:
         logger.error(
-            "Cannot import quadsv: %s. Install the package in dev mode first.", e
+            "Cannot import sonic: %s. Install the package in dev mode first.", e
         )
         return False
 

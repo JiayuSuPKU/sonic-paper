@@ -17,12 +17,12 @@ intestine, and tests graph-dependent patterns in KP-Tracer lineage trees.
 
 ## How to Run
 
-Run from the project root with the `quadsv_paper` environment from
+Run from the project root with the `sonic_paper` environment from
 [`environment.yml`](../../environment.yml). Thread limits keep the reported
 runtime benchmark single-core:
 
 ```bash
-conda run -n quadsv_paper \
+conda run -n sonic_paper \
   python -m scripts.qtest_benchmark.workflow
 ```
 
@@ -84,11 +84,11 @@ lineage summaries and tree layouts are reconstructed in memory.
 After the workflow completes, execute the notebook:
 
 ```bash
-conda run -n quadsv_paper python -m jupyter nbconvert --to notebook --execute \
+conda run -n sonic_paper python -m jupyter nbconvert --to notebook --execute \
   scripts/qtest_benchmark/visualization.ipynb \
   --output /private/tmp/qtest_benchmark_visualization.executed.ipynb \
   --ExecutePreprocessor.timeout=1200 \
-  --ExecutePreprocessor.kernel_name=quadsv_paper
+  --ExecutePreprocessor.kernel_name=sonic_paper
 ```
 
 The notebook previews every panel before saving flat under

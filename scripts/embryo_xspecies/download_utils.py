@@ -15,7 +15,7 @@ from . import config as C
 
 logger = logging.getLogger("embryo_xspecies.download")
 
-_HEADERS = {"User-Agent": "quadsv-paper-embryo-xspecies/1.0"}
+_HEADERS = {"User-Agent": "sonic-paper-embryo-xspecies/1.0"}
 
 
 def matches_section(section_id: str, patterns: list[str]) -> bool:

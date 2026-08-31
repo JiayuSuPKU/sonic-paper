@@ -94,7 +94,7 @@ def _run_lineage_q_tests(
     min_cells_frac: float | None = None,
 ) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
     """Run Moran and CAR tests on the same lineage graph and observations."""
-    from quadsv import DetectorIrregular
+    from sonic import DetectorIrregular
 
     data.obsp["lineage"] = connectivity
     results: dict[str, pd.DataFrame] = {}
@@ -272,7 +272,7 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
             genes["I_moran"] = genes["Q_moran"] / tumor_data.n_obs
             genes["Sig_moran"] = genes["P_adj_moran"] < FDR_CUTOFF
             genes["Sig_car"] = genes["P_adj_car"] < FDR_CUTOFF
-            # QuadSV removes zero-degree leaves before testing; measure support
+            # SONIC removes zero-degree leaves before testing; measure support
             # on that same analyzed cell set, as in the original notebook.
             tested = gene_detectors["car"].adata
             columns = tested.var_names.get_indexer(genes.index)
@@ -488,7 +488,7 @@ def _cache_bivariate_diagnostics(*, force: bool) -> None:  # noqa: C901
         label="Lineage bivariate diagnostics",
     ):
         return
-    from quadsv import DetectorIrregular
+    from sonic import DetectorIrregular
 
     tumor = "3730_NT_T2"
     scores = pd.read_csv(LINEAGE_GENE_SCORES_FILE)

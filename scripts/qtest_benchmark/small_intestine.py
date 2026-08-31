@@ -9,9 +9,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import scipy.fft
-from quadsv.kernels.fft import FFTKernel
-from quadsv.statistics import spatial_q_test
 from scipy.ndimage import gaussian_filter
+from sonic.kernels.fft import FFTKernel
+from sonic.statistics import spatial_q_test
 
 from .config import (
     ARTIFACT_GENES,

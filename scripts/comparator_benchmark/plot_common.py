@@ -9,8 +9,8 @@ from typing import Any
 import matplotlib as mpl
 import numpy as np
 import pandas as pd
-from quadsv.statistics import apply_bh_correction
 from scipy import sparse
+from sonic.statistics import apply_bh_correction
 
 ENRICHMENT_NUMERIC_COLUMNS: tuple[str, ...] = (
     "abs_delta",

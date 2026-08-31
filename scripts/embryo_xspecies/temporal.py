@@ -348,11 +348,11 @@ def quantify_stage_movements(
 
 
 def _test_table(result: pd.DataFrame, prefix: str) -> pd.DataFrame:
-    """Standardize one QuadSV differential-test result table."""
+    """Standardize one SONIC differential-test result table."""
     required = {"Feature", "Statistic", "P_value", "P_adj"}
     if missing := required - set(result):
         raise ValueError(
-            f"QuadSV {prefix} result is missing columns: {sorted(missing)}"
+            f"SONIC {prefix} result is missing columns: {sorted(missing)}"
         )
     return result[["Feature", "Statistic", "P_value", "P_adj"]].rename(
         columns={
@@ -370,7 +370,7 @@ def _transition_tests(
     labels: np.ndarray,
     genes: list[str],
 ) -> pd.DataFrame:
-    """Run DE, amplitude-sensitive DF, and shape-only DF through QuadSV."""
+    """Run DE, amplitude-sensitive DF, and shape-only DF through SONIC."""
     comparator = embeddings.comparator_from_cached_spectra(
         bundle, section_indices, genes
     )

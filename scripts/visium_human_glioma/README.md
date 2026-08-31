@@ -1,7 +1,7 @@
 # Human glioma IDH-status comparison
 
 This folder builds the IDH-mutant vs
-IDH-wildtype glioma Visium expression-pattern comparison figures for the QuadSV paper.
+IDH-wildtype glioma Visium expression-pattern comparison figures for the SONIC paper.
 
 - `download_glioma_data.py` downloads and prepares the Greenwald et al. Visium data using the same QC specifications as the original paper.
 - `workflow.py` runs the IDH-wildtype vs IDH-mutant DE/DF tests and caches figure inputs under `results/visium_glioma_idh_status/`.
@@ -10,17 +10,17 @@ IDH-wildtype glioma Visium expression-pattern comparison figures for the QuadSV 
 
 ## How to Run:
 
-Run from the project root with the `quadsv_paper` environment, available from [`environment.yml`](../../environment.yml):
+Run from the project root with the `sonic_paper` environment, available from [`environment.yml`](../../environment.yml):
 
 ```bash
-conda run -n quadsv_paper \
+conda run -n sonic_paper \
   python -m scripts.visium_human_glioma.workflow --force
 ```
 
 If the `.h5ad` files live outside this paper repo, pass the existing cache root:
 
 ```bash
-conda run -n quadsv_paper \
+conda run -n sonic_paper \
   python -m scripts.visium_human_glioma.workflow \
   --data-root /path/to/visium_glioma_idh_status --force
 ```
@@ -86,11 +86,11 @@ After a successful workflow run, render the figure from cached test, enrichment,
 spectra, diagnostics, and bundled sample-path metadata with:
 
 ```bash
-conda run -n quadsv_paper python -m jupyter nbconvert --to notebook --execute \
+conda run -n sonic_paper python -m jupyter nbconvert --to notebook --execute \
   scripts/visium_human_glioma/visualization.ipynb \
   --output /private/tmp/visium_glioma_idh_status_visualization.executed.ipynb \
   --ExecutePreprocessor.timeout=1200 \
-  --ExecutePreprocessor.kernel_name=quadsv_paper
+  --ExecutePreprocessor.kernel_name=sonic_paper
 ```
 
 The notebook includes per-panel previews before each save cell. It derives four

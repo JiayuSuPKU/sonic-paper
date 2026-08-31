@@ -19,11 +19,6 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = PROJECT_ROOT / "data"
-QUADSV_SRC = (
-    Path(os.environ.get("QUADSV_SRC", PROJECT_ROOT.parent / "quadsv"))
-    .expanduser()
-    .resolve()
-)
 
 RESULT_DIR = PROJECT_ROOT / "results" / "comparator_benchmark"
 FIGURE_DIR = PROJECT_ROOT / "figures" / "comparator_benchmark"

@@ -64,7 +64,7 @@ def download(url: str, path: Path, *, force: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".part")
     # Download to a .part file first so interrupted runs do not look complete.
-    request = urllib.request.Request(url, headers={"User-Agent": "quadsv-paper"})
+    request = urllib.request.Request(url, headers={"User-Agent": "sonic-paper"})
     with urllib.request.urlopen(request) as response, tmp.open("wb") as handle:
         shutil.copyfileobj(response, handle)
     tmp.replace(path)

@@ -16,6 +16,14 @@ results/
 *.png
 *.pdf
 
+# Generated LaTeX build files under tracked paper drafts
+drafts/**/*.aux
+drafts/**/*.fdb_latexmk
+drafts/**/*.fls
+drafts/**/*.log
+drafts/**/*.out
+drafts/**/*.synctex.gz
+
 # Local environments
 .venv/
 venv/

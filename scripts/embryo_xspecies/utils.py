@@ -411,9 +411,9 @@ def build_comparator(
     ``adaptive_freq_edges`` is frequency-grid bookkeeping: it merges radial
     Fourier bins that have no modes in some samples instead of dropping them, so
     every retained frequency interval is supported by **all** sections. Spatial
-    missing-bin masking is handled inside ``quadsv`` rasterization.
+    missing-bin masking is handled inside ``sonic`` rasterization.
     """
-    from quadsv import ComparatorGrid
+    from sonic import ComparatorGrid
 
     return ComparatorGrid(
         sections,
@@ -464,7 +464,7 @@ def load_prepared_sections(
         Pre-chosen gene panel from ``select_gene_panel``; if ``None`` the
         prepared zarr gene set is used.
     expression_mode : {"raw_counts", "log1p_norm"}
-        Matrix passed to ``quadsv``. ``log1p_norm`` library-size normalizes each
+        Matrix passed to ``sonic``. ``log1p_norm`` library-size normalizes each
         observed bin to ``normalization_target_sum`` using all prepared genes,
         then applies sparse ``log1p`` to selected gene columns.
     include_domain_channels : bool
@@ -559,10 +559,10 @@ def shared_supported_freq_edges(
     """Build one radial grid supported by every configured section.
 
     The candidate grid spans zero to Nyquist, with geometric or linear spacing.
-    QuadSV then merges adjacent intervals until each has at least one Fourier
+    SONIC then merges adjacent intervals until each has at least one Fourier
     mode in every section.
     """
-    from quadsv.comparators.features import adapt_frequency_edges
+    from sonic.comparators.features import adapt_frequency_edges
 
     if n_radial_bins < 1:
         raise ValueError("n_radial_bins must be positive.")

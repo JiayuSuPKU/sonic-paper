@@ -215,11 +215,11 @@ def _mean_expression(points: pd.DataFrame) -> pd.Series:
 
 
 def embedding_points(embedding: dict[str, Any]) -> pd.DataFrame:
-    """Build the per-(gene, section) table with orthology and QuadSV metrics.
+    """Build the per-(gene, section) table with orthology and SONIC metrics.
 
     The table is intentionally kept in memory rather than cached because its
     PCA coordinates are deterministically reconstructed from the spectra.
-    Missing stage metadata or per-section QuadSV results are errors.
+    Missing stage metadata or per-section SONIC results are errors.
     """
     frames: list[pd.DataFrame] = []
     for species, bundle in embedding["species"].items():
@@ -283,7 +283,7 @@ def embedding_points(embedding: dict[str, Any]) -> pd.DataFrame:
         validate="one_to_one",
     )
     if points["Z_score"].isna().any():
-        raise RuntimeError("Some embedding points lack per-section QuadSV results.")
+        raise RuntimeError("Some embedding points lack per-section SONIC results.")
     points["_mean_expression"] = _mean_expression(points)
     percentiles = points.groupby(["species", "section_id"], sort=False)[
         ["Z_score", "_mean_expression"]
