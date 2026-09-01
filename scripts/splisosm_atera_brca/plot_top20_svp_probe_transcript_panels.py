@@ -48,7 +48,10 @@ if __package__ in {None, ""}:
     __package__ = "scripts.splisosm_atera_brca"
 
 from scripts.paper_utils import (
+    FIGURE_WIDTH_IN,
     FONT_CONFIG,
+    PAPER_CATEGORICAL,
+    PAPER_COLORS,
     configure_paper_matplotlib,
 )
 
@@ -272,7 +275,7 @@ def plot_spatial_value(ax, coords: np.ndarray, values: np.ndarray, title: str) -
             s=0.16,
             linewidths=0,
             alpha=0.92,
-            cmap="Purples",
+            cmap="magma",
             vmin=0.0,
             vmax=vmax,
             rasterized=True,
@@ -284,7 +287,7 @@ def plot_spatial_value(ax, coords: np.ndarray, values: np.ndarray, title: str) -
             transform=ax.transAxes,
             ha="left",
             va="bottom",
-            fontsize=5,
+            fontsize=5.5,
             color="#555555",
         )
     ax.set_title(title, fontsize=6)
@@ -299,8 +302,11 @@ def plot_transcript_panel(  # noqa: C901
     compat: pd.DataFrame,
 ) -> None:
     """Draw transcript structures and cached Atera probe compatibility."""
-    source_colors = {"GENCODE v49": "#4C78A8", "PacBio QC pass": "#F58518"}
-    codeword_colors = plt.get_cmap("tab10")
+    source_colors = {
+        "GENCODE v49": PAPER_COLORS["cool"],
+        "PacBio QC pass": PAPER_COLORS["warm"],
+    }
+    codeword_colors = matplotlib.colors.ListedColormap(PAPER_CATEGORICAL)
 
     display_rows = []
     for source in ["GENCODE v49", "PacBio QC pass"]:
@@ -364,7 +370,7 @@ def plot_transcript_panel(  # noqa: C901
                     f"{group_label} (n={group_n})",
                     ha="right",
                     va="center",
-                    fontsize=5,
+                    fontsize=5.5,
                     color="#555555",
                 )
             y += 0.34
@@ -410,7 +416,7 @@ def plot_transcript_panel(  # noqa: C901
             fl = row.get("sqanti_FL_counts", np.nan)
             coding = row.get("sqanti_coding", "")
             label = f"{txid} FL={int(float(fl))} {coding}" if pd.notna(fl) else txid
-        ax.text(-120, y, label, ha="right", va="center", fontsize=5, color="#333333")
+        ax.text(-120, y, label, ha="right", va="center", fontsize=5.5, color="#333333")
 
     probe_y = y + 0.62
     codeword_order = sorted(probes["codeword"].dropna().astype(int).unique().tolist())
@@ -476,7 +482,7 @@ def plot_transcript_panel(  # noqa: C901
                 label,
                 ha="center",
                 va="bottom",
-                fontsize=5,
+                fontsize=5.5,
                 rotation=45,
                 color=codeword_color_map.get(codeword, "#333333"),
             )
@@ -571,7 +577,7 @@ def make_gene_figure(
     n = len(gene_features)
     n_cols = max(1, min(n, 6))
     fig_height = 4.8 if compat.shape[0] <= 35 else 5.4
-    fig = plt.figure(figsize=(7.28, fig_height), constrained_layout=False)
+    fig = plt.figure(figsize=(FIGURE_WIDTH_IN, fig_height), constrained_layout=False)
     gs = fig.add_gridspec(
         2,
         1,

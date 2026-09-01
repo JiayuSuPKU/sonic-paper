@@ -16,7 +16,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     __package__ = "scripts.comparator_benchmark"
 
-from scripts.paper_utils import manuscript_size
+from scripts.paper_utils import PAPER_COLORS, manuscript_size
 
 from .config import (
     AD_PIG_FULL_TESTS_FILE,
@@ -46,8 +46,8 @@ from .utils import (
 )
 
 AD_MAP_LABELS = ("WT", "AppNL-G-F")
-WT_COLOR = "#4d4d4d"
-AD_COLOR = "#e69f00"
+WT_COLOR = PAPER_COLORS["charcoal"]
+AD_COLOR = PAPER_COLORS["gold"]
 
 
 def _load_ad_pig_stats() -> pd.DataFrame:
@@ -154,7 +154,7 @@ class AdPigProfilePlotter:
                 lw=1.35,
                 label=f"{label} (n={y.shape[0]})",
             )
-        ax.legend(frameon=True, loc="upper right", fontsize=5, borderpad=0.2, handlelength=1.4)
+        ax.legend(frameon=True, loc="upper right", fontsize=5.5, borderpad=0.2, handlelength=1.4)
         ax.set_yscale("log")
         ax.set_xlabel("Radial bin")
         ax.set_ylabel("P(k)")
@@ -238,7 +238,7 @@ def _add_gene_row(
     )
     sc = plotter.plot_spatial(ax_ad, gene, plotter.ad_path, AD_MAP_LABELS[1], vmax)
     cbar = fig.colorbar(sc, cax=cax)
-    cbar.ax.tick_params(labelsize=5, width=0.4, length=2)
+    cbar.ax.tick_params(labelsize=5.5, width=0.4, length=2)
     cbar.ax.set_title("Log1p", fontsize=5.5, pad=1)
 
     # The two curve panels reuse the fitted spectra, so no extra comparator

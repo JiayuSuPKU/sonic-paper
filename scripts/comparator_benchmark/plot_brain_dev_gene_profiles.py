@@ -20,6 +20,8 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     __package__ = "scripts.comparator_benchmark"
 
+from scripts.paper_utils import FIGURE_WIDTH_IN, paper_diverging_cmap  # noqa: E402
+
 from .config import (  # noqa: E402
     BRAIN_DEV_REFERENCE_BINNING,
     BRAIN_DEV_REFERENCE_FEATURE_MODE,
@@ -52,7 +54,7 @@ from .utils import (  # noqa: E402
 BRAIN_DEV_TIME_COLORS = dict(
     zip(
         BRAIN_DEV_TIMEPOINT_ORDER,
-        mpl.colormaps["viridis"](np.linspace(0.10, 0.88, len(BRAIN_DEV_TIMEPOINT_ORDER))),
+        mpl.colormaps["cividis"](np.linspace(0.10, 0.88, len(BRAIN_DEV_TIMEPOINT_ORDER))),
         strict=True,
     )
 )
@@ -196,7 +198,7 @@ def plot_brain_raw_profiles(
         ax.legend(
             frameon=False,
             loc="upper right",
-            fontsize=5,
+            fontsize=5.5,
             ncol=2,
             handlelength=1.0,
             columnspacing=0.7,
@@ -237,18 +239,18 @@ def plot_brain_l1_log2fc_heatmap(
         mat,
         aspect="auto",
         interpolation="nearest",
-        cmap="coolwarm",
+        cmap=paper_diverging_cmap("brain_dev_log2fc"),
         vmin=-vmax_abs,
         vmax=vmax_abs,
         extent=[frequency[0], frequency[-1], len(labels) - 0.5, -0.5],
     )
     ax.set_yticks(np.arange(len(labels)))
-    ax.set_yticklabels(labels, fontsize=5)
+    ax.set_yticklabels(labels, fontsize=5.5)
     ax.set_xlabel("Radial frequency (cycles / um)")
     ax.set_ylabel("Timepoint", labelpad=1)
     cbar = ax.figure.colorbar(im, cax=cax)
-    cbar.ax.set_title("Log2FC", fontsize=5, pad=2)
-    cbar.ax.tick_params(labelsize=5, width=0.4, length=2, pad=1)
+    cbar.ax.set_title("Log2FC", fontsize=5.5, pad=2)
+    cbar.ax.tick_params(labelsize=5.5, width=0.4, length=2, pad=1)
     return im
 
 
@@ -368,7 +370,7 @@ def _draw_gene_row(
     cbar.outline.set_linewidth(0.45)
     cbar.ax.yaxis.set_ticks_position("right")
     cbar.ax.yaxis.set_label_position("right")
-    cbar.ax.tick_params(labelsize=5, width=0.4, length=2, pad=1)
+    cbar.ax.tick_params(labelsize=5.5, width=0.4, length=2, pad=1)
     cbar.ax.set_title("Log1p", fontsize=5.5, pad=2)
 
     right = gridspec.GridSpecFromSubplotSpec(
@@ -414,7 +416,7 @@ def _make_page(
 ):
     """Build one PDF page containing up to ``rows_per_page`` gene rows."""
     height_mm = max(82.0, 55.0 * rows_per_page + 10.0)
-    fig = plt.figure(figsize=(184 / 25.4, height_mm / 25.4))
+    fig = plt.figure(figsize=(FIGURE_WIDTH_IN, height_mm / 25.4))
     outer = gridspec.GridSpec(
         len(genes),
         1,

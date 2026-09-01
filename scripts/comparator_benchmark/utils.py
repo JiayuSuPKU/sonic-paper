@@ -210,7 +210,7 @@ def add_length_scale_axis(
     """Add a top axis with physical length scales for radial frequency plots."""
     sec = ax.secondary_xaxis("top")
     sec.set_xticks(ticks)
-    sec.set_xticklabels(labels, fontsize=5)
+    sec.set_xticklabels(labels, fontsize=5.5)
     sec.tick_params(width=0.4, length=2, pad=1)
     for tick in ticks:
         ax.axvline(tick, color="0.72", lw=0.5, ls=":", zorder=0)

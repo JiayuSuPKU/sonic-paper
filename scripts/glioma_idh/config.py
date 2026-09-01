@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scripts.paper_utils import PROJECT_ROOT
+from scripts.paper_utils import PAPER_COLORS, PROJECT_ROOT
 
 ANALYSIS_SLUG = "glioma_idh"
 DATA_ROOT = PROJECT_ROOT / "data" / "visium_glioma_idh_status"
@@ -50,7 +50,7 @@ META_PROGRAMS = (
         "key": "metabolism_redox",
         "label": "Metabolism / redox",
         "short_label": "Metab",
-        "color": "#E6AB02",
+        "color": PAPER_COLORS["ochre"],
         "genes": ("BCAT1", "MT3", "GAPDH", "TPI1", "LPL"),
         "terms": (
             ("KEGG", "hsa01230", "Biosynthesis of amino acids"),
@@ -62,7 +62,7 @@ META_PROGRAMS = (
         "key": "hypoxia_vascular",
         "label": "Hypoxia / vascular",
         "short_label": "Hypoxia",
-        "color": "#7A5195",
+        "color": PAPER_COLORS["purple"],
         "genes": ("NDRG1", "VEGFA", "HILPDA", "SLC2A1", "DCN"),
         "terms": (
             ("GO:BP", "GO:0071456", "cellular response to hypoxia"),
@@ -78,7 +78,7 @@ META_PROGRAMS = (
         "key": "immune_complement",
         "label": "Immune / complement",
         "short_label": "Immune",
-        "color": "#009E73",
+        "color": PAPER_COLORS["green"],
         "genes": ("C3", "C1QA", "C1QB", "LGALS3", "C1QC"),
         "terms": (
             ("GO:BP", "GO:0006959", "humoral immune response"),
@@ -90,7 +90,7 @@ META_PROGRAMS = (
         "key": "plasmin_coag",
         "label": "Plasminogen / coagulation",
         "short_label": "Coag",
-        "color": "#CC79A7",
+        "color": PAPER_COLORS["pink"],
         "genes": ("S100A10", "ANXA2", "ENO1", "PGK1", "A2M"),
         "terms": (
             ("KEGG", "hsa04610", "Complement and coagulation cascades"),
@@ -102,7 +102,7 @@ META_PROGRAMS = (
         "key": "ecm_integrin",
         "label": "ECM / integrin",
         "short_label": "ECM",
-        "color": "#303030",
+        "color": PAPER_COLORS["charcoal"],
         "genes": ("FN1", "COL1A1", "COL6A1", "COL1A2", "TNC"),
         "terms": (
             ("KEGG", "hsa04512", "ECM-receptor interaction"),
@@ -177,8 +177,8 @@ GROUP_LABELS = {
     "IDH-wt": "IDH-wildtype",
 }
 GROUP_COLORS = {
-    "IDH-mut": "#1f77b4",
-    "IDH-wt": "#d62728",
+    "IDH-mut": PAPER_COLORS["cool"],
+    "IDH-wt": PAPER_COLORS["warm"],
 }
 
 IDH_WILDTYPE_SAMPLE_IDS: tuple[str, ...] = (

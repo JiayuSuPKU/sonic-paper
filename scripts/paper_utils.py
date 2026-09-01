@@ -37,7 +37,7 @@ FONT_CONFIG: dict[str, float] = {
     "title": 7.0,
     "label": 6.0,
     "tick": 5.5,
-    "text": 5.0,
+    "text": 5.5,
     "legend": 5.5,
 }
 ARIAL_MATHTEXT: dict[str, Any] = {
@@ -70,6 +70,59 @@ OKABE_ITO = {
     "reddish_purple": "#CC79A7",
     "black": "#000000",
 }
+
+# Shared paper-wide visual primitives. Analyses should map their local
+# scientific concepts onto these roles rather than introduce near-duplicate
+# hex colors. Unrelated concepts may reuse a role; repeated concepts must keep
+# the same mapping across their main and extended-data figures.
+PAPER_COLORS = {
+    "cool": OKABE_ITO["blue"],
+    "warm": OKABE_ITO["vermillion"],
+    "green": OKABE_ITO["bluish_green"],
+    "purple": "#7A5195",
+    "gold": OKABE_ITO["orange"],
+    "ochre": "#B26B00",
+    "pink": OKABE_ITO["reddish_purple"],
+    "sky": OKABE_ITO["sky_blue"],
+    "indigo": "#332288",
+    "teal": "#44AA99",
+    "wine": "#882255",
+    "olive": "#999933",
+    "brown": "#661100",
+    "charcoal": "#4D4D4D",
+    "neutral": "#8A8A8A",
+    "light": "#D9D9D9",
+    "off_white": "#F7F7F7",
+}
+PAPER_CATEGORICAL = tuple(
+    PAPER_COLORS[key]
+    for key in (
+        "cool",
+        "warm",
+        "green",
+        "purple",
+        "gold",
+        "pink",
+        "ochre",
+        "sky",
+        "indigo",
+        "teal",
+        "wine",
+        "olive",
+        "brown",
+        "neutral",
+    )
+)
+
+
+def paper_diverging_cmap(name: str = "paper_diverging") -> Any:
+    """Return the paper's blue-white-vermillion map for signed quantities."""
+    from matplotlib.colors import LinearSegmentedColormap
+
+    return LinearSegmentedColormap.from_list(
+        name,
+        (PAPER_COLORS["cool"], PAPER_COLORS["off_white"], PAPER_COLORS["warm"]),
+    )
 
 
 def log(message: str) -> None:
