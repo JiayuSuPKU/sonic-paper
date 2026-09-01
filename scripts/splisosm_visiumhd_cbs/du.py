@@ -4,7 +4,6 @@ import gc
 import warnings
 from functools import partial
 from itertools import combinations
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -23,11 +22,14 @@ from scripts.paper_utils import (
 )
 
 from .config import (
+    CACHE_REVISIONS,
     DATASETS,
+    DU_CACHE_PARAMETERS,
     DU_COVARIATE_MIN_BIN_PCT,
     DU_COVARIATE_MIN_COUNTS,
     DU_METHOD,
     DU_RBP_SUBSET,
+    DU_RESIDUALIZE,
     DU_TARGET_GENE_SUBSET,
     DU_TF_SUBSET,
     FDR_THRESHOLD,
@@ -48,38 +50,34 @@ from .utils import (
 )
 
 
-def _du_cache_signature(
+def _du_cache_signature_data(
     cfg: DatasetConfig,
     svp_keys: set[str],
     covariate_keys: set[str],
     neighbor_degree: int,
-) -> str:
-    return cache_signature(
-        {
-            "inputs": [
-                path_fingerprint(cfg.sdata_zarr),
-                path_fingerprint(Path(__file__)),
-                path_fingerprint(Path(__file__).with_name("config.py")),
-                path_fingerprint(Path(__file__).with_name("utils.py")),
-                path_fingerprint(Path(__file__).with_name("reference_annotations.py")),
-            ],
-            "parameters": {
-                "dataset": cfg.key,
-                "resolution": "16um",
-                "neighbor_degree": neighbor_degree,
-                "method": DU_METHOD,
-                "residualize": "cov_only",
-                "min_covariate_counts": DU_COVARIATE_MIN_COUNTS,
-                "min_covariate_bin_pct": DU_COVARIATE_MIN_BIN_PCT,
-                "target_gene_keys": sorted(svp_keys),
-                "covariate_gene_keys": sorted(covariate_keys),
-                "target_subset": DU_TARGET_GENE_SUBSET,
-                "rbp_subset": DU_RBP_SUBSET,
-                "tf_subset": DU_TF_SUBSET,
-            },
-            "splisosm_version": installed_version("splisosm"),
-        }
-    )
+) -> dict[str, Any]:
+    target_keys = sorted(svp_keys)
+    design_keys = sorted(covariate_keys)
+    class_keys = regulator_class_keys()
+    return {
+        "cache_revision": CACHE_REVISIONS["du"],
+        "dependencies": {"splisosm": installed_version("splisosm")},
+        "inputs": [path_fingerprint(cfg.sdata_zarr)],
+        "parameters": {
+            **DU_CACHE_PARAMETERS,
+            "dataset": cfg.key,
+            "bin_prefix": cfg.bin_prefix,
+            "neighbor_degree": neighbor_degree,
+            "group_iso_by": cfg.group_iso_by,
+            "gene_names": cfg.gene_names,
+            "n_target_genes": len(target_keys),
+            "target_gene_key_hash": cache_signature({"values": target_keys}),
+            "n_covariates": len(design_keys),
+            "covariate_gene_key_hash": cache_signature({"values": design_keys}),
+            "rbp_gene_key_hash": cache_signature({"values": sorted(class_keys["rbp"])}),
+            "tf_chip_gene_key_hash": cache_signature({"values": sorted(class_keys["tf_chip"])}),
+        },
+    }
 
 
 def build_gene_expression_table(
@@ -325,13 +323,14 @@ def run_du_suite(
             adata, table_cfg["gene_names"], covariate_genes
         )
         filtered_covariate_keys = set(covariate_adata.var["gene_key"].astype(str))
-        section = f"du:{cfg.key}:16um"
-        signature = _du_cache_signature(
+        signature_data = _du_cache_signature_data(
             cfg,
             svp_keys,
             filtered_covariate_keys,
             degrees[(cfg.key, "16um")],
         )
+        signature = cache_signature(signature_data)
+        section = f"du:{cfg.key}:16um"
 
         if not force and cache_entry_is_current(
             RESULT_DIR,
@@ -407,7 +406,7 @@ def run_du_suite(
             partial(
                 model.test_differential_usage,
                 method=DU_METHOD,
-                residualize="cov_only",
+                residualize=DU_RESIDUALIZE,
                 ratio_transformation="none",
                 n_jobs=n_jobs,
                 print_progress=True,
@@ -445,10 +444,16 @@ def run_du_suite(
         du["dataset"] = cfg.short_label
         du["resolution"] = "16um"
         du["method"] = DU_METHOD
-        du["residualize"] = "cov_only"
+        du["residualize"] = DU_RESIDUALIZE
         du = du[_du_output_columns(du)]
         save_csv(du, out_path)
-        update_cache_entry(RESULT_DIR, section, signature, (out_path,))
+        update_cache_entry(
+            RESULT_DIR,
+            section,
+            signature,
+            (out_path,),
+            signature_data=signature_data,
+        )
         results[cfg.key] = du
         del model, sdata
         gc.collect()

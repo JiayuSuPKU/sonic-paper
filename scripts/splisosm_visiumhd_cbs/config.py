@@ -20,6 +20,7 @@ RHO = 0.99
 NEIGHBOR_DEGREE = {"16um": 1, "8um": 4, "2um": 64}
 SV_METHOD = "hsic-ir"
 DU_METHOD = "hsic-gp"
+DU_RESIDUALIZE = "cov_only"
 RESOLUTION_UM = {"16um": 16, "8um": 8, "2um": 2}
 RESOLUTION_TABLE = {
     "16um": "square_016um",
@@ -36,6 +37,42 @@ SV_GENE_SUBSET: tuple[str, ...] | None = None
 DU_TARGET_GENE_SUBSET: tuple[str, ...] | None = None
 DU_RBP_SUBSET: tuple[str, ...] | None = None
 DU_TF_SUBSET: tuple[str, ...] | None = None
+
+# Canonical cache parameters; revisions cover algorithm changes not represented below.
+CACHE_REVISIONS = {"sv": 1, "du": 1}
+SV_CACHE_PARAMETERS = {
+    "backend": "SplisosmFFT",
+    "method": SV_METHOD,
+    "rho": RHO,
+    "col_key": "array_col",
+    "row_key": "array_row",
+    "layer": "counts",
+    "filter_single_iso_genes": True,
+    "ratio_transformation": "none",
+    "chunk_size": "auto",
+}
+DU_CACHE_PARAMETERS = {
+    "backend": "SplisosmFFT",
+    "method": DU_METHOD,
+    "residualize": DU_RESIDUALIZE,
+    "ratio_transformation": "none",
+    "rho": RHO,
+    "resolution": "16um",
+    "resolution_table": RESOLUTION_TABLE["16um"],
+    "spacing_um": RESOLUTION_UM["16um"],
+    "col_key": "array_col",
+    "row_key": "array_row",
+    "layer": "counts",
+    "target_min_counts": 0,
+    "target_min_bin_pct": 0.0,
+    "filter_single_iso_genes": True,
+    "target_fdr_threshold": FDR_THRESHOLD,
+    "min_covariate_counts": DU_COVARIATE_MIN_COUNTS,
+    "min_covariate_bin_pct": DU_COVARIATE_MIN_BIN_PCT,
+    "target_subset": DU_TARGET_GENE_SUBSET,
+    "rbp_subset": DU_RBP_SUBSET,
+    "tf_subset": DU_TF_SUBSET,
+}
 
 # Mouse TF ChIP evidence source. The ReMap BED is cached outside the project
 # because the non-redundant mm39 catalogue is large.

@@ -89,6 +89,55 @@ DU_GPR_BACKEND = "nufft"
 DU_RESIDUALIZE = "cov_only"
 DU_LML_APPROX_RANK = 32
 
+# Canonical cache parameters; revisions cover algorithm changes not represented below.
+CACHE_REVISIONS = {"sv": 1, "du": 1}
+SV_CACHE_PARAMETERS = {
+    "backend": "SplisosmNP",
+    "method": SV_METHOD,
+    "table": TABLE_CODEWORD,
+    "spatial_key": SPATIAL_KEY,
+    "layer": LAYER,
+    "group_iso_by": GENE_COL_CODEWORD,
+    "gene_names": GENE_COL_CODEWORD,
+    "min_counts": MIN_COUNTS,
+    "min_bin_pct": MIN_BIN_PCT,
+    "filter_single_iso_genes": True,
+    "min_component_size": MIN_COMPONENT_SIZE,
+    "k_neighbors": K_NEIGHBORS,
+    "rho": RHO,
+    "standardize_cov": False,
+    "ratio_transformation": "none",
+    "nan_filling": "mean",
+    "null_method": "liu",
+    "chunk_size": "auto",
+    "summary_fdr_threshold": FDR_THRESHOLD,
+}
+DU_CACHE_PARAMETERS = {
+    "backend": "SplisosmNP",
+    "method": DU_METHOD,
+    "target_table": TABLE_CODEWORD,
+    "design_table": TABLE_GENE,
+    "spatial_key": SPATIAL_KEY,
+    "layer": LAYER,
+    "group_iso_by": GENE_COL_CODEWORD,
+    "gene_names": GENE_COL_CODEWORD,
+    "residualize": DU_RESIDUALIZE,
+    "ratio_transformation": "none",
+    "nan_filling": "mean",
+    "gpr_backend": DU_GPR_BACKEND,
+    "gpr_lml_approx_rank": DU_LML_APPROX_RANK,
+    "min_counts": MIN_COUNTS,
+    "min_bin_pct": MIN_BIN_PCT,
+    "min_component_size": MIN_COMPONENT_SIZE,
+    "filter_single_iso_genes": True,
+    "skip_spatial_kernel": True,
+    "k_neighbors": K_NEIGHBORS,
+    "rho": RHO,
+    "standardize_cov": False,
+    "target_fdr_threshold": FDR_THRESHOLD,
+    "summary_fdr_threshold": FDR_THRESHOLD,
+}
+
 # Primary workflow-owned result files consumed by visualization.ipynb.
 SV_CSV = RESULT_DIR / "segmented_splisosmnp_svp_hsic_ir.csv"
 SV_METRICS_CSV = RESULT_DIR / "segmented_splisosmnp_svp_metrics.csv"

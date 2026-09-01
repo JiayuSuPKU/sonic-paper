@@ -18,7 +18,11 @@ from scipy.spatial import cKDTree
 from scipy.stats import false_discovery_control, hypergeom
 from sklearn.cluster import MiniBatchKMeans
 
-from scripts.paper_utils import CLUSTERPROFILER_SCRIPT, clusterprofiler_command
+from scripts.paper_utils import (
+    CLUSTERPROFILER_SCRIPT,
+    cache_signature,
+    clusterprofiler_command,
+)
 
 from . import config as C
 from . import orthology, sv, utils
@@ -572,9 +576,9 @@ def summarize_local_mixing(
 # ---------------------------------------------------------------------------
 # Cache orchestration
 # ---------------------------------------------------------------------------
-def _input_signature(embedding: dict[str, Any]) -> str:
-    """Return the signature of every input consumed by embedding metrics."""
-    paths = [Path(__file__), Path(C.__file__), orthology.ORTHO_TSV]
+def _input_signature_data(embedding: dict[str, Any]) -> dict[str, Any]:
+    """Describe every data input and parameter consumed by embedding metrics."""
+    paths = [orthology.ORTHO_TSV, CLUSTERPROFILER_SCRIPT]
     for cfg in C.SPECIES_CONFIGS.values():
         metadata = utils.filtered_metadata(cfg)
         paths.extend(
@@ -599,15 +603,27 @@ def _input_signature(embedding: dict[str, Any]) -> str:
         pca.mean_,
         pca.explained_variance_ratio_,
     ]
-    return utils.cache_signature(paths, arrays)
+    return utils.cache_signature_data(
+        paths,
+        arrays,
+        cache_revision=C.CACHE_REVISIONS["metrics"],
+        parameters=C.METRICS_CACHE_PARAMETERS,
+    )
 
 
 def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
     """Compute or load all joint-embedding analysis metrics."""
-    signature = _input_signature(embedding)
+    signature_data = _input_signature_data(embedding)
+    signature = cache_signature(signature_data)
     if (
         not force
-        and (manifest := utils.current_cache_manifest(RESULT_DIR, _CACHE_ARTIFACTS, signature))
+        and (
+            manifest := utils.current_cache_manifest(
+                RESULT_DIR,
+                _CACHE_ARTIFACTS,
+                signature_data,
+            )
+        )
         is not None
     ):
         LOGGER.info("Embedding metrics cache is current: %s", RESULT_DIR)
@@ -701,6 +717,7 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
     }
     manifest = {
         "cache_signature": signature,
+        "signature_data": signature_data,
         "artifacts": list(_CACHE_ARTIFACTS),
         "embedding": embedding_manifest,
         "local_mixing": mixing_manifest,

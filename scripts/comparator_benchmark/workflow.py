@@ -55,6 +55,7 @@ from .brain_dev_helpers import (
 from .config import (
     AD_ENRICH_CONTRAST_FILE,
     AD_PIG_ANISOTROPY_FILE,
+    AD_PIG_DROP_PROBES,
     AD_PIG_ENRICHMENT_TOP_N,
     AD_PIG_FDR_ALPHA,
     AD_PIG_FULL_BINNINGS,
@@ -68,8 +69,14 @@ from .config import (
     AD_PIG_REFERENCE_FEATURE_MODE,
     AD_PIG_REFERENCE_INPUT,
     AD_PIG_REFERENCE_N_RADIAL_BINS,
+    AD_PIG_RENAME_PROBES,
     AD_PIG_SPECTRAL_REPLICATE_DISTANCE_FILE,
     BRAIN_DEV_ANISOTROPY_FILE,
+    BRAIN_DEV_CELL_TYPE_CONTROL_GROUPS,
+    BRAIN_DEV_CELL_TYPE_CONTROL_TOP_N,
+    BRAIN_DEV_CELL_TYPE_LABELS,
+    BRAIN_DEV_CELL_TYPE_MANUAL_GENES,
+    BRAIN_DEV_CELL_TYPE_PROGRAM_TOP_N,
     BRAIN_DEV_ENRICH_CONTRAST_FILE,
     BRAIN_DEV_ENRICHMENT_TOP_N,
     BRAIN_DEV_FULL_FEATURE_MODES,
@@ -81,6 +88,7 @@ from .config import (
     BRAIN_DEV_REFERENCE_FEATURE_MODE,
     BRAIN_DEV_REFERENCE_INPUT,
     BRAIN_DEV_REFERENCE_N_RADIAL_BINS,
+    BRAIN_DEV_TABLE_S4_CNMFS,
     BRAIN_DEV_TESTS_FILE,
     MAX_GENES,
     N_RADIAL_BINS,
@@ -106,23 +114,64 @@ from .utils import (
     select_gene_panel,
 )
 
+# Key statistical knobs are explicit; bump a revision for algorithm-only changes.
+CACHE_REVISIONS = {"ad_pig": 1, "brain_dev": 1}
+COMMON_CACHE_PARAMETERS = {
+    "n_radial_bins": N_RADIAL_BINS,
+    "spatial_tests": SPATIAL_TESTS,
+    "test_labels": TEST_LABELS,
+    "enrichment": {
+        "sources": ["GO:BP", "KEGG"],
+        "orgdb": "org.Mm.eg.db",
+        "organism": "mmu",
+    },
+}
+CACHE_PARAMETERS = {
+    "ad_pig": {
+        **COMMON_CACHE_PARAMETERS,
+        "full_inputs": AD_PIG_FULL_INPUTS,
+        "full_binnings": AD_PIG_FULL_BINNINGS,
+        "full_feature_modes": AD_PIG_FULL_FEATURE_MODES,
+        "reference_input": AD_PIG_REFERENCE_INPUT,
+        "reference_binning": AD_PIG_REFERENCE_BINNING,
+        "reference_feature_mode": AD_PIG_REFERENCE_FEATURE_MODE,
+        "reference_n_radial_bins": AD_PIG_REFERENCE_N_RADIAL_BINS,
+        "radial_bin_diagnostics": RADIAL_BIN_DIAGNOSTIC_BINS,
+        "fdr_alpha": AD_PIG_FDR_ALPHA,
+        "enrichment_top_n": AD_PIG_ENRICHMENT_TOP_N,
+        "positive_controls": AD_PIG_POS_CONTROLS,
+        "drop_probes": AD_PIG_DROP_PROBES,
+        "rename_probes": AD_PIG_RENAME_PROBES,
+    },
+    "brain_dev": {
+        **COMMON_CACHE_PARAMETERS,
+        "full_inputs": BRAIN_DEV_FULL_INPUTS,
+        "full_feature_modes": BRAIN_DEV_FULL_FEATURE_MODES,
+        "reference_input": BRAIN_DEV_REFERENCE_INPUT,
+        "reference_binning": BRAIN_DEV_REFERENCE_BINNING,
+        "reference_feature_mode": BRAIN_DEV_REFERENCE_FEATURE_MODE,
+        "reference_n_radial_bins": BRAIN_DEV_REFERENCE_N_RADIAL_BINS,
+        "null_permutations": BRAIN_DEV_NULL_PERMUTATIONS,
+        "enrichment_top_n": BRAIN_DEV_ENRICHMENT_TOP_N,
+        "cell_type_program_top_n": BRAIN_DEV_CELL_TYPE_PROGRAM_TOP_N,
+        "cell_type_control_top_n": BRAIN_DEV_CELL_TYPE_CONTROL_TOP_N,
+        "cell_type_control_groups": BRAIN_DEV_CELL_TYPE_CONTROL_GROUPS,
+        "cell_type_manual_genes": BRAIN_DEV_CELL_TYPE_MANUAL_GENES,
+        "cell_type_labels": BRAIN_DEV_CELL_TYPE_LABELS,
+    },
+}
 
-def _panel_cache_signature(
+
+def _panel_cache_signature_data(
     panel: str,
     *,
     presence_threshold: float,
     max_genes: int,
-) -> str:
+) -> dict[str, Any]:
     panel_config = PANELS[panel]
-    module_dir = Path(__file__).resolve().parent
-    inputs = [
-        panel_config.metadata_csv,
-        Path(__file__),
-        module_dir / "config.py",
-        module_dir / "utils.py",
-        module_dir / "ad_pig_helpers.py",
-        module_dir / "brain_dev_helpers.py",
-    ]
+    inputs = [panel_config.metadata_csv]
+    if panel == "brain_dev":
+        inputs.append(BRAIN_DEV_TABLE_S4_CNMFS)
     if panel_config.metadata_csv.exists():
         try:
             metadata = pd.read_csv(panel_config.metadata_csv, usecols=["h5ad_path"])
@@ -133,17 +182,17 @@ def _panel_cache_signature(
                 resolve_cached_data_path(path, panel_config.metadata_csv.parent)
                 for path in metadata["h5ad_path"].dropna().astype(str)
             )
-    return cache_signature(
-        {
-            "inputs": [path_fingerprint(path) for path in inputs],
-            "parameters": {
-                "panel": panel,
-                "presence_threshold": presence_threshold,
-                "max_genes": max_genes,
-            },
-            "sonic_version": installed_version("sonic-spatial"),
-        }
-    )
+    return {
+        "cache_revision": CACHE_REVISIONS[panel],
+        "dependencies": {"sonic-spatial": installed_version("sonic-spatial")},
+        "inputs": [path_fingerprint(path) for path in inputs],
+        "parameters": {
+            **CACHE_PARAMETERS[panel],
+            "panel": panel,
+            "presence_threshold": presence_threshold,
+            "max_genes": max_genes,
+        },
+    }
 
 
 def _run_guarded_panel(
@@ -154,11 +203,12 @@ def _run_guarded_panel(
     presence_threshold: float,
     max_genes: int,
 ) -> dict[str, Any]:
-    signature = _panel_cache_signature(
+    signature_data = _panel_cache_signature_data(
         panel,
         presence_threshold=presence_threshold,
         max_genes=max_genes,
     )
+    signature = cache_signature(signature_data)
     refresh = force or not cache_entry_is_current(RESULT_DIR, panel, signature)
     result = runner(
         force=refresh,
@@ -168,7 +218,14 @@ def _run_guarded_panel(
     owned_outputs = [
         output for output in result["outputs"].values() if isinstance(output, (str, Path))
     ]
-    update_cache_entry(RESULT_DIR, panel, signature, owned_outputs)
+    if refresh:
+        update_cache_entry(
+            RESULT_DIR,
+            panel,
+            signature,
+            owned_outputs,
+            signature_data=signature_data,
+        )
     return result
 
 
@@ -1733,6 +1790,8 @@ def run_workflow(
         started_at=started_at,
         parameters={
             "analysis": analysis,
+            "cache_parameters": CACHE_PARAMETERS,
+            "cache_revisions": CACHE_REVISIONS,
             "force": force,
             "presence_threshold": presence_threshold,
             "max_genes": max_genes,

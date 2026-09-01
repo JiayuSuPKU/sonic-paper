@@ -4,6 +4,7 @@ import argparse
 import os
 import sys
 import time
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,8 @@ import pandas as pd
 from scripts.paper_utils import write_workflow_manifest
 
 from .config import (
+    CACHE_REVISIONS,
+    DU_CACHE_PARAMETERS,
     DU_GPR_BACKEND,
     DU_METHOD,
     FDR_THRESHOLD,
@@ -25,6 +28,7 @@ from .config import (
     MIN_COUNTS,
     RESULT_DIR,
     RHO,
+    SV_CACHE_PARAMETERS,
     SV_METHOD,
 )
 from .du import run_du
@@ -33,6 +37,9 @@ from .probe_mapping import prepare_svp_probe_mapping_cache
 from .run_ankrd30a_analysis import run_ankrd30a_analysis
 from .sv import run_sv, svp_target_genes
 from .utils import ensure_dirs, project_path, save_json
+
+# Cache-defining knobs are documented here and written to workflow_manifest.json.
+CACHE_PARAMETERS = {"sv": SV_CACHE_PARAMETERS, "du": DU_CACHE_PARAMETERS}
 
 
 def run_workflow(
@@ -95,6 +102,7 @@ def run_workflow(
     # downstream notebooks/scripts.
     summary = {
         "analysis": "splisosm_atera_brca",
+        "splisosm_version": version("splisosm"),
         "sv_method": SV_METHOD,
         "du_method": DU_METHOD,
         "du_gpr_backend": DU_GPR_BACKEND,
@@ -141,6 +149,8 @@ def run_workflow(
         RESULT_DIR,
         started_at=started_at,
         parameters={
+            "cache_parameters": CACHE_PARAMETERS,
+            "cache_revisions": CACHE_REVISIONS,
             "force": force,
             "n_jobs": n_jobs,
             "run_top20": run_top20,

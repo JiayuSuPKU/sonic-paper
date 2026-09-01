@@ -47,16 +47,8 @@ def _analysis_config() -> dict[str, Any]:
 
     return {
         "schema_version": 2,
-        "expression_mode": C.ANALYSIS_EXPRESSION_MODE,
-        "normalization_target_sum": C.ANALYSIS_NORMALIZATION_TARGET_SUM,
+        **C.SV_CACHE_PARAMETERS,
         "sonic_version": sonic.__version__,
-        "detector": {
-            "kernel_method": C.SV_KERNEL_METHOD,
-            "rho": C.SV_RHO,
-            "neighbor_degree": C.SV_NEIGHBOR_DEGREE,
-            "spacing_um": [C.BIN_SIZE_UM, C.BIN_SIZE_UM],
-            "fft_solver": C.SV_FFT_SOLVER,
-        },
     }
 
 
@@ -80,13 +72,11 @@ def _manifest(cfg: Any, features: list[str], metadata: pd.DataFrame) -> dict[str
         **_analysis_config(),
         "species": cfg.PANEL_KEY,
         "feature_scope": "all genes returned by utils.select_gene_panel",
-        "min_gene_detected_bin_fraction": C.MIN_GENE_DETECTED_BIN_FRACTION,
         "n_features": len(features),
         "feature_sha256": _feature_hash(features),
         "gene_qc_sha256": hashlib.sha256(gene_qc.read_bytes()).hexdigest(),
         "sections": sections,
         "artifact_pattern": "<section_id>.csv.gz",
-        "fdr_filter_applied": False,
     }
 
 

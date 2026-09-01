@@ -29,6 +29,13 @@ from . import (
 
 LOGGER = logging.getLogger("embryo_xspecies.workflow")
 
+CACHE_PARAMETERS = {
+    "spatial_variability": C.SV_CACHE_PARAMETERS,
+    "spectral_embedding": C.EMBEDDING_CACHE_PARAMETERS,
+    "metrics": C.METRICS_CACHE_PARAMETERS,
+    "temporal": C.TEMPORAL_CACHE_PARAMETERS,
+}
+
 
 def run(
     *,
@@ -108,6 +115,8 @@ def run(
             "force_download": force_download,
             "progress": progress,
             "download_workers": download_workers,
+            "cache_parameters": CACHE_PARAMETERS,
+            "cache_revisions": C.CACHE_REVISIONS,
         },
         outputs={
             "metrics_manifest": project_relative(metrics.RESULT_DIR / "manifest.json"),

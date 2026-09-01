@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import gc
 from functools import partial
-from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -18,6 +18,8 @@ from scripts.paper_utils import (
 )
 
 from .config import (
+    CACHE_REVISIONS,
+    DU_CACHE_PARAMETERS,
     DU_CSV,
     DU_GPR_BACKEND,
     DU_LML_APPROX_RANK,
@@ -225,38 +227,28 @@ def _cached_du_matches(svp: pd.DataFrame, covariates: list[str]) -> bool:
     )
 
 
-def _du_cache_signature(
+def _du_cache_signature_data(
     svp: pd.DataFrame,
     covariates: list[str],
     *,
     lml_approx_rank: int,
-) -> str:
+) -> dict[str, Any]:
     target_keys = [normalize_gene_symbol(gene) for gene in svp_target_genes(svp)]
     covariate_keys = [normalize_gene_symbol(gene) for gene in covariates]
-    return cache_signature(
-        {
-            "inputs": [
-                path_fingerprint(SDATA_ZARR),
-                path_fingerprint(Path(__file__)),
-                path_fingerprint(Path(__file__).with_name("config.py")),
-                path_fingerprint(Path(__file__).with_name("utils.py")),
-            ],
-            "parameters": {
-                "method": DU_METHOD,
-                "residualize": DU_RESIDUALIZE,
-                "gpr_backend": DU_GPR_BACKEND,
-                "gpr_lml_approx_rank": lml_approx_rank,
-                "min_counts": MIN_COUNTS,
-                "min_bin_pct": MIN_BIN_PCT,
-                "min_component_size": MIN_COMPONENT_SIZE,
-                "k_neighbors": K_NEIGHBORS,
-                "rho": RHO,
-                "target_gene_key_hash": stable_hash_values(target_keys),
-                "covariate_key_hash": stable_hash_values(covariate_keys),
-            },
-            "splisosm_version": installed_version("splisosm"),
-        }
-    )
+    class_keys = regulator_class_keys()
+    return {
+        "cache_revision": CACHE_REVISIONS["du"],
+        "dependencies": {"splisosm": installed_version("splisosm")},
+        "inputs": [path_fingerprint(SDATA_ZARR)],
+        "parameters": {
+            **DU_CACHE_PARAMETERS,
+            "gpr_lml_approx_rank": lml_approx_rank,
+            "target_gene_key_hash": stable_hash_values(target_keys),
+            "covariate_key_hash": stable_hash_values(covariate_keys),
+            "rbp_gene_key_hash": stable_hash_values(class_keys["rbp"]),
+            "tf_chip_gene_key_hash": stable_hash_values(class_keys["tf_chip"]),
+        },
+    }
 
 
 def _annotate_du(du: pd.DataFrame, status: pd.DataFrame) -> pd.DataFrame:
@@ -348,11 +340,12 @@ def run_du(
         codeword_cell_ids,
     )
 
-    signature = _du_cache_signature(
+    signature_data = _du_cache_signature_data(
         svp,
         covariates,
         lml_approx_rank=lml_approx_rank,
     )
+    signature = cache_signature(signature_data)
     outputs = (DU_CSV, DU_METRICS_CSV, DU_REGULATOR_STATUS_CSV, DU_SUMMARY_JSON)
     if (
         not force
@@ -443,7 +436,7 @@ def run_du(
     save_csv(status, DU_REGULATOR_STATUS_CSV)
     save_csv(metrics, DU_METRICS_CSV)
     _write_du_summary(du, status, metrics)
-    update_cache_entry(RESULT_DIR, "du", signature, outputs)
+    update_cache_entry(RESULT_DIR, "du", signature, outputs, signature_data=signature_data)
     del model, sdata
     gc.collect()
     return du, status, metrics

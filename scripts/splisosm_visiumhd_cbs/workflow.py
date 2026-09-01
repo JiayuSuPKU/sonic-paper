@@ -15,7 +15,9 @@ import splisosm
 
 from scripts.paper_utils import write_workflow_manifest
 from scripts.splisosm_visiumhd_cbs.config import (
+    CACHE_REVISIONS,
     DATASETS,
+    DU_CACHE_PARAMETERS,
     DU_COVARIATE_MIN_BIN_PCT,
     DU_COVARIATE_MIN_COUNTS,
     DU_RBP_SUBSET,
@@ -27,6 +29,7 @@ from scripts.splisosm_visiumhd_cbs.config import (
     PROJECT_ROOT,
     RESULT_DIR,
     RHO,
+    SV_CACHE_PARAMETERS,
     SV_GENE_SUBSET,
 )
 from scripts.splisosm_visiumhd_cbs.du import (
@@ -45,6 +48,9 @@ from scripts.splisosm_visiumhd_cbs.utils import (
     save_csv,
     save_json,
 )
+
+# Cache-defining knobs are documented here and written to workflow_manifest.json.
+CACHE_PARAMETERS = {"sv": SV_CACHE_PARAMETERS, "du": DU_CACHE_PARAMETERS}
 
 
 def run_workflow(*, force: bool = False, n_jobs: int = 8) -> dict[str, Any]:
@@ -135,7 +141,12 @@ def run_workflow(*, force: bool = False, n_jobs: int = 8) -> dict[str, Any]:
         "splisosm_visiumhd_cbs",
         RESULT_DIR,
         started_at=started_at,
-        parameters={"force": force, "n_jobs": n_jobs},
+        parameters={
+            "cache_parameters": CACHE_PARAMETERS,
+            "cache_revisions": CACHE_REVISIONS,
+            "force": force,
+            "n_jobs": n_jobs,
+        },
         outputs=summary["outputs"],
         summary={key: value for key, value in summary.items() if key != "outputs"},
     )

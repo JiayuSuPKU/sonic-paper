@@ -233,9 +233,7 @@ def cache_entry_is_current(
     if entry.get("signature") != signature or not isinstance(owned, list) or not owned:
         return False
     signature_data = entry.get("signature_data")
-    if signature_data is not None and (
-        not isinstance(signature_data, dict) or cache_signature(signature_data) != signature
-    ):
+    if not isinstance(signature_data, dict) or cache_signature(signature_data) != signature:
         return False
     if outputs is not None and owned != [_manifest_output(path, project_root) for path in outputs]:
         return False
@@ -255,7 +253,7 @@ def update_cache_entry(
     signature: str,
     outputs: Sequence[str | Path],
     *,
-    signature_data: Mapping[str, Any] | None = None,
+    signature_data: Mapping[str, Any],
     project_root: Path = PROJECT_ROOT,
 ) -> Path:
     """Atomically update a cache section and its canonical signature data."""
@@ -265,10 +263,9 @@ def update_cache_entry(
         "signature": signature,
         "outputs": [_manifest_output(output, project_root) for output in outputs],
     }
-    if signature_data is not None:
-        if cache_signature(signature_data) != signature:
-            raise ValueError("signature does not match signature_data")
-        entry["signature_data"] = dict(signature_data)
+    if cache_signature(signature_data) != signature:
+        raise ValueError("signature does not match signature_data")
+    entry["signature_data"] = dict(signature_data)
     manifest["entries"][section] = entry
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".json.tmp")

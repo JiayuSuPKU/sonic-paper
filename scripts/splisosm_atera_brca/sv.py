@@ -16,6 +16,7 @@ from scripts.paper_utils import (
 )
 
 from .config import (
+    CACHE_REVISIONS,
     FDR_THRESHOLD,
     GENE_COL_CODEWORD,
     K_NEIGHBORS,
@@ -27,6 +28,7 @@ from .config import (
     RHO,
     SDATA_ZARR,
     SPATIAL_KEY,
+    SV_CACHE_PARAMETERS,
     SV_CSV,
     SV_METHOD,
     SV_METRICS_CSV,
@@ -43,29 +45,13 @@ from .utils import (
 )
 
 
-def _sv_cache_signature() -> str:
-    return cache_signature(
-        {
-            "inputs": [
-                path_fingerprint(SDATA_ZARR),
-                path_fingerprint(Path(__file__)),
-                path_fingerprint(Path(__file__).with_name("config.py")),
-                path_fingerprint(Path(__file__).with_name("utils.py")),
-            ],
-            "parameters": {
-                "method": SV_METHOD,
-                "table": TABLE_CODEWORD,
-                "layer": LAYER,
-                "group_iso_by": GENE_COL_CODEWORD,
-                "min_counts": MIN_COUNTS,
-                "min_bin_pct": MIN_BIN_PCT,
-                "min_component_size": MIN_COMPONENT_SIZE,
-                "k_neighbors": K_NEIGHBORS,
-                "rho": RHO,
-            },
-            "splisosm_version": installed_version("splisosm"),
-        }
-    )
+def _sv_cache_signature_data() -> dict[str, Any]:
+    return {
+        "cache_revision": CACHE_REVISIONS["sv"],
+        "dependencies": {"splisosm": installed_version("splisosm")},
+        "inputs": [path_fingerprint(SDATA_ZARR)],
+        "parameters": SV_CACHE_PARAMETERS,
+    }
 
 
 def _valid_canonical_metrics(metrics: pd.DataFrame) -> bool:
@@ -115,7 +101,8 @@ def _write_summary(svp: pd.DataFrame, metrics: pd.DataFrame) -> None:
 
 def run_sv(*, force: bool = False, n_jobs: int = 8) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run/load canonical segmented SVP calls."""
-    signature = _sv_cache_signature()
+    signature_data = _sv_cache_signature_data()
+    signature = cache_signature(signature_data)
     outputs = (SV_CSV, SV_METRICS_CSV, SV_SUMMARY_JSON)
     if not force and cache_entry_is_current(
         RESULT_DIR,
@@ -152,7 +139,16 @@ def run_sv(*, force: bool = False, n_jobs: int = 8) -> tuple[pd.DataFrame, pd.Da
     )
     _, test_seconds, test_rss = time_call(
         "segmented SV hsic-ir",
-        partial(model.test_spatial_variability, n_jobs=n_jobs, print_progress=True),
+        partial(
+            model.test_spatial_variability,
+            method=SV_METHOD,
+            ratio_transformation="none",
+            nan_filling="mean",
+            null_method="liu",
+            chunk_size="auto",
+            n_jobs=n_jobs,
+            print_progress=True,
+        ),
     )
     # Keep the gene summary table as the canonical SVP target list.
     svp = model.get_formatted_test_results("sv", with_gene_summary=True).sort_values(
@@ -194,7 +190,7 @@ def run_sv(*, force: bool = False, n_jobs: int = 8) -> tuple[pd.DataFrame, pd.Da
     save_csv(svp.drop(columns=["gene_key"], errors="ignore"), SV_CSV)
     save_csv(metrics, SV_METRICS_CSV)
     _write_summary(svp, metrics)
-    update_cache_entry(RESULT_DIR, "sv", signature, outputs)
+    update_cache_entry(RESULT_DIR, "sv", signature, outputs, signature_data=signature_data)
     log(f"SVP genes at FDR < {FDR_THRESHOLD:g}: {(svp['pvalue_adj'] < FDR_THRESHOLD).sum():,}")
     return svp, metrics
 

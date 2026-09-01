@@ -14,41 +14,67 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 
+from scripts.paper_utils import (
+    cache_signature as canonical_cache_signature,
+)
+from scripts.paper_utils import (
+    path_fingerprint,
+)
+
 from . import config as C
 
 logger = logging.getLogger("embryo_xspecies.utils")
 
 
-def cache_signature(paths: list[Path], arrays: list[np.ndarray] | None = None) -> str:
-    """Hash file inventories and small arrays used to validate derived caches."""
-    digest = hashlib.sha256()
-    for path in sorted(set(paths)):
-        if not path.exists():
-            raise FileNotFoundError(path)
-        stat = path.stat()
-        try:
-            label = path.relative_to(C.PROJECT_ROOT)
-        except ValueError:
-            label = path
-        digest.update(f"{label}\0{stat.st_size}\0{stat.st_mtime_ns}\n".encode())
-    for array in arrays or []:
-        value = np.ascontiguousarray(array)
-        digest.update(str(value.shape).encode())
-        digest.update(value.dtype.str.encode())
-        digest.update(value.tobytes())
-    return digest.hexdigest()
+def _array_fingerprint(array: np.ndarray) -> dict[str, Any]:
+    """Return a compact, JSON-serializable identity for a derived array."""
+    value = np.ascontiguousarray(array)
+    return {
+        "shape": list(value.shape),
+        "dtype": value.dtype.str,
+        "sha256": hashlib.sha256(value.tobytes()).hexdigest(),
+    }
+
+
+def cache_signature_data(
+    paths: list[Path],
+    arrays: list[np.ndarray] | None = None,
+    *,
+    cache_revision: int,
+    parameters: dict[str, Any],
+) -> dict[str, Any]:
+    """Describe the data and parameters that determine a derived cache."""
+    unique_paths = sorted(set(paths))
+    missing = [path for path in unique_paths if not path.exists()]
+    if missing:
+        raise FileNotFoundError(missing[0])
+    return {
+        "cache_revision": cache_revision,
+        "inputs": [path_fingerprint(path) for path in unique_paths],
+        "arrays": [_array_fingerprint(array) for array in arrays or []],
+        "parameters": parameters,
+    }
 
 
 def current_cache_manifest(
     result_dir: Path,
     artifacts: tuple[str, ...],
-    signature: str,
+    signature_data: dict[str, Any],
 ) -> dict[str, Any] | None:
     """Return the manifest only when every owned artifact matches current inputs."""
     if not all((result_dir / name).exists() for name in artifacts):
         return None
     manifest = json.loads((result_dir / "manifest.json").read_text())
-    return manifest if manifest.get("cache_signature") == signature else None
+    recorded = manifest.get("signature_data")
+    if not isinstance(recorded, dict):
+        return None
+    signature = canonical_cache_signature(signature_data)
+    return (
+        manifest
+        if canonical_cache_signature(recorded) == signature
+        and manifest.get("cache_signature") == signature
+        else None
+    )
 
 
 def require_current_bin_size(table: Any, *, label: str = "prepared zarr") -> None:

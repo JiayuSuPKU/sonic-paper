@@ -19,16 +19,16 @@ the [Visium HD analysis](../splisosm_visiumhd_cbs/README.md):
 
 ```bash
 mamba create -y -n sonic_paper_splisosm -c conda-forge -c bioconda \
-  python=3.12 numpy pandas scipy matplotlib anndata spatialdata pybigwig \
-  jupyter nbconvert ipykernel black ruff samtools bedtools stringtie subread \
+  python=3.12 numpy pandas scipy finufft matplotlib anndata spatialdata pybigwig \
+  jupyter nbconvert ipykernel ruff samtools bedtools stringtie subread \
   htslib pip
 conda run -n sonic_paper_splisosm python -m pip install splisosm==1.2.0
 ```
 
 Python requirements used directly by these scripts are `splisosm`, `numpy`,
-`pandas`, `scipy`, `matplotlib`, `anndata`, `spatialdata`, and `pyBigWig`.
+`pandas`, `scipy`, `finufft`, `matplotlib`, `anndata`, `spatialdata`, and `pyBigWig`.
 The notebooks additionally need `jupyter`, `nbconvert`, and `ipykernel`.
-`black` and `ruff` are only needed for code checks.
+`ruff` is only needed for code formatting and checks.
 
 The [ANKRD30A TCGA stage](./ankrd30a/) also requires command-line tools available on `PATH` or
 inside the active conda environment: `samtools`, `stringtie`, `prepDE.py`,
@@ -175,9 +175,9 @@ figures/splisosm_atera_brca/top20_svp_probe_transcript_panels/
 
 ```bash
 conda run -n sonic_paper_splisosm python -m ruff check scripts/splisosm_atera_brca/*.py scripts/splisosm_atera_brca/ankrd30a
-conda run -n sonic_paper_splisosm python -m black --check scripts/splisosm_atera_brca/*.py scripts/splisosm_atera_brca/ankrd30a
+conda run -n sonic_paper_splisosm python -m ruff format --check scripts/splisosm_atera_brca/*.py scripts/splisosm_atera_brca/ankrd30a
 conda run -n sonic_paper_splisosm python -m compileall -q scripts/splisosm_atera_brca
 ```
 
-The notebook is intentionally excluded from ruff/black because it is the manual
+The notebook is intentionally excluded from Ruff because it is the manual
 figure-rendering surface.

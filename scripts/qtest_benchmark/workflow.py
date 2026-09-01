@@ -136,6 +136,14 @@ LINEAGE_CACHE_PARAMETERS = {
 }
 
 
+# Canonical cache parameters are kept here so every invalidating knob is auditable.
+CACHE_PARAMETERS = {
+    "synthetic": SYNTHETIC_CACHE_PARAMETERS,
+    "small-intestine": SMALL_INTESTINE_CACHE_PARAMETERS,
+    "lineage": LINEAGE_CACHE_PARAMETERS,
+}
+
+
 def _group_signature_data(
     group: str,
     parameters: dict[str, Any],
@@ -177,7 +185,7 @@ def generate_analysis_caches(
         )
         signature_data = _group_signature_data(
             "synthetic",
-            SYNTHETIC_CACHE_PARAMETERS,
+            CACHE_PARAMETERS["synthetic"],
         )
         signature = cache_signature(signature_data)
         refresh = force or not cache_entry_is_current(
@@ -213,7 +221,7 @@ def generate_analysis_caches(
         )
         signature_data = _group_signature_data(
             "small-intestine",
-            SMALL_INTESTINE_CACHE_PARAMETERS,
+            CACHE_PARAMETERS["small-intestine"],
             effective_source,
         )
         signature = cache_signature(signature_data)
@@ -253,7 +261,7 @@ def generate_analysis_caches(
         )
         signature_data = _group_signature_data(
             "lineage",
-            LINEAGE_CACHE_PARAMETERS,
+            CACHE_PARAMETERS["lineage"],
             LINEAGE_ANALYSIS_DATA_FILE,
             recursive=(LINEAGE_TREE_DIR,),
         )
@@ -294,6 +302,8 @@ def generate_analysis_caches(
         started_at=started_at,
         parameters={
             "analysis": analysis,
+            "cache_parameters": CACHE_PARAMETERS,
+            "cache_revisions": CACHE_REVISIONS,
             "force": force,
             "source": project_relative(source) if source is not None else None,
         },

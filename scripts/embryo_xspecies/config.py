@@ -77,6 +77,55 @@ GO_FDR_THRESHOLD = 0.05
 GO_MAX_TERM_UNIVERSE_FRACTION = 0.05
 GO_DISPLAY_TERMS_PER_GROUP = 4
 
+# Cache revisions are bumped only when result semantics change without a
+# corresponding parameter change.  The parameter maps below are the canonical
+# cache inputs documented by workflow.py and embedded in derived manifests.
+CACHE_REVISIONS = {"metrics": 1, "temporal": 1}
+SV_CACHE_PARAMETERS = {
+    "expression_mode": ANALYSIS_EXPRESSION_MODE,
+    "normalization_target_sum": ANALYSIS_NORMALIZATION_TARGET_SUM,
+    "min_gene_detected_bin_fraction": MIN_GENE_DETECTED_BIN_FRACTION,
+    "detector": {
+        "kernel_method": SV_KERNEL_METHOD,
+        "rho": SV_RHO,
+        "neighbor_degree": SV_NEIGHBOR_DEGREE,
+        "spacing_um": [BIN_SIZE_UM, BIN_SIZE_UM],
+        "fft_solver": SV_FFT_SOLVER,
+    },
+    "fdr_filter_applied": False,
+}
+SPECTRAL_CACHE_PARAMETERS = {
+    "expression_mode": ANALYSIS_EXPRESSION_MODE,
+    "normalization_target_sum": ANALYSIS_NORMALIZATION_TARGET_SUM,
+    "min_gene_detected_bin_fraction": MIN_GENE_DETECTED_BIN_FRACTION,
+    "background_normalized": True,
+    "bin_size_um": BIN_SIZE_UM,
+    "n_radial_bins_requested": N_RADIAL_BINS,
+    "frequency_spacing": FREQ_SPACING,
+}
+EMBEDDING_CACHE_PARAMETERS = {**SPECTRAL_CACHE_PARAMETERS, "n_pc": N_PC}
+GO_CACHE_PARAMETERS = {
+    "source": GO_SOURCE,
+    "orgdb": GO_ORGDB,
+    "semantic_simplify": GO_SEMANTIC_SIMPLIFY,
+    "semantic_simplify_p_adjust_cutoff": GO_FDR_THRESHOLD,
+    "maximum_term_universe_fraction": GO_MAX_TERM_UNIVERSE_FRACTION,
+    "display_terms_per_group": GO_DISPLAY_TERMS_PER_GROUP,
+    "timeout_seconds": GO_TIMEOUT_SECONDS,
+}
+METRICS_CACHE_PARAMETERS = {
+    "n_pattern_clusters": N_PATTERN_CLUSTERS,
+    "local_mixing_neighbors": LOCAL_MIXING_NEIGHBORS,
+    "local_mixing_quantiles": LOCAL_MIXING_QUANTILES,
+    "go": GO_CACHE_PARAMETERS,
+}
+TEMPORAL_CACHE_PARAMETERS = {
+    "max_within_stage_percentile": TEMPORAL_MAX_WITHIN_STAGE_PERCENTILE,
+    "dynamic_percentile_threshold": TEMPORAL_DYNAMIC_PERCENTILE_THRESHOLD,
+    "transition_fdr_threshold": TRANSITION_FDR_THRESHOLD,
+    "go": GO_CACHE_PARAMETERS,
+}
+
 # --- spatial-domain annotation ----------------------------------------------
 # Generated comparator feature prefix, not an input adata column.
 DOMAIN_CHANNEL_PREFIX = "__domain__"

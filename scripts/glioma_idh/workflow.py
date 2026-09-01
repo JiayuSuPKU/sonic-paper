@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import re
 import subprocess
 import sys
@@ -21,13 +19,17 @@ if __package__ in {None, ""}:
     __package__ = "scripts.glioma_idh"
 
 from scripts.paper_utils import (
+    CACHE_MANIFEST_FILENAME,
     CLUSTERPROFILER_SCRIPT,
+    cache_entry_is_current,
+    cache_signature,
     clusterprofiler_command,
+    path_fingerprint,
+    update_cache_entry,
     write_workflow_manifest,
 )
 
 from .config import (
-    CACHE_SUMMARY_FILE,
     ENRICHMENT_TERMS_FILE,
     FDR_ALPHA,
     GROUP_LABELS,
@@ -43,6 +45,7 @@ from .config import (
     PERMUTATION_NULL_FILE,
     PROJECT_ROOT,
     REAL_TESTS_FILE,
+    RESULT_DIR,
     SAMPLE_MAX_QC_EXCLUDED_FRAC,
     SAMPLES,
     SPATIAL_DIAGNOSTICS_FILE,
@@ -64,7 +67,28 @@ from .utils import (
 )
 
 CLUSTERPROFILER_TIMEOUT_SECONDS = 900
-CACHE_SCHEMA_VERSION = 1
+CACHE_REVISIONS = {"comparison": 1, "enrichment": 1}
+COMPARISON_CACHE_PARAMETERS = {
+    "n_genes": N_GENES,
+    "spot_min_counts": SPOT_MIN_COUNTS,
+    "spot_max_pct_mito": SPOT_MAX_PCT_MITO,
+    "sample_max_qc_excluded_frac": SAMPLE_MAX_QC_EXCLUDED_FRAC,
+    "min_frac_per_sample": MIN_FRAC_PER_SAMPLE,
+    "min_samples_frac": MIN_SAMPLES_FRAC,
+    "min_samples_per_group": MIN_SAMPLES_PER_GROUP,
+    "n_radial_bins": N_RADIAL_BINS,
+    "n_label_permutations": N_LABEL_PERMUTATIONS,
+}
+ENRICHMENT_CACHE_PARAMETERS = {
+    "top_n": 100,
+    "sources": ["GO:BP", "KEGG"],
+    "orgdb": "org.Hs.eg.db",
+    "organism": "hsa",
+}
+CACHE_PARAMETERS = {
+    "comparison": COMPARISON_CACHE_PARAMETERS,
+    "enrichment": ENRICHMENT_CACHE_PARAMETERS,
+}
 
 COMPARISON_CACHE_FILES = {
     "real_tests": REAL_TESTS_FILE,
@@ -74,64 +98,7 @@ COMPARISON_CACHE_FILES = {
 }
 
 
-def _file_fingerprint(path: Path, *, digest: bool = False) -> dict[str, Any]:
-    """Return stable metadata for one cache input or output."""
-    resolved = path.resolve()
-    if not path.exists():
-        return {"path": str(resolved), "exists": False}
-    stat = path.stat()
-    result: dict[str, Any] = {
-        "path": str(resolved),
-        "exists": True,
-        "size": stat.st_size,
-        "mtime_ns": stat.st_mtime_ns,
-    }
-    if digest:
-        sha256 = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1 << 20), b""):
-                sha256.update(chunk)
-        result["sha256"] = sha256.hexdigest()
-    return result
-
-
-def _load_cache_summary() -> dict[str, Any]:
-    """Read the cache manifest, treating a missing or malformed file as stale."""
-    try:
-        summary = json.loads(CACHE_SUMMARY_FILE.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {"schema_version": CACHE_SCHEMA_VERSION}
-    if summary.get("schema_version") != CACHE_SCHEMA_VERSION:
-        return {"schema_version": CACHE_SCHEMA_VERSION}
-    return summary
-
-
-def _write_cache_summary(
-    section: str,
-    *,
-    signature: dict[str, Any],
-    outputs: dict[str, Any],
-    invalidate: tuple[str, ...] = (),
-) -> None:
-    """Atomically update one cache stage and invalidate its dependents."""
-    summary = _load_cache_summary()
-    for name in invalidate:
-        summary.pop(name, None)
-    summary[section] = {"signature": signature, "outputs": outputs}
-    CACHE_SUMMARY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = CACHE_SUMMARY_FILE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
-    tmp.replace(CACHE_SUMMARY_FILE)
-    log(f"wrote {project_relative(CACHE_SUMMARY_FILE)}")
-
-
-def _output_fingerprints(
-    paths: dict[str, Path], *, digest: bool = False
-) -> dict[str, dict[str, Any]]:
-    return {name: _file_fingerprint(path, digest=digest) for name, path in paths.items()}
-
-
-def _comparison_signature(data_root: Path) -> dict[str, Any]:
+def _comparison_signature_data(data_root: Path) -> dict[str, Any]:
     """Describe every input that changes the IDH-status comparison."""
     import sonic
 
@@ -142,36 +109,27 @@ def _comparison_signature(data_root: Path) -> dict[str, Any]:
             {
                 "sample_id": str(row.sample_id),
                 "group": str(row.group),
-                "h5ad": _file_fingerprint(Path(row.h5ad_path)),
+                "h5ad": path_fingerprint(Path(row.h5ad_path)),
             }
         )
     return {
-        "data_root": str(data_root.resolve()),
+        "cache_revision": CACHE_REVISIONS["comparison"],
+        "data_root": project_relative(data_root.resolve()),
         "inputs": inputs,
         "sonic_version": sonic.__version__,
-        "parameters": {
-            "n_genes": N_GENES,
-            "spot_min_counts": SPOT_MIN_COUNTS,
-            "spot_max_pct_mito": SPOT_MAX_PCT_MITO,
-            "sample_max_qc_excluded_frac": SAMPLE_MAX_QC_EXCLUDED_FRAC,
-            "min_frac_per_sample": MIN_FRAC_PER_SAMPLE,
-            "min_samples_frac": MIN_SAMPLES_FRAC,
-            "min_samples_per_group": MIN_SAMPLES_PER_GROUP,
-            "n_radial_bins": N_RADIAL_BINS,
-            "n_label_permutations": N_LABEL_PERMUTATIONS,
-        },
+        "parameters": COMPARISON_CACHE_PARAMETERS,
     }
 
 
-def _enrichment_signature() -> dict[str, Any]:
+def _enrichment_signature_data() -> dict[str, Any]:
     """Describe the tested genes and wrapper used for pathway enrichment."""
     return {
-        "real_tests": _file_fingerprint(REAL_TESTS_FILE, digest=True),
-        "clusterprofiler_wrapper": _file_fingerprint(CLUSTERPROFILER_SCRIPT, digest=True),
-        "top_n": 100,
-        "sources": ["GO:BP", "KEGG"],
-        "orgdb": "org.Hs.eg.db",
-        "organism": "hsa",
+        "cache_revision": CACHE_REVISIONS["enrichment"],
+        "inputs": [
+            path_fingerprint(REAL_TESTS_FILE),
+            path_fingerprint(CLUSTERPROFILER_SCRIPT),
+        ],
+        "parameters": ENRICHMENT_CACHE_PARAMETERS,
     }
 
 
@@ -200,20 +158,13 @@ def _fit_radial_comparator(
 
 def _idh_status_comparison_cache_ready(data_root: Path) -> bool:
     """Return whether the complete IDH-status comparison cache is valid."""
-    if not all(
-        path.exists() and path.stat().st_size > 0
-        for path in (
-            REAL_TESTS_FILE,
-            SPECTRA_FILE,
-            PERMUTATION_NULL_FILE,
-            SPATIAL_DIAGNOSTICS_FILE,
-        )
+    signature_data = _comparison_signature_data(data_root)
+    if not cache_entry_is_current(
+        RESULT_DIR,
+        "comparison",
+        cache_signature(signature_data),
+        outputs=tuple(COMPARISON_CACHE_FILES.values()),
     ):
-        return False
-    section = _load_cache_summary().get("comparison", {})
-    if section.get("signature") != _comparison_signature(data_root):
-        return False
-    if section.get("outputs") != _output_fingerprints(COMPARISON_CACHE_FILES):
         return False
     if not _spatial_diagnostics_cache_ready():
         return False
@@ -518,13 +469,13 @@ def _missing_enrichment_pairs(terms: pd.DataFrame) -> set[tuple[str, str]]:
 
 def _enrichment_cache_ready() -> bool:
     """Return whether cached GO BP and KEGG results cover both ranked gene sets."""
-    if not ENRICHMENT_TERMS_FILE.exists() or ENRICHMENT_TERMS_FILE.stat().st_size == 0:
-        return False
-    section = _load_cache_summary().get("enrichment", {})
-    if section.get("signature") != _enrichment_signature():
-        return False
-    outputs = {"enrichment": _file_fingerprint(ENRICHMENT_TERMS_FILE, digest=True)}
-    if section.get("outputs") != outputs:
+    signature_data = _enrichment_signature_data()
+    if not cache_entry_is_current(
+        RESULT_DIR,
+        "enrichment",
+        cache_signature(signature_data),
+        outputs=(ENRICHMENT_TERMS_FILE,),
+    ):
         return False
     try:
         terms = pd.read_csv(ENRICHMENT_TERMS_FILE)
@@ -617,10 +568,13 @@ def run_enrichment_cache(
         )
     save_csv(terms, ENRICHMENT_TERMS_FILE)
     META_PROGRAM_GENE_MAP_FILE.unlink(missing_ok=True)
-    _write_cache_summary(
+    signature_data = _enrichment_signature_data()
+    update_cache_entry(
+        RESULT_DIR,
         "enrichment",
-        signature=_enrichment_signature(),
-        outputs={"enrichment": _file_fingerprint(ENRICHMENT_TERMS_FILE, digest=True)},
+        cache_signature(signature_data),
+        (ENRICHMENT_TERMS_FILE,),
+        signature_data=signature_data,
     )
     return {"enrichment": project_relative(ENRICHMENT_TERMS_FILE)}
 
@@ -861,7 +815,6 @@ def run_idh_status_comparison_cache(
             "spatial_diagnostics": project_relative(SPATIAL_DIAGNOSTICS_FILE),
         }
 
-    ENRICHMENT_TERMS_FILE.unlink(missing_ok=True)
     META_PROGRAM_GENE_MAP_FILE.unlink(missing_ok=True)
     log(f"data_root={resolved_data_root}")
     # Load all samples once, normalize in memory, then keep only the selected genes.
@@ -950,11 +903,13 @@ def run_idh_status_comparison_cache(
         SPATIAL_DIAGNOSTICS_FILE,
     )
 
-    _write_cache_summary(
+    signature_data = _comparison_signature_data(resolved_data_root)
+    update_cache_entry(
+        RESULT_DIR,
         "comparison",
-        signature=_comparison_signature(resolved_data_root),
-        outputs=_output_fingerprints(COMPARISON_CACHE_FILES),
-        invalidate=("enrichment",),
+        cache_signature(signature_data),
+        tuple(COMPARISON_CACHE_FILES.values()),
+        signature_data=signature_data,
     )
 
     return {
@@ -986,12 +941,14 @@ def run_workflow(
     if run_enrichment:
         outputs.update(run_enrichment_cache(force=force))
         outputs.update(run_metaprogram_gene_map_cache())
-    outputs["cache_summary"] = project_relative(CACHE_SUMMARY_FILE)
+    outputs["cache_manifest"] = project_relative(RESULT_DIR / CACHE_MANIFEST_FILENAME)
     manifest_path = write_workflow_manifest(
         "glioma_idh",
-        CACHE_SUMMARY_FILE.parent,
+        RESULT_DIR,
         started_at=started_at,
         parameters={
+            "cache_parameters": CACHE_PARAMETERS,
+            "cache_revisions": CACHE_REVISIONS,
             "data_root": str(data_root) if data_root is not None else None,
             "force": force,
             "n_jobs": n_jobs,

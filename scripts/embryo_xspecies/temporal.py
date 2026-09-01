@@ -7,14 +7,13 @@ import json
 import logging
 import shutil
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from scipy.stats import hypergeom, spearmanr
 
-from scripts.paper_utils import CLUSTERPROFILER_SCRIPT
+from scripts.paper_utils import CLUSTERPROFILER_SCRIPT, cache_signature
 
 from . import config as C
 from . import embeddings, metrics, orthology, utils
@@ -48,12 +47,9 @@ _EXAMPLE_GENE_EXCLUDED_PREFIXES = (
 )
 
 
-def _input_signature(embedding: dict[str, Any]) -> str:
-    """Return the signature of inputs consumed by temporal metrics."""
+def _input_signature_data(embedding: dict[str, Any]) -> dict[str, Any]:
+    """Describe the data inputs and parameters consumed by temporal metrics."""
     paths = [
-        Path(__file__),
-        Path(C.__file__),
-        Path(metrics.__file__),
         orthology.ORTHO_TSV,
         CLUSTERPROFILER_SCRIPT,
     ]
@@ -64,7 +60,7 @@ def _input_signature(embedding: dict[str, Any]) -> str:
             for section_id in metadata["section_id"].astype(str)
         )
     pca = embedding["pca"]
-    return utils.cache_signature(
+    return utils.cache_signature_data(
         paths,
         [
             embedding["freq_edges"],
@@ -72,6 +68,8 @@ def _input_signature(embedding: dict[str, Any]) -> str:
             pca.mean_,
             pca.explained_variance_ratio_,
         ],
+        cache_revision=C.CACHE_REVISIONS["temporal"],
+        parameters=C.TEMPORAL_CACHE_PARAMETERS,
     )
 
 
@@ -573,10 +571,17 @@ def _summarize(
 
 def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
     """Compute or load global variation and consecutive-stage statistics."""
-    signature = _input_signature(embedding)
+    signature_data = _input_signature_data(embedding)
+    signature = cache_signature(signature_data)
     if (
         not force
-        and (manifest := utils.current_cache_manifest(RESULT_DIR, _CACHE_ARTIFACTS, signature))
+        and (
+            manifest := utils.current_cache_manifest(
+                RESULT_DIR,
+                _CACHE_ARTIFACTS,
+                signature_data,
+            )
+        )
         is not None
     ):
         LOGGER.info("Temporal cache is current: %s", RESULT_DIR)
@@ -706,6 +711,7 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
 
     manifest = {
         "cache_signature": signature,
+        "signature_data": signature_data,
         "artifacts": list(_CACHE_ARTIFACTS),
         "global_variation": global_variation,
         "consecutive_stage": {

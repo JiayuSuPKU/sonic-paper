@@ -21,16 +21,16 @@ the [Atera analysis](../splisosm_atera_brca/README.md):
 
 ```bash
 mamba create -y -n sonic_paper_splisosm -c conda-forge -c bioconda \
-  python=3.12 numpy pandas scipy matplotlib anndata spatialdata pybigwig \
-  jupyter nbconvert ipykernel black ruff samtools bedtools stringtie subread \
+  python=3.12 numpy pandas scipy finufft matplotlib anndata spatialdata pybigwig \
+  jupyter nbconvert ipykernel ruff samtools bedtools stringtie subread \
   htslib pip
 conda run -n sonic_paper_splisosm python -m pip install splisosm==1.2.0
 ```
 
 Python requirements used directly by these scripts are `splisosm`, `numpy`,
-`pandas`, `scipy`, `matplotlib`, `anndata`, and `spatialdata`. The notebook also
-uses `jupyter`, `nbconvert`, and `ipykernel`. `black` and `ruff` are only needed
-for code checks. The Visium HD CBS workflow itself does not require the [Atera
+`pandas`, `scipy`, `finufft`, `matplotlib`, `anndata`, and `spatialdata`. The notebook also
+uses `jupyter`, `nbconvert`, and `ipykernel`. `ruff` is only needed for code
+formatting and checks. The Visium HD CBS workflow itself does not require the [Atera
 TCGA command-line tools](../splisosm_atera_brca/ankrd30a/tcga.py), but they are included in `sonic_paper_splisosm` so both
 analysis folders can share one environment.
 
@@ -152,9 +152,9 @@ Empty lists suppress that feature class.
 
 ```bash
 conda run -n sonic_paper_splisosm python -m ruff check scripts/splisosm_visiumhd_cbs/*.py
-conda run -n sonic_paper_splisosm python -m black --check scripts/splisosm_visiumhd_cbs/*.py
+conda run -n sonic_paper_splisosm python -m ruff format --check scripts/splisosm_visiumhd_cbs/*.py
 conda run -n sonic_paper_splisosm python -m compileall -q scripts/splisosm_visiumhd_cbs
 ```
 
-The notebook is intentionally excluded from the ruff command because it
+The notebook is intentionally excluded from the Ruff commands because it
 is manually maintained for exploration.

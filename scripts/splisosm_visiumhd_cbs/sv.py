@@ -3,7 +3,6 @@ from __future__ import annotations
 import gc
 from functools import partial
 from itertools import combinations, product
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -21,9 +20,13 @@ from scripts.paper_utils import (
 )
 
 from .config import (
+    CACHE_REVISIONS,
     DATASETS,
     FDR_THRESHOLD,
+    RESOLUTION_TABLE,
+    RESOLUTION_UM,
     RESULT_DIR,
+    SV_CACHE_PARAMETERS,
     SV_GENE_SUBSET,
     SV_METHOD,
     SV_METRICS_PATH,
@@ -42,34 +45,41 @@ from .utils import (
 )
 
 
-def _sv_cache_signature(
+def _sv_cache_signature_data(
     cfg: DatasetConfig,
     resolution: str,
     neighbor_degree: int,
     eligible_isoforms: list[str] | None,
     gene_subset: tuple[str, ...] | None,
-) -> str:
-    return cache_signature(
-        {
-            "inputs": [
-                path_fingerprint(cfg.sdata_zarr),
-                path_fingerprint(Path(__file__)),
-                path_fingerprint(Path(__file__).with_name("config.py")),
-                path_fingerprint(Path(__file__).with_name("utils.py")),
-            ],
-            "parameters": {
-                "dataset": cfg.key,
-                "resolution": resolution,
-                "neighbor_degree": neighbor_degree,
-                "method": SV_METHOD,
-                "min_counts": cfg.min_counts,
-                "min_bin_pct": cfg.min_bin_pct,
-                "eligible_isoforms": eligible_isoforms,
-                "gene_subset": gene_subset,
-            },
-            "splisosm_version": installed_version("splisosm"),
-        }
-    )
+) -> dict[str, Any]:
+    filtered_subset = eligible_isoforms is not None or gene_subset is not None
+    return {
+        "cache_revision": CACHE_REVISIONS["sv"],
+        "dependencies": {"splisosm": installed_version("splisosm")},
+        "inputs": [path_fingerprint(cfg.sdata_zarr)],
+        "parameters": {
+            **SV_CACHE_PARAMETERS,
+            "dataset": cfg.key,
+            "resolution": resolution,
+            "resolution_table": RESOLUTION_TABLE[resolution],
+            "spacing_um": RESOLUTION_UM[resolution],
+            "bin_prefix": cfg.bin_prefix,
+            "neighbor_degree": neighbor_degree,
+            "min_counts": 0 if filtered_subset else cfg.min_counts,
+            "min_bin_pct": 0.0 if filtered_subset else cfg.min_bin_pct,
+            "group_iso_by": cfg.group_iso_by,
+            "gene_names": cfg.gene_names,
+            "gene_subset": gene_subset,
+            "n_eligible_isoforms": (
+                len(eligible_isoforms) if eligible_isoforms is not None else None
+            ),
+            "eligible_isoform_hash": (
+                cache_signature({"values": sorted(eligible_isoforms)})
+                if eligible_isoforms is not None
+                else None
+            ),
+        },
+    }
 
 
 def _merge_metric_cache(new_metrics: pd.DataFrame, *, force: bool) -> pd.DataFrame:
@@ -139,13 +149,14 @@ def run_sv_one(
     result_path = RESULT_DIR / f"sv_{cfg.key}_{resolution}_hsic_ir.csv"
     eligible_path = RESULT_DIR / f"eligible_16um_features_{cfg.key}.csv"
     metric_rows: list[dict[str, Any]] = []
-    signature = _sv_cache_signature(
+    signature_data = _sv_cache_signature_data(
         cfg,
         resolution,
         neighbor_degree,
         eligible_isoforms,
         gene_subset,
     )
+    signature = cache_signature(signature_data)
     section = f"sv:{cfg.key}:{resolution}"
     outputs = (result_path, eligible_path) if resolution == "16um" else (result_path,)
 
@@ -256,7 +267,7 @@ def run_sv_one(
     features = model_feature_rows(model, table_cfg)
     if resolution == "16um":
         save_csv(features, eligible_path)
-    update_cache_entry(RESULT_DIR, section, signature, outputs)
+    update_cache_entry(RESULT_DIR, section, signature, outputs, signature_data=signature_data)
 
     del model, sdata
     gc.collect()
