@@ -23,13 +23,13 @@ from .config import (
     CACHE_REVISIONS,
     DATASETS,
     FDR_THRESHOLD,
+    METRICS_PATH,
     RESOLUTION_TABLE,
     RESOLUTION_UM,
     RESULT_DIR,
     SV_CACHE_PARAMETERS,
     SV_GENE_SUBSET,
     SV_METHOD,
-    SV_METRICS_PATH,
     DatasetConfig,
 )
 from .utils import (
@@ -89,12 +89,16 @@ def _merge_metric_cache(new_metrics: pd.DataFrame, *, force: bool) -> pd.DataFra
     benchmark values instead of replacing them with placeholder load events.
     """
     if new_metrics.empty:
-        return pd.read_csv(SV_METRICS_PATH) if SV_METRICS_PATH.exists() else pd.DataFrame()
-    if force or not SV_METRICS_PATH.exists():
+        if not METRICS_PATH.exists():
+            return pd.DataFrame()
+        cached = pd.read_csv(METRICS_PATH)
+        return cached[cached["phase"].isin(("data_prep", "sv_test"))].copy()
+    if force or not METRICS_PATH.exists():
         return new_metrics
 
     key_cols = ["dataset_key", "resolution", "phase"]
-    existing = pd.read_csv(SV_METRICS_PATH)
+    existing = pd.read_csv(METRICS_PATH)
+    existing = existing[existing["phase"].isin(("data_prep", "sv_test"))].copy()
     replace_keys = new_metrics[key_cols].drop_duplicates().assign(_replace=True)
     kept = existing.merge(replace_keys, on=key_cols, how="left")
     kept = kept[kept["_replace"].isna()].drop(columns="_replace")
@@ -310,8 +314,6 @@ def run_sv_suite(
     metric_parts = [metric for metric in metrics if not metric.empty]
     new_metric_df = pd.concat(metric_parts, ignore_index=True) if metric_parts else pd.DataFrame()
     metric_df = _merge_metric_cache(new_metric_df, force=force)
-    if not new_metric_df.empty:
-        save_csv(metric_df, SV_METRICS_PATH)
     return results, metric_df
 
 

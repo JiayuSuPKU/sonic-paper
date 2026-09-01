@@ -22,7 +22,6 @@ TOP20_RESULT_DIR = RESULT_DIR / "top20_svp_probe_transcript_panels"
 SVP_PROBE_RESULT_DIR = RESULT_DIR / "svp_probe_transcript_cache"
 
 SDATA_ZARR = ATERA_DATA_DIR / "sdata_cw_nomorph.filtered.zarr"
-SDATA_ZARR_ZIP = ATERA_DATA_DIR / "sdata_cw_nomorph.filtered.zarr.zip"
 PROBE_CSV = ATERA_DATA_DIR / "atera__human_whole_transcriptome_v1__probe_info.csv"
 ANNOTATION_CSV = ATERA_DATA_DIR / "WTA_Preview_FFPE_Breast_Cancer_cell_groups.csv"
 
@@ -59,7 +58,6 @@ REMAP_NR_HG38_URLS = (
     "https://remap.univ-amu.fr/storage/remap2022/hg38/MACS2/remap2022_nr_macs2_hg38_v1_0.bed.gz",
     "https://zenodo.org/records/10527088/files/remap2022_nr_macs2_hg38_v1_0.bed.gz?download=1",
 )
-POSTAR3_RBP_SOURCE = REFERENCE_ROOT / "POSTAR3" / "human.rbp_with_clip.txt"
 
 BRCA_LRSEQ_BASE_URL = (
     "https://raw.githubusercontent.com/TheJacksonLaboratory/BRCA-LRseq-pipeline/main"
@@ -73,7 +71,6 @@ TABLE_GENE = "table"
 LAYER = "counts"
 SPATIAL_KEY = "spatial"
 GENE_COL_CODEWORD = "gene_symbol"
-GENE_COL_GENE_TABLE = None
 
 # Canonical statistical settings shared by SV and DU; workflow summaries record
 # these values to prevent stale noncanonical caches from being reused silently.

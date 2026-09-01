@@ -6,7 +6,6 @@ import hashlib
 import json
 import logging
 import shutil
-import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -21,7 +20,7 @@ from sklearn.cluster import MiniBatchKMeans
 from scripts.paper_utils import (
     CLUSTERPROFILER_SCRIPT,
     cache_signature,
-    clusterprofiler_command,
+    run_clusterprofiler,
 )
 
 from . import config as C
@@ -67,8 +66,6 @@ def cached_go_enrichment(  # noqa: C901
     wrapper = CLUSTERPROFILER_SCRIPT
     if not wrapper.exists():
         raise FileNotFoundError(f"Missing clusterProfiler wrapper: {wrapper}")
-    rscript_command = clusterprofiler_command()
-
     normalized = {}
     for name, (genes, universe, orgdb) in queries.items():
         query_genes = sorted(set(map(str, genes)))
@@ -101,8 +98,11 @@ def cached_go_enrichment(  # noqa: C901
     manifest_path = result_dir / f"{cache_name}_manifest.json"
     if cache_path.exists() != manifest_path.exists():
         raise RuntimeError(f"Incomplete GO cache: expected both {cache_path} and {manifest_path}.")
-    if cache_path.exists() and json.loads(manifest_path.read_text()) == cache_config:
-        return pd.read_csv(cache_path)
+    if cache_path.exists():
+        cached_config = json.loads(manifest_path.read_text())
+        cached_config.pop("clusterprofiler_provenance", None)
+        if cached_config == cache_config:
+            return pd.read_csv(cache_path)
 
     with tempfile.TemporaryDirectory(prefix=f"embryo_{cache_name}_") as temporary:
         root = Path(temporary)
@@ -132,13 +132,10 @@ def cached_go_enrichment(  # noqa: C901
             )
         jobs_path = root / "jobs.csv"
         pd.DataFrame(jobs).to_csv(jobs_path, index=False)
-        subprocess.run(
-            rscript_command + [str(wrapper), str(jobs_path)],
+        provenance = run_clusterprofiler(
+            jobs_path,
             cwd=C.PROJECT_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=C.GO_TIMEOUT_SECONDS,
+            timeout_seconds=C.GO_TIMEOUT_SECONDS,
         )
         frames = []
         for name, output in outputs.items():
@@ -151,7 +148,9 @@ def cached_go_enrichment(  # noqa: C901
         raise RuntimeError(f"clusterProfiler returned no terms for {panel}.")
     enrichment = pd.concat(frames, ignore_index=True)
     enrichment.to_csv(cache_path, index=False)
-    manifest_path.write_text(json.dumps(cache_config, indent=2) + "\n")
+    manifest_path.write_text(
+        json.dumps({**cache_config, "clusterprofiler_provenance": provenance}, indent=2) + "\n"
+    )
     return enrichment
 
 

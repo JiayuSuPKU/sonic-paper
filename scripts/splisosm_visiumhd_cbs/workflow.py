@@ -46,7 +46,6 @@ from scripts.splisosm_visiumhd_cbs.utils import (
     log,
     neighbor_degrees_by_res,
     save_csv,
-    save_json,
 )
 
 # Cache-defining knobs are documented here and written to workflow_manifest.json.
@@ -98,9 +97,6 @@ def run_workflow(*, force: bool = False, n_jobs: int = 8) -> dict[str, Any]:
     du_tf_shared = du_shared_associations(du_tf_results, sv_results, covariate_set="tf_chip")
     save_csv(du_rbp_shared, RESULT_DIR / "du_rbp_shared_associations.csv")
     save_csv(du_tf_shared, RESULT_DIR / "du_tf_chip_shared_associations.csv")
-    if not du_metrics.empty:
-        save_csv(du_metrics, RESULT_DIR / "du_runtime_memory_metrics.csv")
-
     metric_parts = [df for df in [sv_metrics, du_metrics] if df is not None and not df.empty]
     metrics = (
         pd.concat(metric_parts, ignore_index=True, sort=False) if metric_parts else pd.DataFrame()
@@ -136,7 +132,6 @@ def run_workflow(*, force: bool = False, n_jobs: int = 8) -> dict[str, Any]:
             "cache_manifest": str((RESULT_DIR / "cache_manifest.json").relative_to(PROJECT_ROOT)),
         },
     }
-    save_json(summary, RESULT_DIR / "summary.json")
     manifest_path = write_workflow_manifest(
         "splisosm_visiumhd_cbs",
         RESULT_DIR,

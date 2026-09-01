@@ -20,13 +20,9 @@ from scripts.paper_utils import (
     max_rss_gb,
     normalize_gene_symbol,
     project_relative,
+    save_csv,
+    save_json,
     time_call,
-)
-from scripts.paper_utils import (
-    save_csv as _save_csv,
-)
-from scripts.paper_utils import (
-    save_json as _save_json,
 )
 
 from .config import (
@@ -45,7 +41,7 @@ from .config import (
     TCGA_DATA_DIR,
 )
 
-__all__ = ["log", "max_rss_gb", "normalize_gene_symbol", "time_call"]
+__all__ = ["log", "max_rss_gb", "normalize_gene_symbol", "save_csv", "save_json", "time_call"]
 
 
 def ensure_dirs() -> None:
@@ -61,14 +57,6 @@ def ensure_dirs() -> None:
 
 def project_path(path: Path) -> str:
     return project_relative(path, PROJECT_ROOT)
-
-
-def save_csv(df: pd.DataFrame, path: Path, *, index: bool = False) -> None:
-    _save_csv(df, path, project_root=PROJECT_ROOT, index=index)
-
-
-def save_json(data: dict[str, Any], path: Path) -> None:
-    _save_json(data, path, project_root=PROJECT_ROOT)
 
 
 def stable_hash_values(values: Iterable[object]) -> str:

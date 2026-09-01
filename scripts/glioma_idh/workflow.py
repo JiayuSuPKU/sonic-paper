@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 import tempfile
 import time
@@ -23,8 +22,8 @@ from scripts.paper_utils import (
     CLUSTERPROFILER_SCRIPT,
     cache_entry_is_current,
     cache_signature,
-    clusterprofiler_command,
     path_fingerprint,
+    run_clusterprofiler,
     update_cache_entry,
     write_workflow_manifest,
 )
@@ -408,39 +407,6 @@ def _spatial_diagnostics_cache_ready() -> bool:
     }.issubset(observed)
 
 
-def _run_clusterprofiler(job_rows: list[dict[str, Any]]) -> None:
-    """Write one temporary job table and run the shared clusterProfiler wrapper."""
-    if not job_rows:
-        return
-    if not CLUSTERPROFILER_SCRIPT.exists():
-        raise FileNotFoundError(f"Missing {CLUSTERPROFILER_SCRIPT}")
-    job_path = Path(job_rows[0]["job_path"])
-    pd.DataFrame(job_rows).drop(columns=["job_path"]).to_csv(job_path, index=False)
-    cmd = clusterprofiler_command() + [str(CLUSTERPROFILER_SCRIPT), str(job_path)]
-    try:
-        proc = subprocess.run(
-            cmd,
-            cwd=PROJECT_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=CLUSTERPROFILER_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(
-            "clusterProfiler enrichment timed out after "
-            f"{CLUSTERPROFILER_TIMEOUT_SECONDS}s for {len({row['job_id'] for row in job_rows})} jobs"
-        ) from exc
-    except subprocess.CalledProcessError as exc:
-        raise RuntimeError(
-            f"clusterProfiler enrichment failed\nstdout:\n{exc.stdout}\n\nstderr:\n{exc.stderr}"
-        ) from exc
-    if proc.stdout.strip():
-        log(proc.stdout.strip())
-    if proc.stderr.strip():
-        log(proc.stderr.strip())
-
-
 def _ranked_gene_sets(real_tests: pd.DataFrame, *, top_n: int = 100) -> dict[str, list[str]]:
     """Return equal-sized DE and DF-norm gene sets ordered by raw p-value."""
     ranked: dict[str, list[str]] = {}
@@ -521,6 +487,7 @@ def run_enrichment_cache(
     # Use the tested gene panel as the enrichment universe.
     background = real_tests["Feature"].astype(str).drop_duplicates().tolist()
 
+    provenance = None
     with tempfile.TemporaryDirectory(prefix="glioma_clusterprofiler_") as tmpdir:
         tmp = Path(tmpdir)
         job_path = tmp / "jobs.csv"
@@ -538,7 +505,6 @@ def run_enrichment_cache(
             out_paths[gene_set] = out_path
             job_rows.extend(
                 {
-                    "job_path": str(job_path),
                     "job_id": f"glioma_idh:{gene_set}:top{top_n}",
                     "panel": "glioma_idh",
                     "test": gene_set,
@@ -555,7 +521,12 @@ def run_enrichment_cache(
 
         if job_rows:
             log(f"clusterProfiler enrichment jobs={len({row['job_id'] for row in job_rows})}")
-            _run_clusterprofiler(job_rows)
+            pd.DataFrame(job_rows).to_csv(job_path, index=False)
+            provenance = run_clusterprofiler(
+                job_path,
+                cwd=PROJECT_ROOT,
+                timeout_seconds=CLUSTERPROFILER_TIMEOUT_SECONDS,
+            )
         parts = _read_enrichment_outputs(out_paths, gene_sets)
 
     terms = pd.concat(parts, ignore_index=True, sort=False) if parts else pd.DataFrame()
@@ -575,6 +546,7 @@ def run_enrichment_cache(
         cache_signature(signature_data),
         (ENRICHMENT_TERMS_FILE,),
         signature_data=signature_data,
+        provenance={"clusterprofiler": provenance} if provenance is not None else None,
     )
     return {"enrichment": project_relative(ENRICHMENT_TERMS_FILE)}
 

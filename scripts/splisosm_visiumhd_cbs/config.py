@@ -11,7 +11,7 @@ REFERENCE_ROOT = HOME / "reference" / "mm39"
 
 RESULT_DIR = PROJECT_ROOT / "results" / "splisosm_visiumhd_cbs"
 FIGURE_DIR = PROJECT_ROOT / "figures" / "splisosm_visiumhd_cbs"
-SV_METRICS_PATH = RESULT_DIR / "sv_runtime_memory_metrics.csv"
+METRICS_PATH = RESULT_DIR / "runtime_memory_metrics.csv"
 
 GTF_FILE = REFERENCE_ROOT / "gencode.vM33.annotation.gtf.gz"
 

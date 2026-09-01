@@ -33,6 +33,7 @@ from .config import (
     DU_TARGET_GENE_SUBSET,
     DU_TF_SUBSET,
     FDR_THRESHOLD,
+    METRICS_PATH,
     RBP_GENES,
     RESULT_DIR,
     DatasetConfig,
@@ -300,7 +301,7 @@ def run_du_suite(
     derived later by filtering the `is_rbp` and `is_tf_chip` flags.
     """
     covariate_set = "regulator"
-    metric_path = RESULT_DIR / "du_runtime_memory_metrics.csv"
+    metric_path = METRICS_PATH
     degrees = neighbor_degrees_by_res()
     results: dict[str, pd.DataFrame] = {}
     metric_rows: list[dict[str, Any]] = []
@@ -461,11 +462,13 @@ def run_du_suite(
     metrics = pd.DataFrame(metric_rows)
     if metrics.empty and metric_path.exists():
         # Full cache hit: reuse the last real timing/memory benchmark.
-        metrics = pd.read_csv(metric_path)
+        cached = pd.read_csv(metric_path)
+        metrics = cached[cached["phase"].isin(("du_setup", "du_test"))].copy()
     elif not metrics.empty and not force and metric_path.exists():
         # Partial recompute: replace only rows measured in this run.
         key_cols = ["covariate_set", "dataset_key", "resolution", "phase"]
         existing = pd.read_csv(metric_path)
+        existing = existing[existing["phase"].isin(("du_setup", "du_test"))].copy()
         replace_keys = metrics[key_cols].drop_duplicates().assign(_replace=True)
         kept = existing.merge(replace_keys, on=key_cols, how="left")
         kept = kept[kept["_replace"].isna()].drop(columns="_replace")

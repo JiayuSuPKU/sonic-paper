@@ -7,6 +7,7 @@ import json
 import os
 import resource
 import shutil
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -80,6 +81,19 @@ def ensure_directories(*paths: Path) -> None:
     """Create output directories and their parents."""
     for path in paths:
         path.mkdir(parents=True, exist_ok=True)
+
+
+def require_files(
+    paths: Sequence[str | Path], *, label: str = "required files"
+) -> tuple[Path, ...]:
+    """Return required nonempty files or fail with every invalid path."""
+    required = tuple(Path(path).expanduser() for path in paths)
+    invalid = [path for path in required if not path.is_file() or path.stat().st_size == 0]
+    if invalid:
+        raise FileNotFoundError(
+            f"Missing or empty {label}:\n" + "\n".join(str(path) for path in invalid)
+        )
+    return required
 
 
 def project_relative(path: Path, project_root: Path = PROJECT_ROOT) -> str:
@@ -254,9 +268,10 @@ def update_cache_entry(
     outputs: Sequence[str | Path],
     *,
     signature_data: Mapping[str, Any],
+    provenance: Mapping[str, Any] | None = None,
     project_root: Path = PROJECT_ROOT,
 ) -> Path:
-    """Atomically update a cache section and its canonical signature data."""
+    """Atomically update a cache section, signature data, and audit provenance."""
     path = result_dir / CACHE_MANIFEST_FILENAME
     manifest = _load_cache_manifest(path)
     entry: dict[str, Any] = {
@@ -266,6 +281,8 @@ def update_cache_entry(
     if cache_signature(signature_data) != signature:
         raise ValueError("signature does not match signature_data")
     entry["signature_data"] = dict(signature_data)
+    if provenance is not None:
+        entry["provenance"] = dict(provenance)
     manifest["entries"][section] = entry
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".json.tmp")
@@ -450,3 +467,63 @@ def clusterprofiler_command(default_conda_env: str = "sonic_paper") -> list[str]
     if rscript := shutil.which("Rscript"):
         return [rscript]
     raise FileNotFoundError("Could not find Rscript in the active environment or PATH.")
+
+
+def clusterprofiler_provenance(default_conda_env: str = "sonic_paper") -> dict[str, Any]:
+    """Return the resolved R environment and core enrichment package versions."""
+    command = clusterprofiler_command(default_conda_env)
+    probe = (
+        "values <- c(r_version=R.version.string, "
+        'clusterprofiler_version=as.character(packageVersion("clusterProfiler")), '
+        'annotationdbi_version=as.character(packageVersion("AnnotationDbi")), '
+        'library_paths=paste(.libPaths(), collapse="|")); '
+        'cat(paste(names(values), values, sep="\\t"), sep="\\n")'
+    )
+    proc = subprocess.run(
+        [*command, "-e", probe],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    versions = dict(line.split("\t", 1) for line in proc.stdout.splitlines() if "\t" in line)
+    return {
+        "rscript_command": command,
+        "wrapper_sha256": hashlib.sha256(CLUSTERPROFILER_SCRIPT.read_bytes()).hexdigest(),
+        **versions,
+    }
+
+
+def run_clusterprofiler(
+    jobs_path: Path,
+    *,
+    cwd: Path = PROJECT_ROOT,
+    timeout_seconds: int = 900,
+    default_conda_env: str = "sonic_paper",
+) -> dict[str, Any]:
+    """Run the shared clusterProfiler job wrapper and return its environment."""
+    if not CLUSTERPROFILER_SCRIPT.exists():
+        raise FileNotFoundError(f"Missing clusterProfiler wrapper: {CLUSTERPROFILER_SCRIPT}")
+    command = clusterprofiler_command(default_conda_env)
+    try:
+        proc = subprocess.run(
+            [*command, str(CLUSTERPROFILER_SCRIPT), str(jobs_path)],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"clusterProfiler enrichment timed out after {timeout_seconds}s for {jobs_path}"
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"clusterProfiler enrichment failed\nstdout:\n{exc.stdout}\n\nstderr:\n{exc.stderr}"
+        ) from exc
+    if proc.stdout.strip():
+        log(proc.stdout.strip())
+    if proc.stderr.strip():
+        log(proc.stderr.strip())
+    return clusterprofiler_provenance(default_conda_env)

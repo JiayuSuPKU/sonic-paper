@@ -36,7 +36,7 @@ from .plot_top20_svp_probe_transcript_panels import render_top20_figures
 from .probe_mapping import prepare_svp_probe_mapping_cache
 from .run_ankrd30a_analysis import run_ankrd30a_analysis
 from .sv import run_sv, svp_target_genes
-from .utils import ensure_dirs, project_path, save_json
+from .utils import ensure_dirs, project_path
 
 # Cache-defining knobs are documented here and written to workflow_manifest.json.
 CACHE_PARAMETERS = {"sv": SV_CACHE_PARAMETERS, "du": DU_CACHE_PARAMETERS}
@@ -98,8 +98,6 @@ def run_workflow(
         # Combined runtime table lets the workflow summary stay compact.
         metrics.to_csv(RESULT_DIR / "runtime_memory_metrics.csv", index=False)
 
-    # One JSON summary records the knobs and generated cache roots consumed by
-    # downstream notebooks/scripts.
     summary = {
         "analysis": "splisosm_atera_brca",
         "splisosm_version": version("splisosm"),
@@ -143,7 +141,6 @@ def run_workflow(
             ),
         },
     }
-    save_json(summary, RESULT_DIR / "summary.json")
     manifest_path = write_workflow_manifest(
         "splisosm_atera_brca",
         RESULT_DIR,

@@ -15,30 +15,23 @@ from scripts.paper_utils import (
     log,
     project_relative,
     resolve_cached_data_path,
-)
-from scripts.paper_utils import (
-    save_csv as _save_csv,
+    save_csv,
 )
 
 from .config import (
     DATA_ROOT,
     FIGURE_DIR,
     GROUP_LABELS,
-    PROJECT_ROOT,
     RESULT_DIR,
     SAMPLES,
 )
 
-__all__ = ["log", "project_relative"]
+__all__ = ["log", "project_relative", "save_csv"]
 
 
 def ensure_dirs() -> None:
     """Create workflow output directories."""
     ensure_directories(RESULT_DIR, FIGURE_DIR)
-
-
-def save_csv(df: pd.DataFrame, path: Path, index: bool = False) -> None:
-    _save_csv(df, path, project_root=PROJECT_ROOT, index=index)
 
 
 def resolve_data_root(data_root: Path | str | None) -> Path:

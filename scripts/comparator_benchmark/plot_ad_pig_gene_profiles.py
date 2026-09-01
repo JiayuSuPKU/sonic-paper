@@ -41,7 +41,7 @@ from .utils import (
     format_pvalue,
     l1_normalize_rows,
     load_panel,
-    parse_gene_list,
+    required_gene_list,
     unique,
 )
 
@@ -87,11 +87,11 @@ class AdPigProfilePlotter:
         self.comparator, self.paths_order = fit_all_samples(self.samples, self.genes, "radial")
         path_to_idx = {p: i for i, p in enumerate(self.paths_order)}
         self.wt_idx = np.asarray(
-            [path_to_idx[p] for p in self.real_set.a_paths if p in path_to_idx],
+            [path_to_idx[p] for p in self.real_set.a_paths],
             dtype=int,
         )
         self.ad_idx = np.asarray(
-            [path_to_idx[p] for p in self.real_set.b_paths if p in path_to_idx],
+            [path_to_idx[p] for p in self.real_set.b_paths],
             dtype=int,
         )
         self.wt_path = self.real_set.a_paths[0]
@@ -321,14 +321,6 @@ def generate_pdf(
             plt.close(fig)
 
 
-def build_gene_list(args: argparse.Namespace) -> list[str]:
-    """Parse and de-duplicate CLI gene arguments."""
-    genes = unique(parse_gene_list(args.genes))
-    if not genes:
-        raise ValueError("No genes selected. Pass --genes.")
-    return genes
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse standalone plotter CLI arguments."""
     parser = argparse.ArgumentParser(
@@ -362,7 +354,7 @@ def main(argv: list[str] | None = None) -> None:
         raise ValueError("--rows-per-page must be >= 1")
     if args.rows_per_page > 6:
         raise ValueError("--rows-per-page must be <= 6")
-    genes = build_gene_list(args)
+    genes = required_gene_list(args.genes)
     generate_pdf(
         genes,
         output=args.output,

@@ -79,15 +79,10 @@ def spatial_feature_image(
     sdata_cache: dict[str, Any],
     dataset_key: str,
     feature: str,
-) -> tuple[np.ndarray | None, str]:
+) -> tuple[np.ndarray, str]:
     """Load one rasterized feature as an oriented log1p count image."""
-    if dataset_key not in sdata_cache:
-        return None, "Spatial cache not loaded"
-    try:
-        cache = sdata_cache[dataset_key]
-        data = cache["sdata"][cache["raster_key"]].sel(c=[feature]).values
-    except Exception:
-        return None, f"Missing: {short_spatial_feature_label(feature)}"
+    cache = sdata_cache[dataset_key]
+    data = cache["sdata"][cache["raster_key"]].sel(c=[feature]).values
 
     image = np.asarray(data, dtype=float).squeeze()
     image = np.where(image > 0, np.log1p(image), np.nan)
@@ -100,17 +95,17 @@ def spatial_gene_expression_image(
     gene: str,
     *,
     max_features: int | None = None,
-) -> tuple[np.ndarray | None, str]:
+) -> tuple[np.ndarray, str]:
     """Load total gene-level raster signal as an oriented log1p count image."""
-    if not gene or dataset_key not in sdata_cache:
-        return None, "Spatial cache not loaded"
+    if not gene:
+        raise ValueError("A gene is required for a spatial expression image.")
 
     cache = sdata_cache[dataset_key]
     features = feature_names_for_gene(
         cache["adata"], cache["table_cfg"], gene, max_features=max_features
     )
     if not features:
-        return None, f"{gene} not found"
+        raise KeyError(f"{gene!r} was not found in the {dataset_key!r} spatial table.")
 
     data = cache["sdata"][cache["raster_key"]].sel(c=features).values
     cube = np.moveaxis(np.asarray(data, dtype=float), 0, -1)
@@ -119,10 +114,8 @@ def spatial_gene_expression_image(
     return orient_spatial_image(image, dataset_key), f"{gene} expression"
 
 
-def enhance_sparse_spatial_image(image: np.ndarray | None, *, dilate: bool = False):
+def enhance_sparse_spatial_image(image: np.ndarray, *, dilate: bool = False):
     """Optionally thicken sparse nonzero pixels without changing map resolution."""
-    if image is None:
-        return None
     arr = np.asarray(image, dtype=float)
     if not dilate:
         return arr
@@ -139,10 +132,8 @@ def enhance_sparse_spatial_image(image: np.ndarray | None, *, dilate: bool = Fal
     return np.where(mask, expanded, np.nan)
 
 
-def crop_spatial_image_to_signal(image: np.ndarray | None, *, margin: int = 8):
+def crop_spatial_image_to_signal(image: np.ndarray, *, margin: int = 8):
     """Crop empty borders around finite spatial signal."""
-    if image is None:
-        return None
     arr = np.asarray(image, dtype=float)
     mask = np.isfinite(arr)
     if not mask.any():
@@ -156,7 +147,7 @@ def crop_spatial_image_to_signal(image: np.ndarray | None, *, margin: int = 8):
 
 
 def prepare_spatial_map_image(
-    image: np.ndarray | None,
+    image: np.ndarray,
     *,
     dilate: bool = False,
     margin: int = 8,
@@ -167,14 +158,12 @@ def prepare_spatial_map_image(
 
 
 def pad_spatial_image_to_shape(
-    image: np.ndarray | None,
+    image: np.ndarray,
     shape: tuple[int, int],
     *,
     x_align: str = "center",
 ):
     """Center-pad a spatial image with NaNs for equal-sized imshow panels."""
-    if image is None:
-        return None
     arr = np.asarray(image, dtype=float)
     out = np.full(shape, np.nan, dtype=float)
     top = max(0, (shape[0] - arr.shape[0]) // 2)
@@ -366,7 +355,6 @@ def plot_feature_structure(
     )
 
     if not rows:
-        print(f"No structure rows found for {gene_name}")
-        return None
+        raise ValueError(f"No structure rows found for {gene_name!r}.")
 
     return _draw_feature_structure(gene_name, rows)

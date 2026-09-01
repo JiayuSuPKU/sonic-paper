@@ -78,7 +78,7 @@ The workflow writes:
 - `idh_status_spatial_diagnostics.csv` - per-gene/sample raw 2D anisotropy plus per-sample expression and radial-power effective ranks.
 - `idh_status_clusterprofiler_enrichment.csv` - merged GO BP and KEGG clusterProfiler results for the top 100 DE and DF-norm genes.
 - `idh_status_df_norm_top100_metaprogram_map.csv` - deterministic pathway-based assignments of the top 100 DF-norm genes to the configured meta-programs.
-- `cache_manifest.json` - input signatures and output fingerprints that prevent reuse of incompatible comparison or enrichment caches.
+- `cache_manifest.json` - input signatures and output fingerprints that prevent reuse of incompatible comparison or enrichment caches; the enrichment entry also records the resolved R command, library paths, wrapper checksum, and core package versions.
 
 ## Rendering Figures:
 

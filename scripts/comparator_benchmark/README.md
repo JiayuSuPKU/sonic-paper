@@ -218,6 +218,8 @@ For both analyses, we also cache the full enrichment responses under
 - GO BP terms also include `semantic_simplified`, marking terms retained by
   `clusterProfiler::simplify(cutoff=0.7, measure="Wang")`; all original GO terms
   remain in the cache.
+- The owning `cache_manifest.json` entry records the resolved R command, library
+  paths, wrapper checksum, and core package versions from the most recent enrichment run.
 
 No broader benchmark sweep table is written because it is not needed for the
 current figure outputs.

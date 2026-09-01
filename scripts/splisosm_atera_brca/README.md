@@ -137,7 +137,8 @@ Main cached files:
 - `segmented_splisosmnp_svp_hsic_ir.csv`
 - `du_regulator_segmented_svp_hsic_gp_nufft.csv`
 - `du_regulator_status.csv`
-- `summary.json`
+- `workflow_manifest.json`
+- `cache_manifest.json`
 - `svp_probe_transcript_cache/svp_probe_mappings.csv`
 - `svp_probe_transcript_cache/svp_gencode_transcript_probe_compatibility.csv`
 - `svp_probe_transcript_cache/svp_pacbio_transcript_probe_compatibility.csv`

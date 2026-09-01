@@ -24,26 +24,25 @@ from scripts.paper_utils import (
     format_pvalue,
     log,
     parse_gene_list,
-    resolve_cached_data_path,
-)
-from scripts.paper_utils import (
-    save_csv as _save_csv,
+    require_files,
+    save_csv,
 )
 
 from .config import (
     AD_PIG_DROP_PROBES,
     AD_PIG_RENAME_PROBES,
+    AD_PIG_SAMPLES,
+    BRAIN_DEV_GSM_TITLES,
     BRAIN_DEV_NULL_PERMUTATIONS,
     FIGURE_DIR,
     MAX_GENES,
     N_RADIAL_BINS,
     PANELS,
     PRESENCE_THRESHOLD,
-    PROJECT_ROOT,
     RESULT_DIR,
 )
 
-__all__ = ["format_pvalue", "log", "parse_gene_list"]
+__all__ = ["format_pvalue", "log", "parse_gene_list", "required_gene_list", "save_csv"]
 
 logger = logging.getLogger("comparator_benchmark.utils")
 
@@ -64,8 +63,54 @@ def ensure_dirs() -> None:
     ensure_directories(RESULT_DIR, FIGURE_DIR)
 
 
-def save_csv(df: pd.DataFrame, path: Path, index: bool = False) -> None:
-    _save_csv(df, path, project_root=PROJECT_ROOT, index=index)
+def resolve_metadata_path(value: str | Path, metadata_path: Path) -> Path:
+    """Resolve a sample path exactly, relative only to its metadata file."""
+    path = Path(value).expanduser()
+    return (path if path.is_absolute() else metadata_path.parent / path).resolve()
+
+
+def validate_panel_metadata(panel: str, meta: pd.DataFrame, metadata_path: Path) -> None:
+    """Require metadata to match every sample declared in the panel config."""
+    if panel == "ad_pig":
+        columns = ["sample", "genotype", "age_months"]
+        expected = pd.DataFrame(AD_PIG_SAMPLES, columns=columns)
+        id_column = "sample"
+    elif panel == "brain_dev":
+        columns = ["gsm_id", "sample_title", "timepoint", "plane", "replicate"]
+        expected = pd.DataFrame(
+            [
+                (
+                    gsm_id,
+                    title,
+                    title.split("_")[0],
+                    title.split("_")[1],
+                    int(title.rsplit("REP", 1)[1]),
+                )
+                for gsm_id, title in BRAIN_DEV_GSM_TITLES.items()
+            ],
+            columns=columns,
+        )
+        id_column = "gsm_id"
+    else:
+        raise ValueError(f"Unknown panel: {panel!r}")
+
+    missing_columns = [column for column in [*columns, "h5ad_path"] if column not in meta]
+    if missing_columns:
+        raise ValueError(f"{metadata_path} is missing required columns: {missing_columns}")
+    invalid_paths = meta["h5ad_path"].isna() | meta["h5ad_path"].astype(str).str.strip().eq("")
+    if invalid_paths.any():
+        raise ValueError(f"{metadata_path} has samples without an H5AD path")
+    if meta[id_column].duplicated().any():
+        duplicates = meta.loc[meta[id_column].duplicated(keep=False), id_column].tolist()
+        raise ValueError(f"Duplicate configured samples in {metadata_path}: {duplicates}")
+
+    differences = expected.merge(meta[columns], how="outer", indicator=True)
+    differences = differences[differences["_merge"].ne("both")]
+    if not differences.empty:
+        raise ValueError(
+            f"{metadata_path} does not match {panel!r} sample configuration: "
+            f"{differences.to_dict(orient='records')}"
+        )
 
 
 def cache_has_columns(path: Path, required: set[str]) -> bool:
@@ -82,6 +127,14 @@ def cache_has_columns(path: Path, required: set[str]) -> bool:
 def unique(items: Iterable[str]) -> list[str]:
     """Return unique items while preserving first-seen order."""
     return list(dict.fromkeys(items))
+
+
+def required_gene_list(values: Sequence[str] | None) -> list[str]:
+    """Parse required CLI gene values and preserve first-seen order."""
+    genes = parse_gene_list(values)
+    if not genes:
+        raise ValueError("No genes selected. Pass --genes.")
+    return genes
 
 
 def l1_normalize_rows(values: np.ndarray, eps: float = 1e-12) -> np.ndarray:
@@ -474,13 +527,36 @@ def _apply_ad_pig_probe_qc(adata: ad.AnnData) -> ad.AnnData:
     return out
 
 
+def _read_panel_sample(panel: str, path: Path) -> ad.AnnData:
+    """Read one configured sample and validate its analysis-critical contents."""
+    try:
+        adata = ad.read_h5ad(path)
+    except Exception as exc:
+        raise RuntimeError(f"Could not read configured {panel!r} sample: {path}") from exc
+    if adata.n_obs == 0:
+        raise ValueError(f"Configured {panel!r} sample has no spots: {path}")
+
+    if panel == "ad_pig":
+        adata = _apply_ad_pig_probe_qc(adata)
+    else:
+        adata.var_names_make_unique()
+    if adata.n_vars == 0:
+        raise ValueError(f"Configured {panel!r} sample has no usable features: {path}")
+    if "spatial" not in adata.obsm:
+        raise KeyError(f"Configured {panel!r} sample has no 'spatial' coordinates: {path}")
+    spatial = np.asarray(adata.obsm["spatial"])
+    if spatial.ndim != 2 or spatial.shape[1] < 2 or not np.isfinite(spatial[:, :2]).all():
+        raise ValueError(f"Configured {panel!r} sample has invalid spatial coordinates: {path}")
+    return adata
+
+
 def load_panel(
     panel: str,
 ) -> tuple[dict[Path, ad.AnnData], pd.DataFrame, list[SampleSet]]:
     """Load AnnData for every sample referenced by any sample-set in ``panel``.
 
-    Reads the metadata table from ``PANELS[panel].metadata_csv``. Skips
-    samples whose .h5ad is missing or empty.
+    Relative paths are resolved only against the metadata directory. Every
+    configured comparison sample must be present, nonempty, and spatially valid.
     """
     if panel not in PANELS:
         raise ValueError(f"Unknown panel {panel!r}; choices: {sorted(PANELS)}")
@@ -488,28 +564,15 @@ def load_panel(
     if not meta_path.exists():
         raise FileNotFoundError(f"No metadata.csv at {meta_path}")
     meta = pd.read_csv(meta_path)
-    meta["h5ad_path"] = [
-        str(resolve_cached_data_path(path, meta_path.parent)) for path in meta["h5ad_path"]
-    ]
+    validate_panel_metadata(panel, meta, meta_path)
+    meta["h5ad_path"] = [str(resolve_metadata_path(path, meta_path)) for path in meta["h5ad_path"]]
+    if duplicates := meta.loc[meta["h5ad_path"].duplicated(), "h5ad_path"].tolist():
+        raise ValueError(f"Duplicate sample paths in {meta_path}: {duplicates}")
+    require_files(meta["h5ad_path"], label=f"configured {panel!r} sample files")
 
     sets = build_sample_sets(panel, meta)
     needed_paths = sorted({p for s in sets for p in (*s.a_paths, *s.b_paths)})
-    samples: dict[Path, ad.AnnData] = {}
-    for p in needed_paths:
-        if not p.exists():
-            logger.warning("missing %s; skipping", p)
-            continue
-        a = ad.read_h5ad(p)
-        if a.n_obs == 0:
-            logger.warning("%s has 0 spots; skipping", p)
-            continue
-        if panel == "ad_pig":
-            a = _apply_ad_pig_probe_qc(a)
-        else:
-            a.var_names_make_unique()
-        samples[p] = a
-    if not samples:
-        raise FileNotFoundError(f"No non-empty .h5ad samples found for {panel!r}")
+    samples = {path: _read_panel_sample(panel, path) for path in needed_paths}
     return samples, meta, sets
 
 

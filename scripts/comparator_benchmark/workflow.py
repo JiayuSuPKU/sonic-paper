@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import time
@@ -30,14 +29,12 @@ if __package__ in {None, ""}:
 from sonic.statistics import apply_bh_correction
 
 from scripts.paper_utils import (
-    CLUSTERPROFILER_SCRIPT,
     cache_entry_is_current,
     cache_signature,
-    clusterprofiler_command,
     installed_version,
     path_fingerprint,
     project_relative,
-    resolve_cached_data_path,
+    run_clusterprofiler,
     update_cache_entry,
     write_workflow_manifest,
 )
@@ -110,6 +107,7 @@ from .utils import (
     load_panel,
     log,
     log1p_normalized_samples,
+    resolve_metadata_path,
     save_csv,
     select_gene_panel,
 )
@@ -179,7 +177,7 @@ def _panel_cache_signature_data(
             pass
         else:
             inputs.extend(
-                resolve_cached_data_path(path, panel_config.metadata_csv.parent)
+                resolve_metadata_path(path, panel_config.metadata_csv)
                 for path in metadata["h5ad_path"].dropna().astype(str)
             )
     return {
@@ -218,13 +216,14 @@ def _run_guarded_panel(
     owned_outputs = [
         output for output in result["outputs"].values() if isinstance(output, (str, Path))
     ]
-    if refresh:
+    if refresh or result.get("provenance") is not None:
         update_cache_entry(
             RESULT_DIR,
             panel,
             signature,
             owned_outputs,
             signature_data=signature_data,
+            provenance=result.get("provenance"),
         )
     return result
 
@@ -451,26 +450,32 @@ def _select_comparison_genes(
     return list(dict.fromkeys(genes + controls))
 
 
-def _subset_design(sample_set: Any, paths_order: list[Path]) -> dict[str, Any] | None:
+def _subset_design(sample_set: Any, paths_order: list[Path]) -> dict[str, Any]:
     # Convert stored sample-set metadata into the compact design object expected
     # by the comparator API. Binary and continuous contrasts share this shape.
     path_to_idx = {path: i for i, path in enumerate(paths_order)}
+    configured_paths = [*sample_set.a_paths, *sample_set.b_paths]
+    missing = [path for path in configured_paths if path not in path_to_idx]
+    if missing:
+        raise KeyError(f"Configured samples are absent from the fitted comparator: {missing}")
+
     if sample_set.design_values is not None:
-        idx_list = [path_to_idx[p] for p in sample_set.a_paths if p in path_to_idx]
+        idx_list = [path_to_idx[path] for path in sample_set.a_paths]
         if not idx_list:
-            return None
-        keep = [i for i, p in enumerate(sample_set.a_paths) if p in path_to_idx]
+            raise ValueError("Configured continuous comparison has no samples")
+        if len(sample_set.design_values) != len(idx_list):
+            raise ValueError("Configured design values do not align with its samples")
         return {
             "is_design": True,
             "idx": np.asarray(idx_list, dtype=int),
-            "design_values": sample_set.design_values[keep],
+            "design_values": sample_set.design_values,
             "design_name": sample_set.design_name,
         }
 
-    a_idx = [path_to_idx[p] for p in sample_set.a_paths if p in path_to_idx]
-    b_idx = [path_to_idx[p] for p in sample_set.b_paths if p in path_to_idx]
+    a_idx = [path_to_idx[path] for path in sample_set.a_paths]
+    b_idx = [path_to_idx[path] for path in sample_set.b_paths]
     if not a_idx or not b_idx:
-        return None
+        raise ValueError("Configured binary comparison has an empty sample group")
     return {
         "is_design": False,
         "idx": np.asarray(a_idx + b_idx, dtype=int),
@@ -697,8 +702,6 @@ def run_ad_pig_full_scenarios(  # noqa: C901
                 # The observed cache keeps full per-gene rows because it feeds
                 # ranking, enrichment, and scatter-plot panels.
                 real_subset = _subset_design(real_set, paths_order)
-                if real_subset is None:
-                    raise RuntimeError(f"Missing real subset for {meta['scenario_id']}")
                 observed_parts.append(
                     _observed_test_rows(
                         comparator=comparator,
@@ -712,8 +715,6 @@ def run_ad_pig_full_scenarios(  # noqa: C901
                 # ECDF curves; DE permutation is not needed for those panels.
                 for perm_idx, perm_set in enumerate(perm_sets):
                     subset = _subset_design(perm_set, paths_order)
-                    if subset is None:
-                        continue
                     null_parts.append(
                         _null_ecdf_rows(
                             comparator=comparator,
@@ -739,7 +740,7 @@ def _effective_rank_summary(
     normalize_shape: bool,
 ) -> dict[str, Any]:
     subset = _subset_design(real_set, paths_order)
-    if subset is None or subset["is_design"]:
+    if subset["is_design"]:
         raise ValueError("AD/PIG effective-rank summary requires a binary real contrast")
     real_cmp = comparator.subset(subset["idx"])
     n_bins = int(real_cmp.spectra_.shape[-1])
@@ -843,7 +844,7 @@ def run_ad_pig_radial_bin_robustness(  # noqa: C901
                 log(f"  adapted requested {n_bins} bins to actual {actual_n_bins}")
             fitted[(n_bins, binning)] = (comparator, paths_order, actual_n_bins)
             real_subset = _subset_design(real_set, paths_order)
-            if real_subset is None or real_subset["is_design"]:
+            if real_subset["is_design"]:
                 raise ValueError("AD/PIG radial-bin robustness requires a binary real contrast")
             # Run DF and DF-norm tests
             for test, normalize_shape in SPATIAL_TESTS:
@@ -884,8 +885,8 @@ def run_ad_pig_radial_bin_robustness(  # noqa: C901
             null_parts: list[np.ndarray] = []
             for perm_set in perm_sets:
                 subset = _subset_design(perm_set, paths_order)
-                if subset is None or subset["is_design"]:
-                    continue
+                if subset["is_design"]:
+                    raise ValueError("AD/PIG permutation requires a binary comparison")
                 perm = _spatial_test(comparator, subset, normalize_shape=normalize_shape)
                 null_parts.append(perm["P_value"].to_numpy(float))
             null_p = np.concatenate(null_parts) if null_parts else np.array([], dtype=float)
@@ -1234,38 +1235,6 @@ def _brain_dev_reference_tests_wide(full_tests: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def run_clusterprofiler_jobs(job_rows: list[dict[str, Any]]) -> None:
-    """Run clusterProfiler GO BP + KEGG enrichment for pending gene-set jobs."""
-    if not job_rows:
-        return
-    if not CLUSTERPROFILER_SCRIPT.exists():
-        raise FileNotFoundError(f"Missing {CLUSTERPROFILER_SCRIPT}")
-
-    with tempfile.TemporaryDirectory(prefix="clusterprofiler_jobs_") as tmp:
-        job_path = Path(tmp) / "jobs.csv"
-        pd.DataFrame(job_rows).to_csv(job_path, index=False)
-        cmd = clusterprofiler_command() + [str(CLUSTERPROFILER_SCRIPT), str(job_path)]
-        timeout = int(os.environ.get("CLUSTERPROFILER_TIMEOUT_SECONDS", "900"))
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=PROJECT_ROOT,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(
-                "clusterProfiler enrichment timed out after "
-                f"{timeout}s for {len({row['job_id'] for row in job_rows})} jobs"
-            ) from exc
-    if proc.stdout.strip():
-        log(proc.stdout.strip())
-    if proc.stderr.strip():
-        log(proc.stderr.strip())
-
-
 def _safe_term_key(row: pd.Series) -> str:
     source = str(row.get("source", ""))
     native = str(row.get("native", ""))
@@ -1422,7 +1391,7 @@ def _run_topn_enrichment_cache(
     top_n: int,
     contrast_file: str,
     force: bool = False,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Cache top-N DF/DF-norm clusterProfiler results for one panel."""
     cache_dir = RESULT_DIR / "enrichment_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -1480,24 +1449,35 @@ def _run_topn_enrichment_cache(
         )
 
     # Run clusterProfiler enrichment analysis in R using the wrapper function
+    provenance = None
     if job_rows:
         log(f"clusterProfiler enrichment jobs={len({row['job_id'] for row in job_rows})}")
-        run_clusterprofiler_jobs(job_rows)
+        with tempfile.TemporaryDirectory(prefix="clusterprofiler_jobs_") as tmp:
+            jobs_path = Path(tmp) / "jobs.csv"
+            pd.DataFrame(job_rows).to_csv(jobs_path, index=False)
+            provenance = run_clusterprofiler(
+                jobs_path,
+                cwd=PROJECT_ROOT,
+                timeout_seconds=int(os.environ.get("CLUSTERPROFILER_TIMEOUT_SECONDS", "900")),
+            )
 
     contrast_path = RESULT_DIR / contrast_file
     contrasts = _df_norm_enrichment_contrasts(panel, top_n)
     save_csv(contrasts, contrast_path)
-    return {
-        "enrichment_cache": str(cache_dir.relative_to(PROJECT_ROOT)),
-        f"{panel}_enrichment_contrasts": str(contrast_path.relative_to(PROJECT_ROOT)),
-    }
+    return (
+        {
+            "enrichment_cache": str(cache_dir.relative_to(PROJECT_ROOT)),
+            f"{panel}_enrichment_contrasts": str(contrast_path.relative_to(PROJECT_ROOT)),
+        },
+        provenance,
+    )
 
 
 def run_ad_pig_enrichment_cache(
     *,
     force: bool = False,
     top_n: int = AD_PIG_ENRICHMENT_TOP_N,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Cache reference-scenario top genes, enrichment tables, and DF-vs-DF-norm contrasts."""
     ensure_dirs()
 
@@ -1520,7 +1500,7 @@ def run_brain_dev_enrichment_cache(
     *,
     force: bool = False,
     top_n: int = BRAIN_DEV_ENRICHMENT_TOP_N,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Cache brain-dev top genes, enrichment tables, and DF-vs-DF-norm contrasts."""
     ensure_dirs()
 
@@ -1605,7 +1585,7 @@ def _run_brain_dev_full_scenarios(
 
             # Run Comparator test on the real design
             real_subset = _subset_design(real_set, paths_order)
-            if real_subset is None or not real_subset["is_design"]:
+            if not real_subset["is_design"]:
                 raise RuntimeError(
                     f"Missing brain-development real design for {meta['scenario_id']}"
                 )
@@ -1621,8 +1601,8 @@ def _run_brain_dev_full_scenarios(
             # Run Comparator tests on the permuted designs and build null ECDF rows.
             for perm_idx, perm_set in enumerate(perm_sets):
                 subset = _subset_design(perm_set, paths_order)
-                if subset is None or not subset["is_design"]:
-                    continue
+                if not subset["is_design"]:
+                    raise ValueError("Brain-development permutation requires a continuous design")
                 null_parts.append(
                     _null_ecdf_rows(
                         comparator=comparator,
@@ -1668,7 +1648,8 @@ def run_ad_pig_workflow(
     )
 
     log("AD/PIG step 3/3: reference enrichment, anisotropy, and replicate spectra")
-    outputs.update(run_ad_pig_enrichment_cache(force=force))
+    enrichment_outputs, provenance = run_ad_pig_enrichment_cache(force=force)
+    outputs.update(enrichment_outputs)
     outputs.update(
         run_ad_pig_anisotropy_cache(
             force=force,
@@ -1683,7 +1664,10 @@ def run_ad_pig_workflow(
             max_genes=max_genes,
         )
     )
-    return {"outputs": outputs}
+    result: dict[str, Any] = {"outputs": outputs}
+    if provenance is not None:
+        result["provenance"] = {"clusterprofiler": provenance}
+    return result
 
 
 def run_brain_dev_workflow(
@@ -1735,8 +1719,12 @@ def run_brain_dev_workflow(
             max_genes=max_genes,
         )
     )
-    outputs.update(run_brain_dev_enrichment_cache(force=force))
-    return {"outputs": outputs}
+    enrichment_outputs, provenance = run_brain_dev_enrichment_cache(force=force)
+    outputs.update(enrichment_outputs)
+    result: dict[str, Any] = {"outputs": outputs}
+    if provenance is not None:
+        result["provenance"] = {"clusterprofiler": provenance}
+    return result
 
 
 def run_workflow(

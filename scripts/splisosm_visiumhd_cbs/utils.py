@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -14,20 +13,14 @@ from scripts.paper_utils import (
     max_rss_gb,
     neglog10,
     normalize_gene_symbol,
+    save_csv,
     time_call,
-)
-from scripts.paper_utils import (
-    save_csv as _save_csv,
-)
-from scripts.paper_utils import (
-    save_json as _save_json,
 )
 
 from .config import (
     DATASETS,
     FIGURE_DIR,
     NEIGHBOR_DEGREE,
-    PROJECT_ROOT,
     RESOLUTION_TABLE,
     RESOLUTION_UM,
     RESULT_DIR,
@@ -35,21 +28,12 @@ from .config import (
     DatasetConfig,
 )
 
-__all__ = ["log", "max_rss_gb", "normalize_gene_symbol", "time_call"]
+__all__ = ["log", "max_rss_gb", "normalize_gene_symbol", "save_csv", "time_call"]
 
 
 def ensure_dirs() -> None:
     """Create the workflow output directories."""
     ensure_directories(RESULT_DIR, FIGURE_DIR)
-
-
-def save_csv(df: pd.DataFrame, path: Path, index: bool = False) -> None:
-    """Write a CSV and log a project-relative path when possible."""
-    _save_csv(df, path, project_root=PROJECT_ROOT, index=index)
-
-
-def save_json(data: dict[str, Any], path: Path) -> None:
-    _save_json(data, path, project_root=PROJECT_ROOT)
 
 
 def neighbor_degrees_by_res() -> dict[tuple[str, str], int]:

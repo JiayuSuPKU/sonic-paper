@@ -44,8 +44,8 @@ from .utils import (  # noqa: E402
     format_pvalue,
     l1_normalize_rows,
     load_panel,
-    parse_gene_list,
     radial_frequency_axis,
+    required_gene_list,
     unique,
 )
 
@@ -93,14 +93,18 @@ def representative_brain_dev_paths(
     timepoints: tuple[str, ...] = BRAIN_DEV_TIMEPOINT_ORDER,
 ) -> list[Path]:
     """Pick the lowest-replicate anterior sample for each requested timepoint."""
-    available = set(samples)
     sub = meta[meta["plane"].eq("ANTERIOR")].sort_values(["timepoint", "replicate"])
     out: list[Path] = []
     for timepoint in timepoints:
         match = sub[sub["timepoint"].eq(timepoint)]
-        paths = [Path(p) for p in match["h5ad_path"] if Path(p) in available]
+        paths = [Path(p) for p in match["h5ad_path"]]
         if not paths:
-            raise KeyError(f"No anterior brain-dev sample found for {timepoint}")
+            raise KeyError(f"No anterior brain-dev sample configured for {timepoint}")
+        missing = [path for path in paths if path not in samples]
+        if missing:
+            raise KeyError(
+                f"Configured anterior samples were not loaded for {timepoint}: {missing}"
+            )
         out.append(paths[0])
     return out
 
@@ -156,6 +160,9 @@ def brain_spectra_by_timepoint(
     grouped: dict[str, list[np.ndarray]] = {}
     for i, path in enumerate(paths_order):
         grouped.setdefault(timepoint_by_path[path], []).append(gene_spectra[i])
+    missing = [timepoint for timepoint in BRAIN_DEV_TIMEPOINT_ORDER if timepoint not in grouped]
+    if missing:
+        raise KeyError(f"Fitted brain-development samples omit configured timepoints: {missing}")
     return {timepoint: np.vstack(rows) for timepoint, rows in grouped.items()}
 
 
@@ -168,8 +175,6 @@ def plot_brain_raw_profiles(
 ) -> None:
     """Plot per-sample raw radial power curves plus timepoint means."""
     for timepoint in BRAIN_DEV_TIMEPOINT_ORDER:
-        if timepoint not in grouped:
-            continue
         arr = grouped[timepoint]
         color = BRAIN_DEV_TIME_COLORS[timepoint]
         for row in arr:
@@ -210,8 +215,6 @@ def brain_l1_log2fc_matrix(
     rows: list[np.ndarray] = []
     labels: list[str] = []
     for timepoint in BRAIN_DEV_TIMEPOINT_ORDER:
-        if timepoint not in grouped:
-            continue
         shape = l1_normalize_rows(grouped[timepoint], eps)
         all_shape.append(shape)
         rows.append(shape.mean(axis=0))
@@ -454,14 +457,6 @@ def generate_pdf(genes: list[str], *, output: Path, rows_per_page: int) -> None:
             plt.close(fig)
 
 
-def build_gene_list(args: argparse.Namespace) -> list[str]:
-    """Parse and de-duplicate CLI gene arguments."""
-    genes = unique(parse_gene_list(args.genes))
-    if not genes:
-        raise ValueError("No genes selected. Pass --genes.")
-    return genes
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse standalone plotter CLI arguments."""
     parser = argparse.ArgumentParser(
@@ -493,7 +488,7 @@ def main(argv: list[str] | None = None) -> None:
         raise ValueError("--rows-per-page must be >= 1")
     if args.rows_per_page > 4:
         raise ValueError("--rows-per-page must be <= 4")
-    genes = build_gene_list(args)
+    genes = required_gene_list(args.genes)
     generate_pdf(genes, output=args.output, rows_per_page=args.rows_per_page)
     print(args.output)
     print("genes:", ", ".join(genes))
