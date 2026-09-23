@@ -437,7 +437,7 @@ class GliomaGeneProfilePlotter:
         """Return compact DE/DF/DF-norm p-value text for one gene."""
         row = self.real_by_gene.loc[gene]
         return (
-            f"p-values: DE={format_pvalue(row['P_DE'])} | "
+            f"$P$: DE={format_pvalue(row['P_DE'])} | "
             f"DF={format_pvalue(row['P_DF'])} | "
             f"DF-norm={format_pvalue(row['P_DF_norm'])}"
         )
