@@ -4,6 +4,16 @@ __pycache__/
 .ipynb_checkpoints/
 .pytest_cache/
 .cache/
+.ruff_cache/
+
+# Local manuscript drafts, correspondence, and review packages
+/drafts/
+
+# Local credentials
+.env
+.env.*
+!.env.example
+gdc-token*.txt
 
 # Data folder
 /data/
@@ -15,14 +25,6 @@ results/
 *.csv
 *.png
 *.pdf
-
-# Generated LaTeX build files under tracked paper drafts
-drafts/**/*.aux
-drafts/**/*.fdb_latexmk
-drafts/**/*.fls
-drafts/**/*.log
-drafts/**/*.out
-drafts/**/*.synctex.gz
 
 # Local environments
 .venv/

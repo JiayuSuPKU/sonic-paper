@@ -8,6 +8,21 @@ Comparison** and was formerly released as QuadSV.
 The reusable core package now lives in the separate
 [`JiayuSuPKU/sonic`](https://github.com/JiayuSuPKU/sonic) repository.
 
+## Analyses
+
+| Workflow | Scope |
+| --- | --- |
+| [Q-test benchmarks](scripts/qtest_benchmark/) | Synthetic validation, runtime scaling, mouse intestine, and tumor lineages |
+| [Pattern-comparison benchmarks](scripts/comparator_benchmark/) | Alzheimer's disease and postnatal mouse brain development |
+| [Glioma](scripts/glioma_idh/) | IDH-associated differences in spatial expression |
+| [Embryonic atlas](scripts/embryo_xspecies/) | Mouse and human developmental trajectories and pattern retrieval |
+| [Visium HD SPLISOSM](scripts/splisosm_visiumhd_cbs/) | Spatial isoform usage and regulator associations across assays |
+| [Atera SPLISOSM](scripts/splisosm_atera_brca/) | Breast-cancer transcript usage and ANKRD30A validation |
+
+Each analysis directory documents its inputs, configuration, and commands.
+Workflows build result caches; `visualization.ipynb` notebooks generate figures
+from those caches.
+
 ## Reproducible environment
 
 Create the paper environment from the repository root:
@@ -25,14 +40,33 @@ published installation with the sibling source checkout:
 conda run -n sonic_paper python -m pip install --no-build-isolation -e ../sonic
 ```
 
+The two SPLISOSM workflows require the separate `sonic_paper_splisosm`
+environment. Follow the setup instructions in the
+[Atera README](scripts/splisosm_atera_brca/README.md#minimal-dependencies)
+before running those analyses.
+
+## Data and outputs
+
+Download or prepare the inputs described in each analysis README before running
+its workflow. Check `config.py` for input and reference paths, especially the
+Visium HD preprocessed inputs and the reference files used by SPLISOSM.
+Controlled-access TCGA analyses require separate GDC authorization and a local
+token file.
+
+Data, generated results and figures are excluded from Git. Notebooks are stored
+without execution outputs. Manuscript drafts and co-author review packages are
+maintained separately from this analysis repository.
+
 ## Run analysis caches
 
-Run every tracked cache workflow in its documented Conda environment:
+Inspect the commands first, then run the selected workflows from the repository
+root:
 
 ```bash
-conda run -n sonic_paper python -m scripts.run_all_analyses
+conda run -n sonic_paper python -m scripts.run_all_analyses --dry-run
+conda run -n sonic_paper python -m scripts.run_all_analyses comparator_benchmark
 ```
 
-Use `--dry-run` to inspect the commands without starting analyses, or name one
-or more workflows to run only those. Pass `--force` only when all selected
-workflows should recompute their derived caches.
+Omit the workflow names to run all six analyses in their documented environments.
+Pass `--force` only when the selected workflows should recompute their derived
+caches.
