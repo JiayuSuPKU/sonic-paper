@@ -351,8 +351,8 @@ def cross_resolution_comparison(
                     "right_resolution": right,
                     "shared_genes": int(merged.shape[0]),
                     "spearman_logp": rho,
-                    "left_svp": int((a["pvalue_adj"] < FDR_THRESHOLD).sum()),
-                    "right_svp": int((b["pvalue_adj"] < FDR_THRESHOLD).sum()),
+                    "left_svp": int((a["pvalue_adj"] <= FDR_THRESHOLD).sum()),
+                    "right_svp": int((b["pvalue_adj"] <= FDR_THRESHOLD).sum()),
                 }
             )
     return pd.DataFrame(rows)
@@ -365,7 +365,7 @@ def cross_platform_comparison(
     sv16 = {cfg.key: sv_results.get((cfg.key, "16um")) for cfg in DATASETS.values()}
     sv16 = {key: df for key, df in sv16.items() if df is not None}
     sets = {
-        key: set(df.loc[df["pvalue_adj"] < FDR_THRESHOLD, "gene_key"]) for key, df in sv16.items()
+        key: set(df.loc[df["pvalue_adj"] <= FDR_THRESHOLD, "gene_key"]) for key, df in sv16.items()
     }
     rows = []
     keys = list(sv16)
@@ -461,7 +461,7 @@ def prioritize_shared_hits(
         ranked[f"rank_{key}"] = np.arange(1, ranked.shape[0] + 1)
         ranked[f"pvalue_{key}"] = ranked["pvalue"].to_numpy()
         ranked[f"padj_{key}"] = ranked["pvalue_adj"].to_numpy()
-        ranked[f"called_{key}"] = ranked["pvalue_adj"].lt(FDR_THRESHOLD).to_numpy()
+        ranked[f"called_{key}"] = ranked["pvalue_adj"].le(FDR_THRESHOLD).to_numpy()
         ranked[f"gene_{key}"] = ranked["gene"].astype(str)
         rank_tables.append(
             ranked[

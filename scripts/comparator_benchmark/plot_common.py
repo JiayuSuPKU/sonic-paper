@@ -60,7 +60,7 @@ def fdr_counts(
 ) -> dict[str, int]:
     """Count BH-FDR significant genes for each test in a wide p-value table."""
     return {
-        test: int((apply_bh_correction(wide_tests[f"P_{test}"].to_numpy(float)) < alpha).sum())
+        test: int((apply_bh_correction(wide_tests[f"P_{test}"].to_numpy(float)) <= alpha).sum())
         for test in tests
     }
 

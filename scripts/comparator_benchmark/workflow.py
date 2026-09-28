@@ -879,8 +879,8 @@ def run_ad_pig_radial_bin_robustness(  # noqa: C901
                 if not ref.empty
                 else np.array([], dtype=float)
             )
-            current_hits = set(frame.loc[current_q < AD_PIG_FDR_ALPHA, "Feature"])
-            ref_hits = set(ref.loc[ref_q < AD_PIG_FDR_ALPHA, "Feature"])
+            current_hits = set(frame.loc[current_q <= AD_PIG_FDR_ALPHA, "Feature"])
+            ref_hits = set(ref.loc[ref_q <= AD_PIG_FDR_ALPHA, "Feature"])
 
             null_parts: list[np.ndarray] = []
             for perm_set in perm_sets:

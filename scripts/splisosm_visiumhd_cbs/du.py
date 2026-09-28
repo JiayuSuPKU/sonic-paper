@@ -167,7 +167,7 @@ def target_genes_for_du(cfg: DatasetConfig, sv16: pd.DataFrame) -> list[str]:
         return list(DU_TARGET_GENE_SUBSET)
 
     sv16 = _ensure_sv_keys(sv16)
-    svp = sv16.loc[sv16["pvalue_adj"] < FDR_THRESHOLD].sort_values("pvalue_adj")
+    svp = sv16.loc[sv16["pvalue_adj"] <= FDR_THRESHOLD].sort_values("pvalue_adj")
     ordered: list[str] = []
     seen: set[str] = set()
     for gene in svp["gene"].astype(str):
@@ -254,7 +254,7 @@ def _ensure_du_keys(df: pd.DataFrame) -> pd.DataFrame:
 def _svp_gene_keys(sv16: pd.DataFrame) -> set[str]:
     """Dataset-specific 16um SVP target set used for DU target restriction."""
     sv16 = _ensure_sv_keys(sv16)
-    return set(sv16.loc[sv16["pvalue_adj"] < FDR_THRESHOLD, "gene_key"])
+    return set(sv16.loc[sv16["pvalue_adj"] <= FDR_THRESHOLD, "gene_key"])
 
 
 def _cached_du_matches_inputs(
@@ -481,7 +481,7 @@ def _sig_pair_set(df: pd.DataFrame, suffix: str = "") -> set[tuple[str, str]]:
     padj_col = f"pvalue_adj{suffix}"
     if padj_col not in df.columns:
         padj_col = "pvalue_adj"
-    sig = df[pd.to_numeric(df[padj_col], errors="coerce") < FDR_THRESHOLD]
+    sig = df[pd.to_numeric(df[padj_col], errors="coerce") <= FDR_THRESHOLD]
     return set(zip(sig["gene_key"], sig["covariate_key"], strict=False))
 
 
@@ -628,7 +628,7 @@ def du_shared_associations(
     merged["mean_neglogp"] = np.vstack([minus_log10_p(merged[col]) for col in pvalue_cols]).mean(
         axis=0
     )
-    sig_matrix = merged[padj_cols].lt(FDR_THRESHOLD)
+    sig_matrix = merged[padj_cols].le(FDR_THRESHOLD)
     merged["n_sig_datasets"] = sig_matrix.sum(axis=1)
     merged["sig_all"] = sig_matrix.all(axis=1)
     merged["covariate_set"] = covariate_set

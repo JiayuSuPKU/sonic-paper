@@ -110,7 +110,7 @@ def run_workflow(
         "min_bin_pct": MIN_BIN_PCT,
         "min_component_size": MIN_COMPONENT_SIZE,
         "n_sv_genes": int(svp.shape[0]),
-        "n_svp_genes_fdr_0_01": int((svp["pvalue_adj"] < FDR_THRESHOLD).sum()),
+        "n_svp_genes_fdr_0_01": int((svp["pvalue_adj"] <= FDR_THRESHOLD).sum()),
         "n_du_pairs": int(du.shape[0]),
         "n_regulators_tested": int(regulator_status["tested_in_splisosmnp_du"].sum()),
         "n_svp_probe_mapping_genes_cached": len(svp_genes),

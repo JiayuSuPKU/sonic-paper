@@ -82,7 +82,7 @@ def _write_summary(svp: pd.DataFrame, metrics: pd.DataFrame) -> None:
         "backend": "SplisosmNP",
         "method": SV_METHOD,
         "n_genes_tested": int(svp.shape[0]),
-        "n_sig_fdr_0_01": int((svp["pvalue_adj"] < FDR_THRESHOLD).sum()),
+        "n_sig_fdr_0_01": int((svp["pvalue_adj"] <= FDR_THRESHOLD).sum()),
         "parameters": {
             "table": TABLE_CODEWORD,
             "layer": LAYER,
@@ -177,7 +177,7 @@ def run_sv(*, force: bool = False, n_jobs: int = 8) -> tuple[pd.DataFrame, pd.Da
                 "n_spots": int(model.n_spots),
                 "n_genes": int(model.n_genes),
                 "avg_isos_per_gene": float(np.mean(model.n_isos_per_gene)),
-                "n_sig_fdr_0_01": int((svp["pvalue_adj"] < FDR_THRESHOLD).sum()),
+                "n_sig_fdr_0_01": int((svp["pvalue_adj"] <= FDR_THRESHOLD).sum()),
                 "setup_seconds": setup_seconds,
                 "setup_max_rss_gb": setup_rss,
                 "test_seconds": test_seconds,
@@ -191,13 +191,13 @@ def run_sv(*, force: bool = False, n_jobs: int = 8) -> tuple[pd.DataFrame, pd.Da
     save_csv(metrics, SV_METRICS_CSV)
     _write_summary(svp, metrics)
     update_cache_entry(RESULT_DIR, "sv", signature, outputs, signature_data=signature_data)
-    log(f"SVP genes at FDR < {FDR_THRESHOLD:g}: {(svp['pvalue_adj'] < FDR_THRESHOLD).sum():,}")
+    log(f"SVP genes at FDR <= {FDR_THRESHOLD:g}: {(svp['pvalue_adj'] <= FDR_THRESHOLD).sum():,}")
     return svp, metrics
 
 
 def svp_target_genes(svp: pd.DataFrame) -> list[str]:
     # Return unique significant gene symbols while preserving the ranked SV order.
-    sig = svp[pd.to_numeric(svp["pvalue_adj"], errors="coerce") < FDR_THRESHOLD].copy()
+    sig = svp[pd.to_numeric(svp["pvalue_adj"], errors="coerce") <= FDR_THRESHOLD].copy()
     sig = sig.sort_values(["pvalue_adj", "statistic"], ascending=[True, False])
     out: list[str] = []
     seen: set[str] = set()

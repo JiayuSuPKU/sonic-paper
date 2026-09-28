@@ -252,8 +252,8 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
             genes = _merge_q_results(gene_results)
             genes["Tumor"] = tumor
             genes["I_moran"] = genes["Q_moran"] / tumor_data.n_obs
-            genes["Sig_moran"] = genes["P_adj_moran"] < FDR_CUTOFF
-            genes["Sig_car"] = genes["P_adj_car"] < FDR_CUTOFF
+            genes["Sig_moran"] = genes["P_adj_moran"] <= FDR_CUTOFF
+            genes["Sig_car"] = genes["P_adj_car"] <= FDR_CUTOFF
             # SONIC removes zero-degree leaves before testing; measure support
             # on that same analyzed cell set, as in the original notebook.
             tested = gene_detectors["car"].adata
@@ -374,7 +374,7 @@ def _cache_gene_diagnostics(*, force: bool) -> None:
             alternative="greater",
         )
         p_values = np.nan_to_num(test.pvalue, nan=1.0)
-        markers |= stats.false_discovery_control(p_values, method="bh") < FDR_CUTOFF
+        markers |= stats.false_discovery_control(p_values, method="bh") <= FDR_CUTOFF
     diagnostics["Small_state_marker"] = markers
 
     example_gene = "Rgs4"

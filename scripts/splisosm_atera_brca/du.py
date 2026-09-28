@@ -304,7 +304,7 @@ def _write_du_summary(du: pd.DataFrame, status: pd.DataFrame, metrics: pd.DataFr
                 "regulator_key",
             ].nunique()
         ),
-        "n_sig_pairs_fdr_0_01": int((du["pvalue_adj"] < FDR_THRESHOLD).sum()),
+        "n_sig_pairs_fdr_0_01": int((du["pvalue_adj"] <= FDR_THRESHOLD).sum()),
         "target_gene_key_hash": stable_hash_values(target_keys),
         "covariate_key_hash": stable_hash_values(covariate_keys),
         "parameters": {

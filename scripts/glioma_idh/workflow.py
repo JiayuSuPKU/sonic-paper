@@ -592,7 +592,7 @@ def _eligible_df_norm_pathways(enrichment: pd.DataFrame) -> pd.DataFrame:
         .agg(" ".join, axis=1)
     )
     terms = terms.loc[
-        terms["df_norm_fdr"].lt(FDR_ALPHA)
+        terms["df_norm_fdr"].le(FDR_ALPHA)
         & terms["df_norm_fdr"].lt(terms["de_fdr"])
         & terms["term_size"].ge(1)
         & (terms["source"].ne("GO:BP") | go_simplified)
