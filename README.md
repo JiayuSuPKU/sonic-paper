@@ -70,3 +70,7 @@ conda run -n sonic_paper python -m scripts.run_all_analyses comparator_benchmark
 Omit the workflow names to run all six analyses in their documented environments.
 Pass `--force` only when the selected workflows should recompute their derived
 caches.
+
+## License
+
+This repository is licensed under the [BSD 3-Clause License](LICENSE).
