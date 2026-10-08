@@ -14,10 +14,10 @@ from spatialdata.models import TableModel
 from scripts.paper_utils import (
     cache_entry_is_current,
     cache_signature,
-    installed_version,
     path_fingerprint,
     update_cache_entry,
 )
+from scripts.splisosm_utils import source_provenance
 
 from .config import (
     CACHE_REVISIONS,
@@ -55,8 +55,8 @@ def _sv_cache_signature_data(
     filtered_subset = eligible_isoforms is not None or gene_subset is not None
     return {
         "cache_revision": CACHE_REVISIONS["sv"],
-        "dependencies": {"splisosm": installed_version("splisosm")},
-        "inputs": [path_fingerprint(cfg.sdata_zarr)],
+        "source": source_provenance(__file__),
+        "inputs": [path_fingerprint(cfg.sdata_zarr, recursive=True)],
         "parameters": {
             **SV_CACHE_PARAMETERS,
             "dataset": cfg.key,
@@ -178,7 +178,7 @@ def run_sv_one(
         features = pd.read_csv(eligible_path) if eligible_path.exists() else pd.DataFrame()
         return res, features, pd.DataFrame()
 
-    sdata = load_sdata(cfg)
+    sdata = load_sdata(cfg, resolution)
     table_cfg = resolve_table_config(cfg, sdata, resolution)
     table_name = table_cfg["table_name"]
     min_counts = table_cfg["min_counts"]

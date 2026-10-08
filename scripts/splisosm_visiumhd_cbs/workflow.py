@@ -13,7 +13,14 @@ if __package__ in {None, ""}:
 import pandas as pd
 import splisosm
 
-from scripts.paper_utils import write_workflow_manifest
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    path_fingerprint,
+    update_cache_entry,
+    write_workflow_manifest,
+)
+from scripts.splisosm_utils import source_provenance
 from scripts.splisosm_visiumhd_cbs.config import (
     CACHE_REVISIONS,
     DATASETS,
@@ -37,6 +44,7 @@ from scripts.splisosm_visiumhd_cbs.du import (
     run_du_suite,
     subset_du_results_by_class,
 )
+from scripts.splisosm_visiumhd_cbs.reference_annotations import remap_tf_symbols
 from scripts.splisosm_visiumhd_cbs.sv import (
     prioritize_shared_hits,
     run_sv_suite,
@@ -52,6 +60,60 @@ from scripts.splisosm_visiumhd_cbs.utils import (
 CACHE_PARAMETERS = {"sv": SV_CACHE_PARAMETERS, "du": DU_CACHE_PARAMETERS}
 
 
+def _summary_signature_data() -> dict:
+    return {
+        "source": source_provenance(__file__),
+        "inputs": [
+            path_fingerprint(path)
+            for cfg in DATASETS.values()
+            for path in (
+                *(RESULT_DIR / f"sv_{cfg.key}_{res}_hsic_ir.csv" for res in ("16um", "8um", "2um")),
+                RESULT_DIR / f"du_regulator_{cfg.key}_16um_hsic_gp.csv",
+            )
+        ],
+    }
+
+
+def require_current_figure_cache() -> None:
+    """Reject stale or mixed SV, DU and derived summaries before plotting."""
+    from scripts.paper_utils import require_files
+
+    from .config import REMAP_TF_TARGETS
+    from .du import _du_cache_signature_data, target_genes_for_du
+    from .sv import _sv_cache_signature_data
+    from .utils import normalize_gene_symbol
+
+    require_files((REMAP_TF_TARGETS,), label="cached ReMap regulator list; run the workflow first")
+
+    remap_tf_symbols(read_only=True)
+    degrees = neighbor_degrees_by_res()
+    for cfg in DATASETS.values():
+        isoforms = None
+        for res in ("16um", "8um", "2um"):
+            data = _sv_cache_signature_data(
+                cfg, res, degrees[(cfg.key, res)], isoforms, SV_GENE_SUBSET
+            )
+            if not cache_entry_is_current(RESULT_DIR, f"sv:{cfg.key}:{res}", cache_signature(data)):
+                raise RuntimeError(
+                    f"Stale {cfg.key} {res} SV cache; rerun splisosm_visiumhd_cbs.workflow"
+                )
+            if res == "16um":
+                isoforms = (
+                    pd.read_csv(RESULT_DIR / f"eligible_16um_features_{cfg.key}.csv")["isoform"]
+                    .astype(str)
+                    .tolist()
+                )
+        sv = pd.read_csv(RESULT_DIR / f"sv_{cfg.key}_16um_hsic_ir.csv")
+        keys = {normalize_gene_symbol(g) for g in target_genes_for_du(cfg, sv)}
+        data = _du_cache_signature_data(cfg, keys, degrees[(cfg.key, "16um")])
+        if not cache_entry_is_current(RESULT_DIR, f"du:{cfg.key}:16um", cache_signature(data)):
+            raise RuntimeError(f"Stale {cfg.key} DU cache; rerun splisosm_visiumhd_cbs.workflow")
+    if not cache_entry_is_current(
+        RESULT_DIR, "summaries", cache_signature(_summary_signature_data())
+    ):
+        raise RuntimeError("Stale Visium summaries/metrics; rerun splisosm_visiumhd_cbs.workflow")
+
+
 def run_workflow(*, force: bool = False, n_jobs: int = 8) -> dict[str, Any]:
     """Compute/cache all result tables used by the final visualization notebook.
 
@@ -60,6 +122,7 @@ def run_workflow(*, force: bool = False, n_jobs: int = 8) -> dict[str, Any]:
     """
     started_at = time.perf_counter()
     ensure_dirs()
+    remap_tf_symbols(force=force)
     log(f"splisosm: {getattr(splisosm, '__version__', 'unknown')} ({splisosm.__file__})")
     log(f"force={force}, n_jobs={n_jobs}")
     log(f"fixed neighbor_degree={NEIGHBOR_DEGREE}, rho={RHO}")
@@ -74,14 +137,6 @@ def run_workflow(*, force: bool = False, n_jobs: int = 8) -> dict[str, Any]:
 
     # 1) SV calls plus one ranked shared-hit table for downstream prioritization.
     sv_results, sv_metrics = run_sv_suite(force=force, n_jobs=n_jobs)
-    sv16 = {
-        cfg.key: sv_results[(cfg.key, "16um")]
-        for cfg in DATASETS.values()
-        if (cfg.key, "16um") in sv_results
-    }
-    shared_hits = prioritize_shared_hits(sv16)
-    save_csv(shared_hits, RESULT_DIR / "shared_svp_hits.csv")
-
     # 2) One combined RBP+TF DU run per dataset; class-specific outputs are
     # derived by filtering the combined table to avoid duplicate DU work.
     du_results, du_metrics = run_du_suite(
@@ -90,19 +145,43 @@ def run_workflow(*, force: bool = False, n_jobs: int = 8) -> dict[str, Any]:
         n_jobs=n_jobs,
     )
 
-    # 3) Downstream DU summaries used directly by the Mbp/Gabbr1 figure cells.
-    du_rbp_results = subset_du_results_by_class(du_results, "rbp")
-    du_tf_results = subset_du_results_by_class(du_results, "tf_chip")
-    du_rbp_shared = du_shared_associations(du_rbp_results, sv_results, covariate_set="rbp")
-    du_tf_shared = du_shared_associations(du_tf_results, sv_results, covariate_set="tf_chip")
-    save_csv(du_rbp_shared, RESULT_DIR / "du_rbp_shared_associations.csv")
-    save_csv(du_tf_shared, RESULT_DIR / "du_tf_chip_shared_associations.csv")
-    metric_parts = [df for df in [sv_metrics, du_metrics] if df is not None and not df.empty]
-    metrics = (
-        pd.concat(metric_parts, ignore_index=True, sort=False) if metric_parts else pd.DataFrame()
+    # 3) Reuse derived summaries without rewriting valid output fingerprints.
+    summary_data = _summary_signature_data()
+    summary_paths = tuple(
+        RESULT_DIR / name
+        for name in (
+            "shared_svp_hits.csv",
+            "du_rbp_shared_associations.csv",
+            "du_tf_shared_associations.csv",
+            "runtime_memory_metrics.csv",
+        )
     )
-    if not metrics.empty:
-        save_csv(metrics, RESULT_DIR / "runtime_memory_metrics.csv")
+    if not force and cache_entry_is_current(
+        RESULT_DIR, "summaries", cache_signature(summary_data), outputs=summary_paths
+    ):
+        shared_hits, du_rbp_shared, du_tf_shared = (pd.read_csv(path) for path in summary_paths[:3])
+    else:
+        sv16 = {cfg.key: sv_results[(cfg.key, "16um")] for cfg in DATASETS.values()}
+        shared_hits = prioritize_shared_hits(sv16)
+        du_rbp_shared = du_shared_associations(
+            subset_du_results_by_class(du_results, "rbp"), sv_results, covariate_set="rbp"
+        )
+        du_tf_shared = du_shared_associations(
+            subset_du_results_by_class(du_results, "tf_chip"), sv_results, covariate_set="tf_chip"
+        )
+        parts = [df for df in (sv_metrics, du_metrics) if df is not None and not df.empty]
+        metrics = pd.concat(parts, ignore_index=True, sort=False) if parts else pd.DataFrame()
+        for frame, path in zip(
+            (shared_hits, du_rbp_shared, du_tf_shared, metrics), summary_paths, strict=True
+        ):
+            save_csv(frame, path)
+        update_cache_entry(
+            RESULT_DIR,
+            "summaries",
+            cache_signature(summary_data),
+            summary_paths,
+            signature_data=summary_data,
+        )
 
     # 4) Lightweight provenance manifest for auditing cached outputs.
     summary = {

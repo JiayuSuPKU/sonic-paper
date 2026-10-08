@@ -14,6 +14,13 @@ For DU analysis, we test one resolution (16um) using conditional association
 containing both RBP and TF-ChIP covariates. The workflow is supported by the 
 `SplisosmFFT` class for scalable FFT-based implementations.
 
+Caches fingerprint nested Zarr files, installed SPLISOSM/analysis source, and
+outputs. ReMap TF/interval caches also track the source BED and parser;
+annotation caches detect changed reference files. 
+Source fingerprints ignore Python comments, docstrings, formatting, and log-message
+wording. Only imported shared helpers and their dependencies are included; SONIC
+code/version changes do not invalidate SPLISOSM caches. 
+
 ## Minimal Dependencies
 
 This workflow can run from the same shared `sonic_paper_splisosm` conda environment as
@@ -101,7 +108,7 @@ separate CSVs.
 - Fixed `rho`: `0.99`.
 - DU is run at 16um only with `hsic-gp` and `residualize="cov_only"`.
 - DU targets default to dataset-specific 16um SVP genes
-  (`SV pvalue_adj < 0.01`), crossed once with one combined regulator
+  (`SV pvalue_adj <= 0.01`), crossed once with one combined regulator
   design matrix containing configured RBP covariates plus ReMap mouse
   TF-ChIP covariates. RBP and TF summaries are derived by filtering the
   single combined DU result table.

@@ -14,6 +14,14 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    path_fingerprint,
+    update_cache_entry,
+)
+from scripts.splisosm_utils import source_provenance
+
 from .config import (
     DATASETS,
     REMAP_INTERVAL_DIR,
@@ -30,7 +38,7 @@ from .utils import (
     save_csv,
 )
 
-_REFERENCE_FEATURE_CACHE: dict[tuple[str, ...], dict[str, Any]] = {}
+_REFERENCE_FEATURE_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def _open_text(path: Path):
@@ -268,8 +276,9 @@ def load_reference_feature_cache(*, force: bool = False) -> dict[str, Any]:
         str(DATASETS["trend_3prime"].bed12_file),
         str(DATASETS["ffpe_probe"].bed12_file),
     )
-    if not force and paths in _REFERENCE_FEATURE_CACHE:
-        return _REFERENCE_FEATURE_CACHE[paths]
+    signature = cache_signature({"inputs": [path_fingerprint(path) for path in paths]})
+    if not force and signature in _REFERENCE_FEATURE_CACHE:
+        return _REFERENCE_FEATURE_CACHE[signature]
 
     cache = {
         "reference": _parse_reference_gtf(DATASETS["ont_tx"].gtf_file),
@@ -277,7 +286,8 @@ def load_reference_feature_cache(*, force: bool = False) -> dict[str, Any]:
         "trend": _parse_bed12(DATASETS["trend_3prime"].bed12_file, "trend_peak_bed12"),
         "probe": _parse_bed12(DATASETS["ffpe_probe"].bed12_file, "probe_bed12"),
     }
-    _REFERENCE_FEATURE_CACHE[paths] = cache
+    _REFERENCE_FEATURE_CACHE.clear()
+    _REFERENCE_FEATURE_CACHE[signature] = cache
     return cache
 
 
@@ -313,7 +323,7 @@ def _spatial_feature_names(
     if sdata_cache is not None and dataset_key in sdata_cache:
         sdata = sdata_cache[dataset_key]["sdata"]
     else:
-        sdata = load_sdata(DATASETS[dataset_key])
+        sdata = load_sdata(DATASETS[dataset_key], resolution)
 
     table_cfg = resolve_table_config(DATASETS[dataset_key], sdata, resolution)
     adata = sdata.tables[table_cfg["table_name"]]
@@ -544,13 +554,30 @@ def remap_target_from_fields(fields: list[str]) -> str | None:
     return parts[0] if parts else None
 
 
-def remap_tf_symbols(*, force: bool = False) -> list[str]:
-    """Return ReMap mouse regulator symbols, cached after one streaming parse."""
-    if REMAP_TF_TARGETS.exists() and not force:
+def _remap_signature_data() -> dict:
+    return {
+        "source": source_provenance(__file__),
+        "inputs": [path_fingerprint(REMAP_NR_MM39_BED)],
+    }
+
+
+def remap_tf_symbols(*, force: bool = False, read_only: bool = False) -> list[str]:
+    """Reuse regulator symbols only while their source BED and parser are current."""
+    if not read_only:
+        ensure_remap_nr_bed()
+    data = _remap_signature_data()
+    if not force and cache_entry_is_current(
+        REMAP_TF_TARGETS.parent,
+        "visiumhd_cbs:tf_symbols:mm39",
+        cache_signature(data),
+        outputs=(REMAP_TF_TARGETS,),
+    ):
         df = pd.read_csv(REMAP_TF_TARGETS)
         return sorted(df["tf_symbol"].dropna().astype(str).unique())
 
-    bed_path = ensure_remap_nr_bed()
+    if read_only:
+        raise RuntimeError("Stale ReMap TF cache; rerun splisosm_visiumhd_cbs.workflow")
+    bed_path = REMAP_NR_MM39_BED
     targets: set[str] = set()
     with _open_bed(bed_path) as handle:
         for line in handle:
@@ -563,6 +590,13 @@ def remap_tf_symbols(*, force: bool = False) -> list[str]:
     out = pd.DataFrame({"tf_symbol": sorted(targets)})
     out["tf_key"] = out["tf_symbol"].map(normalize_gene_symbol)
     save_csv(out, REMAP_TF_TARGETS)
+    update_cache_entry(
+        REMAP_TF_TARGETS.parent,
+        "visiumhd_cbs:tf_symbols:mm39",
+        cache_signature(data),
+        (REMAP_TF_TARGETS,),
+        signature_data=data,
+    )
     return out["tf_symbol"].tolist()
 
 
@@ -611,7 +645,7 @@ def _scan_remap_interval(chrom: str, start: int, end: int) -> pd.DataFrame:
                     "source": "ReMap2022 nr mm39",
                 }
             )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=("chrom", "start", "end", "tf_symbol", "tf_key", "source"))
 
 
 def remap_binding_sites(
@@ -627,15 +661,19 @@ def remap_binding_sites(
     end = int(end)
     cache_path = _interval_cache_path(chrom, start, end)
 
-    if cache_path.exists() and not force:
+    ensure_remap_nr_bed()
+    data = {**_remap_signature_data(), "interval": [chrom, start, end]}
+    section = f"visiumhd_cbs:interval:{chrom}:{start}:{end}"
+    if not force and cache_entry_is_current(
+        cache_path.parent, section, cache_signature(data), outputs=(cache_path,)
+    ):
         sites = pd.read_csv(cache_path)
     else:
         sites = _scan_remap_interval(chrom, start, end)
-        if not sites.empty:
-            try:
-                save_csv(sites, cache_path)
-            except OSError as exc:
-                log(f"could not cache ReMap interval {cache_path}: {exc}")
+        save_csv(sites, cache_path)
+        update_cache_entry(
+            cache_path.parent, section, cache_signature(data), (cache_path,), signature_data=data
+        )
 
     if targets is not None and not sites.empty:
         target_keys = {normalize_gene_symbol(target) for target in targets}

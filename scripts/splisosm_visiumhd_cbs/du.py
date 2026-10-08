@@ -16,10 +16,10 @@ from spatialdata.models import TableModel
 from scripts.paper_utils import (
     cache_entry_is_current,
     cache_signature,
-    installed_version,
     path_fingerprint,
     update_cache_entry,
 )
+from scripts.splisosm_utils import source_provenance
 
 from .config import (
     CACHE_REVISIONS,
@@ -54,16 +54,17 @@ from .utils import (
 def _du_cache_signature_data(
     cfg: DatasetConfig,
     svp_keys: set[str],
-    covariate_keys: set[str],
     neighbor_degree: int,
 ) -> dict[str, Any]:
     target_keys = sorted(svp_keys)
-    design_keys = sorted(covariate_keys)
     class_keys = regulator_class_keys()
     return {
         "cache_revision": CACHE_REVISIONS["du"],
-        "dependencies": {"splisosm": installed_version("splisosm")},
-        "inputs": [path_fingerprint(cfg.sdata_zarr)],
+        "source": source_provenance(__file__),
+        "inputs": [
+            path_fingerprint(cfg.sdata_zarr, recursive=True),
+            path_fingerprint(RESULT_DIR / f"eligible_16um_features_{cfg.key}.csv"),
+        ],
         "parameters": {
             **DU_CACHE_PARAMETERS,
             "dataset": cfg.key,
@@ -73,8 +74,6 @@ def _du_cache_signature_data(
             "gene_names": cfg.gene_names,
             "n_target_genes": len(target_keys),
             "target_gene_key_hash": cache_signature({"values": target_keys}),
-            "n_covariates": len(design_keys),
-            "covariate_gene_key_hash": cache_signature({"values": design_keys}),
             "rbp_gene_key_hash": cache_signature({"values": sorted(class_keys["rbp"])}),
             "tf_chip_gene_key_hash": cache_signature({"values": sorted(class_keys["tf_chip"])}),
         },
@@ -257,16 +256,6 @@ def _svp_gene_keys(sv16: pd.DataFrame) -> set[str]:
     return set(sv16.loc[sv16["pvalue_adj"] <= FDR_THRESHOLD, "gene_key"])
 
 
-def _cached_du_matches_inputs(
-    cached: pd.DataFrame, svp_keys: set[str], covariate_keys: set[str]
-) -> bool:
-    """Check whether a cached DU table matches current targets and regulators."""
-    if cached.empty:
-        return not svp_keys and not covariate_keys
-    cached = _ensure_du_keys(cached)
-    return set(cached["gene_key"]) == svp_keys and set(cached["covariate_key"]) == covariate_keys
-
-
 def _du_output_columns(df: pd.DataFrame) -> list[str]:
     """Keep only stable, downstream-needed DU columns in a predictable order."""
     preferred = [
@@ -316,35 +305,21 @@ def run_du_suite(
         targets = target_genes_for_du(cfg, sv16)
         svp_keys = {normalize_gene_symbol(gene) for gene in targets}
 
-        sdata = load_sdata(cfg)
+        signature_data = _du_cache_signature_data(cfg, svp_keys, degrees[(cfg.key, "16um")])
+        signature = cache_signature(signature_data)
+        section = f"du:{cfg.key}:16um"
+        if not force and cache_entry_is_current(
+            RESULT_DIR, section, signature, outputs=(out_path,)
+        ):
+            results[cfg.key] = _ensure_du_keys(pd.read_csv(out_path))
+            continue
+
+        sdata = load_sdata(cfg, "16um")
         table_cfg = resolve_table_config(cfg, sdata, "16um")
         adata = sdata.tables[table_cfg["table_name"]]
-        # Design matrix: filtered gene-level log-normalized regulator expression.
         covariate_adata = build_gene_expression_table(
             adata, table_cfg["gene_names"], covariate_genes
         )
-        filtered_covariate_keys = set(covariate_adata.var["gene_key"].astype(str))
-        signature_data = _du_cache_signature_data(
-            cfg,
-            svp_keys,
-            filtered_covariate_keys,
-            degrees[(cfg.key, "16um")],
-        )
-        signature = cache_signature(signature_data)
-        section = f"du:{cfg.key}:16um"
-
-        if not force and cache_entry_is_current(
-            RESULT_DIR,
-            section,
-            signature,
-            outputs=(out_path,),
-        ):
-            # A cache hit is valid only if both the DU targets and filtered
-            # regulator covariates match the current dataset/config state.
-            cached = _ensure_du_keys(pd.read_csv(out_path))
-            if _cached_du_matches_inputs(cached, svp_keys, filtered_covariate_keys):
-                results[cfg.key] = cached
-                continue
 
         # DU target matrix: same-dataset 16um SVP features only.
         gene_mask = (
@@ -357,6 +332,15 @@ def run_du_suite(
         if gene_mask.sum() == 0:
             warnings.warn(f"No DU target features found for {cfg.key}.", stacklevel=2)
             continue
+        eligible = pd.read_csv(RESULT_DIR / f"eligible_16um_features_{cfg.key}.csv")[
+            "isoform"
+        ].astype(str)
+        missing = eligible[~eligible.isin(adata.var_names)]
+        if not missing.empty:
+            raise ValueError(f"SV eligible features missing from {cfg.key}: {missing.tolist()[:5]}")
+        gene_mask &= adata.var_names.astype(str).isin(eligible)
+        if not gene_mask.any():
+            raise ValueError(f"No SV-eligible DU target features for {cfg.key}")
         target_adata = adata[:, gene_mask].copy()
         target_key = f"_du_targets_{cfg.key}_16um"
         design_key = f"_du_{covariate_set}_{cfg.key}_16um"

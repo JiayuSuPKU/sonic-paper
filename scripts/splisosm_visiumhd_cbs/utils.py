@@ -45,11 +45,27 @@ def neighbor_degrees_by_res() -> dict[tuple[str, str], int]:
     }
 
 
-def load_sdata(cfg: DatasetConfig):
-    """Open one dataset's SpatialData zarr store."""
-    if not cfg.sdata_zarr.exists():
-        raise FileNotFoundError(f"Missing SpatialData store: {cfg.sdata_zarr}")
-    return sd.read_zarr(cfg.sdata_zarr)
+def load_sdata(cfg: DatasetConfig, resolution: str = "16um"):
+    """Read one grid's table and bins, without loading the other resolutions."""
+    import anndata
+    import zarr
+    from spatialdata._io.io_shapes import _read_shapes
+
+    table = RESOLUTION_TABLE[resolution]
+    root = zarr.open_group(str(cfg.sdata_zarr), mode="r")
+    # SpatialData's public reader selects element types, not individual shapes.
+    names = list(root["shapes"].group_keys())
+    candidates = (f"{cfg.bin_prefix}{table}", table, f"_{table}", f"Visium_HD_Mouse_Brain_{table}")
+    bins = next((name for name in candidates if name in names), None)
+    if bins is None:
+        matches = [name for name in names if name.endswith(table)]
+        if len(matches) != 1:
+            raise ValueError(f"Could not resolve bins for {cfg.key} {resolution}: {names}")
+        bins = matches[0]
+    return sd.SpatialData(
+        tables={table: anndata.read_zarr(cfg.sdata_zarr / "tables" / table)},
+        shapes={bins: _read_shapes(cfg.sdata_zarr / "shapes" / bins)},
+    )
 
 
 def resolve_bin_element(sdata, cfg: DatasetConfig, resolution: str) -> str:
