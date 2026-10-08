@@ -6,11 +6,11 @@ organization of glioblastoma." Cell 187.10 (2024): 2485-2501.
 Idempotent pipeline:
 
 1. Downloads every ``IDHm_*.tar.gz`` / ``GBM_*.tar.gz`` from Zenodo record
-   12624860 into ``<data_root>/raw/``.
-2. Extracts each tarball into ``<data_root>/spaceranger/<sample>/``.
+   12624860 into ``DATA_ROOT/raw/``.
+2. Extracts each tarball into ``DATA_ROOT/spaceranger/<sample>/``.
 3. Loads each sample via :func:`sonic.utils.load_visium_sample`, converts
    Visium full-resolution pixel coordinates to micrometers using the 55 um
-   capture-spot diameter, and writes ``<data_root>/adata/<sample>.h5ad`` for
+   capture-spot diameter, and writes ``DATA_ROOT/adata/<sample>.h5ad`` for
    fast reloading in notebooks.
 
 Reruns are cheap: every step skips work whose archive and completed output
@@ -19,8 +19,8 @@ have been validated.
 Typical invocation::
 
     python -m scripts.glioma_idh.download_glioma_data
-    # or with a custom location:
-    python -m scripts.glioma_idh.download_glioma_data --data-root /elsewhere/visium_glioma_idh_status
+
+The input/output root is defined by ``DATA_ROOT`` in ``config.py``.
 """
 
 from __future__ import annotations
@@ -266,7 +266,17 @@ def _h5ad_is_current(path: Path) -> bool:
             if node is None:
                 return False
             value = node[()]
-    except OSError:
+            qc = h5.get("uns/glioma_spot_qc")
+            expected = {
+                "min_counts": SPOT_MIN_COUNTS,
+                "max_pct_mito": SPOT_MAX_PCT_MITO,
+                "max_excluded_fraction": SAMPLE_MAX_QC_EXCLUDED_FRAC,
+            }
+            if qc is None or any(
+                key not in qc or qc[key][()] != value for key, value in expected.items()
+            ):
+                return False
+    except (OSError, ValueError, TypeError, KeyError):
         return False
     if isinstance(value, bytes):
         value = value.decode()
@@ -383,11 +393,11 @@ def _convert_to_h5ad(spaceranger_dir: Path, out_path: Path, sample: str) -> bool
         return False
 
 
-def process_sample(sample: str, data_root: Path) -> tuple[str, bool]:
+def process_sample(sample: str) -> tuple[str, bool]:
     """Run the download → extract → convert pipeline for one sample (idempotent)."""
-    raw = data_root / "raw" / f"{sample}.tar.gz"
-    extracted_root = data_root / "spaceranger" / sample
-    h5ad = data_root / "adata" / f"{sample}.h5ad"
+    raw = DATA_ROOT / "raw" / f"{sample}.tar.gz"
+    extracted_root = DATA_ROOT / "spaceranger" / sample
+    h5ad = DATA_ROOT / "adata" / f"{sample}.h5ad"
 
     # 1. Download.
     if _tarball_is_valid(raw, MIN_TARBALL_BYTES):
@@ -428,12 +438,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument(
-        "--data-root",
-        type=Path,
-        default=DATA_ROOT,
-        help="Output root. Will contain raw/, spaceranger/, adata/ subfolders.",
-    )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args(argv)
 
@@ -443,13 +447,13 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     for sub in ("raw", "spaceranger", "adata"):
-        (args.data_root / sub).mkdir(parents=True, exist_ok=True)
+        (DATA_ROOT / sub).mkdir(parents=True, exist_ok=True)
 
     t0 = time.time()
     succeeded: list[str] = []
     failed: list[str] = []
     for sample in ALL_SAMPLES:
-        name, ok = process_sample(sample, args.data_root)
+        name, ok = process_sample(sample)
         (succeeded if ok else failed).append(name)
 
     elapsed = time.time() - t0

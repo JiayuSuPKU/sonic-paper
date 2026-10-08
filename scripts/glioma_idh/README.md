@@ -14,16 +14,15 @@ Run from the project root with the `sonic_paper` environment, available from [`e
 
 ```bash
 conda run -n sonic_paper \
-  python -m scripts.glioma_idh.workflow --force
+  python -m scripts.glioma_idh.workflow
 ```
 
-If the `.h5ad` files live outside this paper repo, pass the existing cache root:
+Add `--force` to recompute all stages. Otherwise, current stages are reused.
 
-```bash
-conda run -n sonic_paper \
-  python -m scripts.glioma_idh.workflow \
-  --data-root /path/to/visium_glioma_idh_status --force
-```
+The downloader, workflow, and figures all use `DATA_ROOT` from `config.py`.
+The configured root and input files are tracked in cache provenance, so changing them invalidates old results.
+Prepared inputs must match the current QC settings and micrometer-coordinate cache version.
+Rerun the downloader if those checks fail.
 
 The glioma analysis workflow runs five main steps to generate inputs for the `idh_main.pdf`, `idh_supp.pdf`, and per-program `idh_<metaprogram>.pdf` figures:
 
@@ -74,11 +73,17 @@ The workflow writes:
 
 - `idh_status_tests.csv` - DE, DF, and DF-norm p-values/FDRs for the selected gene panel.
 - `idh_status_permutation_null.csv` - DF and DF-norm p-values/FDRs from 50 deterministic sample-label shuffles, retaining only fields needed for null calibration.
-- `idh_status_spectra.npz` - generated cache of radial spectra plus sample IDs, groups, h5ad paths, and genes used by `visualization.ipynb`.
+- `idh_status_spectra.npz` - generated cache of radial spectra, per-sample gene-presence masks, anisotropy, sample IDs, groups, h5ad paths, and genes used by `visualization.ipynb`.
 - `idh_status_spatial_diagnostics.csv` - per-gene/sample raw 2D anisotropy plus per-sample expression and radial-power effective ranks.
 - `idh_status_clusterprofiler_enrichment.csv` - merged GO BP and KEGG clusterProfiler results for the top 100 DE and DF-norm genes.
 - `idh_status_df_norm_top100_metaprogram_map.csv` - deterministic pathway-based assignments of the top 100 DF-norm genes to the configured meta-programs.
 - `cache_manifest.json` - input signatures and output fingerprints that prevent reuse of incompatible comparison or enrichment caches; the enrichment entry also records the resolved R command, library paths, wrapper checksum, and core package versions.
+
+Comparison, diagnostics, enrichment, and meta-program mapping have separate
+cache entries. Missing diagnostics can be rebuilt from saved spectra and
+normalized expression. Plotting edits do not invalidate numerical stages. 
+R-wrapper edits invalidate enrichment only (and its downstream map). 
+Successful enrichment jobs with no terms are cached as empty tables.
 
 ## Rendering Figures:
 
@@ -102,4 +107,9 @@ main figure. The standalone
 Each gene panel shows raw radial profiles beside the per-bin log2 fold change
 of L1-normalized group means. Use `--sample-ids IDHm_BWH23O GBM_ZH8811Bbulk`
 to fix the spatial maps shown in each gene panel instead of using per-gene
-representative samples.
+representative samples. Profiles and automatic representative-sample selection use the
+same per-gene presence mask as DF testing.
+
+The notebook and standalone profile loader validate cache provenance before
+reading results. Older caches need one workflow run to regenerate the new
+metadata.

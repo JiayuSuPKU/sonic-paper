@@ -55,7 +55,7 @@ META_PROGRAMS = (
         "terms": (
             ("KEGG", "hsa01230", "Biosynthesis of amino acids"),
             ("GO:BP", "GO:0032787", "monocarboxylic acid metabolic process"),
-            ("GO:BP", "GO:0042744", "hydrogen peroxide catabolic process"),
+            ("GO:BP", "GO:1905954", "positive regulation of lipid localization"),
         ),
     },
     {
@@ -66,12 +66,8 @@ META_PROGRAMS = (
         "genes": ("NDRG1", "VEGFA", "HILPDA", "SLC2A1", "DCN"),
         "terms": (
             ("GO:BP", "GO:0071456", "cellular response to hypoxia"),
-            ("KEGG", "hsa04066", "HIF-1 signaling pathway"),
-            (
-                "GO:BP",
-                "GO:1900746",
-                "regulation of vascular endothelial growth factor signaling pathway",
-            ),
+            ("GO:BP", "GO:0001568", "blood vessel development"),
+            ("GO:BP", "GO:0070482", "response to oxygen levels"),
         ),
     },
     {
@@ -107,7 +103,7 @@ META_PROGRAMS = (
         "terms": (
             ("KEGG", "hsa04512", "ECM-receptor interaction"),
             ("KEGG", "hsa04518", "Integrin signaling"),
-            ("GO:BP", "GO:0030199", "collagen fibril organization"),
+            ("GO:BP", "GO:0009612", "response to mechanical stimulus"),
         ),
     },
 )

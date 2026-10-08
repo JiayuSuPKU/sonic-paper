@@ -35,6 +35,7 @@ if __package__ in {None, ""}:
     __package__ = "scripts.glioma_idh"
 
 from .config import (  # noqa: E402
+    DATA_ROOT,
     FIGURE_DIR,
     GROUP_COLORS,
     GROUP_LABELS,
@@ -73,8 +74,14 @@ def short_sample_id(sample_id: str) -> str:
     return sample_id.replace("IDHm_", "").replace("GBM_", "")
 
 
-def load_spectra_cache(path: Path = SPECTRA_FILE) -> dict[str, Any]:
+def load_spectra_cache(path: Path | None = None) -> dict[str, Any]:
     """Load radial spectra plus sample metadata from the workflow cache."""
+    from .workflow import require_current_comparison_cache
+
+    path = SPECTRA_FILE if path is None else Path(path)
+    if path.resolve() != SPECTRA_FILE.resolve():
+        raise ValueError("Load the current workflow spectra with its cache manifest.")
+    require_current_comparison_cache()
     if not path.exists():
         raise FileNotFoundError(f"Missing {path}; run workflow.py first.")
     with np.load(path, allow_pickle=True) as data:
@@ -85,6 +92,7 @@ def load_spectra_cache(path: Path = SPECTRA_FILE) -> dict[str, Any]:
             "groups",
             "h5ad_paths",
             "genes",
+            "presence",
         }
         missing = required - set(data.files)
         if missing:
@@ -93,11 +101,15 @@ def load_spectra_cache(path: Path = SPECTRA_FILE) -> dict[str, Any]:
                 f"Missing keys: {sorted(missing)}"
             )
         return {
-            "spectra": np.asarray(data["spectra"], dtype=float),
+            "spectra": data["spectra"],
+            "presence": data["presence"],
             "freq_edges": np.asarray(data["freq_edges"], dtype=float),
             "sample_ids": data["sample_ids"].astype(str).tolist(),
             "groups": data["groups"].astype(str).tolist(),
-            "h5ad_paths": data["h5ad_paths"].astype(str).tolist(),
+            "h5ad_paths": [
+                str(DATA_ROOT.expanduser().resolve() / path)
+                for path in data["h5ad_paths"].astype(str)
+            ],
             "genes": data["genes"].astype(str).tolist(),
         }
 
@@ -266,7 +278,7 @@ class GliomaGeneProfilePlotter:
             raise ValueError("samples and meta must be provided together")
         if samples is None:
             meta = metadata_from_spectra(self.spectra_data)
-            samples, meta = load_normalized_samples_from_metadata(meta)
+            samples, meta = load_normalized_samples_from_metadata(meta, genes=selected_genes)
         self.samples = samples
         self.meta = meta.copy()
         self.real_by_gene = tests.set_index("Feature")
@@ -280,7 +292,22 @@ class GliomaGeneProfilePlotter:
         """Choose median-like expression samples per IDH-status group."""
         out: list[str] = []
         for group in GROUP_ORDER:
-            ids = self.meta.loc[self.meta["group"] == group, "sample_id"].astype(str).tolist()
+            eligible = np.asarray(self.spectra_data["presence"], dtype=bool)[
+                :, self.spectra_data["genes"].index(gene)
+            ]
+            eligible_ids = {
+                sid
+                for sid, keep in zip(self.spectra_data["sample_ids"], eligible, strict=True)
+                if keep
+            }
+            ids = (
+                self.meta.loc[
+                    self.meta["group"].eq(group) & self.meta["sample_id"].isin(eligible_ids),
+                    "sample_id",
+                ]
+                .astype(str)
+                .tolist()
+            )
             if not ids:
                 raise KeyError(f"No samples found for group {group}")
             means = np.asarray([np.nanmean(gene_values(self.samples[sid], gene)) for sid in ids])
@@ -330,7 +357,7 @@ class GliomaGeneProfilePlotter:
     ) -> None:
         """Plot raw spectra and the L1-normalized group-mean log2 fold change."""
         gi = self.spectra_data["genes"].index(gene)
-        spectra = np.asarray(self.spectra_data["spectra"], dtype=float)
+        spectra = self.spectra_data["spectra"]
         x, xlabel = _freq_axis(np.asarray(self.spectra_data["freq_edges"], dtype=float), spectra)
         id_to_group = self.meta.set_index("sample_id")["group"].astype(str).to_dict()
         groups = np.asarray(
@@ -338,8 +365,12 @@ class GliomaGeneProfilePlotter:
         )
         raw_by_group: dict[str, np.ndarray] = {}
         for group in GROUP_ORDER:
-            idx = np.flatnonzero(groups == group)
-            y = np.maximum(spectra[idx, gi, :], EPS)
+            idx = np.flatnonzero((groups == group) & self.spectra_data["presence"][:, gi])
+            if idx.size == 0:
+                raise ValueError(
+                    f"No eligible {group} samples for {gene}; cannot plot DF profiles."
+                )
+            y = np.maximum(np.asarray(spectra[idx, gi, :], dtype=float), EPS)
             raw_by_group[group] = y
             color = GROUP_COLORS[group]
             for row in y:

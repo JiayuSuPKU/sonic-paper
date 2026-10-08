@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import re
 import sys
 import tempfile
@@ -24,11 +25,14 @@ from scripts.paper_utils import (
     cache_signature,
     path_fingerprint,
     run_clusterprofiler,
+    source_provenance,
     update_cache_entry,
     write_workflow_manifest,
 )
 
+from . import utils as glioma_utils
 from .config import (
+    DATA_ROOT,
     ENRICHMENT_TERMS_FILE,
     FDR_ALPHA,
     GROUP_LABELS,
@@ -52,21 +56,22 @@ from .config import (
     SPOT_MAX_PCT_MITO,
     SPOT_MIN_COUNTS,
 )
+from .download_glioma_data import H5AD_CACHE_VERSION, _h5ad_is_current
 from .utils import (
     align_samples_to_genes,
     ensure_dirs,
     load_normalized_samples,
+    load_normalized_samples_from_metadata,
     log,
     merge_real_tests,
     project_relative,
-    resolve_data_root,
     sample_metadata,
     save_csv,
     select_gene_panel,
 )
 
 CLUSTERPROFILER_TIMEOUT_SECONDS = 900
-CACHE_REVISIONS = {"comparison": 1, "enrichment": 1}
+CACHE_REVISIONS = {"comparison": 2, "diagnostics": 1, "enrichment": 2, "metaprogram": 1}
 COMPARISON_CACHE_PARAMETERS = {
     "n_genes": N_GENES,
     "spot_min_counts": SPOT_MIN_COUNTS,
@@ -93,15 +98,50 @@ COMPARISON_CACHE_FILES = {
     "real_tests": REAL_TESTS_FILE,
     "permutation_null": PERMUTATION_NULL_FILE,
     "spectra": SPECTRA_FILE,
-    "spatial_diagnostics": SPATIAL_DIAGNOSTICS_FILE,
 }
 
 
-def _comparison_signature_data(data_root: Path) -> dict[str, Any]:
+def _stage_source(*functions: Any) -> dict[str, Any]:
+    """Fingerprint numerical dependencies without unrelated plots or R code."""
+    from scripts import paper_utils
+
+    provenance = source_provenance(__file__)
+    provenance["analysis_source_sha256"] = cache_signature(
+        {
+            "functions": {f.__name__: inspect.getsource(f) for f in functions},
+            "cache_helpers": Path(paper_utils.__file__).read_text(),
+        }
+    )
+    return provenance
+
+
+def require_current_comparison_cache() -> None:
+    """Validate current inputs under config.DATA_ROOT before consuming results."""
+    if not _idh_status_comparison_cache_ready():
+        raise RuntimeError("Stale or missing glioma comparison cache; rerun glioma_idh.workflow.")
+
+
+def require_current_figure_cache() -> None:
+    """Reject stale or mixed analysis stages before loading manuscript figures."""
+    require_current_comparison_cache()
+    for section, data, output in (
+        ("diagnostics", _diagnostics_signature_data(), SPATIAL_DIAGNOSTICS_FILE),
+        ("enrichment", _enrichment_signature_data(), ENRICHMENT_TERMS_FILE),
+        ("metaprogram", _metaprogram_signature_data(), META_PROGRAM_GENE_MAP_FILE),
+    ):
+        if not cache_entry_is_current(
+            RESULT_DIR, section, cache_signature(data), outputs=(output,)
+        ):
+            raise RuntimeError(
+                f"Stale or missing glioma {section} cache; rerun glioma_idh.workflow."
+            )
+
+
+def _comparison_signature_data() -> dict[str, Any]:
     """Describe every input that changes the IDH-status comparison."""
     import sonic
 
-    meta = sample_metadata(data_root)
+    meta = sample_metadata()
     inputs = []
     for row in meta.itertuples(index=False):
         inputs.append(
@@ -112,8 +152,19 @@ def _comparison_signature_data(data_root: Path) -> dict[str, Any]:
             }
         )
     return {
+        "source": _stage_source(
+            _fit_radial_comparator,
+            _permuted_group_labels,
+            _permutation_null_table,
+            _sample_gene_means,
+            _comparison_outputs_valid,
+            run_idh_status_comparison_cache,
+            glioma_utils,
+            _h5ad_is_current,
+        ),
+        "h5ad_version": H5AD_CACHE_VERSION,
         "cache_revision": CACHE_REVISIONS["comparison"],
-        "data_root": project_relative(data_root.resolve()),
+        "data_root": project_relative(DATA_ROOT.expanduser().resolve()),
         "inputs": inputs,
         "sonic_version": sonic.__version__,
         "parameters": COMPARISON_CACHE_PARAMETERS,
@@ -123,12 +174,14 @@ def _comparison_signature_data(data_root: Path) -> dict[str, Any]:
 def _enrichment_signature_data() -> dict[str, Any]:
     """Describe the tested genes and wrapper used for pathway enrichment."""
     return {
+        "source": _stage_source(_ranked_gene_sets, _read_enrichment_outputs, run_enrichment_cache),
         "cache_revision": CACHE_REVISIONS["enrichment"],
         "inputs": [
             path_fingerprint(REAL_TESTS_FILE),
             path_fingerprint(CLUSTERPROFILER_SCRIPT),
         ],
         "parameters": ENRICHMENT_CACHE_PARAMETERS,
+        "columns": ENRICHMENT_COLUMNS,
     }
 
 
@@ -140,10 +193,30 @@ def _fit_radial_comparator(
     n_jobs: int,
 ) -> Any:
     from sonic import ComparatorIrregular
+    from sonic.comparators.features import power_spectrum_anisotropy
 
-    panel = [aligned_samples[sid] for sid in sample_ids]
-    cmp = ComparatorIrregular(
-        samples=panel,
+    class GliomaComparator(ComparatorIrregular):
+        # Reuse each bounded raw-power chunk before SONIC reduces it to radial bins.
+        # The analysis already depends on this private SONIC chunker API.
+        def _nufft_spectrum_chunker(self, i, *, frequency_padding=0):
+            chunker, dc, presence, n_genes, grid = super()._nufft_spectrum_chunker(
+                i, frequency_padding=frequency_padding
+            )
+
+            def collect(start, stop):
+                power = chunker(start, stop)
+                self.anisotropy_[i, start:stop] = power_spectrum_anisotropy(
+                    power,
+                    grid,
+                    self._spacings[i],
+                    fft_solver=self._spectrum_fft_solver,
+                ).to_numpy()
+                return power
+
+            return collect, dc, presence, n_genes, grid
+
+    cmp = GliomaComparator(
+        samples=[aligned_samples[sid] for sid in sample_ids],
         gene_names=genes,
         feature_mode="radial",
         n_radial_bins=N_RADIAL_BINS,
@@ -151,22 +224,23 @@ def _fit_radial_comparator(
         obsm_key="spatial",
         presence_threshold=MIN_FRAC_PER_SAMPLE,
     )
+    cmp.anisotropy_ = np.full((len(sample_ids), len(genes), 3), np.nan)
     cmp.compute_spectra(n_jobs=n_jobs, progress=False)
     return cmp
 
 
-def _idh_status_comparison_cache_ready(data_root: Path) -> bool:
-    """Return whether the complete IDH-status comparison cache is valid."""
-    signature_data = _comparison_signature_data(data_root)
-    if not cache_entry_is_current(
+def _idh_status_comparison_cache_ready() -> bool:
+    """Validate signatures and output fingerprints without decompressing results."""
+    return cache_entry_is_current(
         RESULT_DIR,
         "comparison",
-        cache_signature(signature_data),
+        cache_signature(_comparison_signature_data()),
         outputs=tuple(COMPARISON_CACHE_FILES.values()),
-    ):
-        return False
-    if not _spatial_diagnostics_cache_ready():
-        return False
+    )
+
+
+def _comparison_outputs_valid() -> bool:
+    """Validate the complete schema once, before recording output fingerprints."""
     required = {
         "Feature",
         "P_DE",
@@ -183,12 +257,22 @@ def _idh_status_comparison_cache_ready(data_root: Path) -> bool:
         if not required.issubset(real_tests.columns) or not null_required.issubset(null.columns):
             return False
         with np.load(SPECTRA_FILE, allow_pickle=True) as spectra:
-            if not {"spectra", "freq_edges", "sample_ids", "groups", "genes"}.issubset(
-                spectra.files
-            ):
+            if not {
+                "spectra",
+                "freq_edges",
+                "sample_ids",
+                "groups",
+                "genes",
+                "presence",
+                "anisotropy",
+                "h5ad_paths",
+            }.issubset(spectra.files):
                 return False
             spectra_shape = spectra["spectra"].shape
-            n_edges = spectra["freq_edges"].size
+            edges = spectra["freq_edges"]
+            presence = spectra["presence"]
+            anisotropy_shape = spectra["anisotropy"].shape
+            paths = spectra["h5ad_paths"].astype(str).tolist()
             cached_samples = spectra["sample_ids"].astype(str).tolist()
             cached_groups = spectra["groups"].astype(str).tolist()
             cached_genes = spectra["genes"].astype(str).tolist()
@@ -202,8 +286,15 @@ def _idh_status_comparison_cache_ready(data_root: Path) -> bool:
         or set(real_tests["Feature"].astype(str)) != set(cached_genes)
         or cached_samples != expected_samples
         or cached_groups != expected_groups
-        or spectra_shape != (len(SAMPLES), n_genes, N_RADIAL_BINS)
-        or n_edges != N_RADIAL_BINS + 1
+        or edges.ndim != 1
+        or edges.size < 2
+        or not np.isfinite(edges).all()
+        or not np.all(np.diff(edges) > 0)
+        or spectra_shape != (len(SAMPLES), n_genes, edges.size - 1)
+        or presence.shape != (len(SAMPLES), n_genes)
+        or presence.dtype != np.bool_
+        or anisotropy_shape != (len(SAMPLES), n_genes, 3)
+        or paths != [str(Path("adata") / f"{sid}.h5ad") for sid in expected_samples]
     ):
         return False
     expected_null_rows = 2 * N_LABEL_PERMUTATIONS * n_genes
@@ -278,20 +369,25 @@ def _sample_gene_means(
 
 
 def _effective_rank_from_observations(values: np.ndarray) -> float:
-    """Effective rank of the gene covariance from observation x gene values."""
+    """Exact covariance participation ratio via bounded Gram blocks, without SVD."""
     x = np.asarray(values, dtype=float)
     if x.ndim != 2 or min(x.shape) < 2:
         return float("nan")
     x = x - x.mean(axis=0, keepdims=True)
-    eig = np.linalg.svd(x, compute_uv=False, full_matrices=False) ** 2
-    total = float(eig.sum())
+    total = float(np.einsum("ij,ij->", x, x))
     if total <= 0:
         return float("nan")
-    return float(total * total / float((eig**2).sum()))
+    if x.shape[0] > x.shape[1]:
+        x = x.T
+    denominator = 0.0
+    for start in range(0, x.shape[0], 256):
+        gram = x[start : start + 256] @ x.T
+        denominator += float(np.einsum("ij,ij->", gram, gram))
+    return total * total / denominator
 
 
 def _spatial_diagnostics_table(
-    comparator: Any,
+    anisotropy: np.ndarray,
     spectra: np.ndarray,
     aligned_samples: dict[str, Any],
     sample_ids: list[str],
@@ -299,8 +395,6 @@ def _spatial_diagnostics_table(
     genes: list[str],
 ) -> pd.DataFrame:
     """Per-sample anisotropy and expression/spectrum covariance effective ranks."""
-    from sonic.comparators.features import power_spectrum_anisotropy
-
     rows: list[pd.DataFrame] = []
     for sample_idx, sample_id in enumerate(sample_ids):
         group = str(groups[sample_idx])
@@ -334,8 +428,10 @@ def _spatial_diagnostics_table(
             )
         )
 
+        del x_expr
+
         # Effective rank of gene-by-gene covariance from log radial power profiles.
-        x_power = np.log(np.maximum(spectra[sample_idx], 1e-12)).T
+        x_power = np.log(np.maximum(np.asarray(spectra[sample_idx], dtype=float), 1e-12)).T
         power_rank = _effective_rank_from_observations(x_power)
         rows.append(
             pd.DataFrame(
@@ -359,22 +455,9 @@ def _spatial_diagnostics_table(
             )
         )
 
-        # Radial bins discard angle, so re-stream raw 2D power in bounded chunks.
-        spectrum_chunker, _dc, _presence, n_genes, grid_shape = comparator._nufft_spectrum_chunker(
-            sample_idx
-        )
-        chunk_size = int(comparator._nufft_chunk_size)
-        anis = pd.concat(
-            [
-                power_spectrum_anisotropy(
-                    spectrum_chunker(start, min(start + chunk_size, n_genes)),
-                    grid_shape,
-                    comparator._spacings[sample_idx],
-                    fft_solver=comparator._spectrum_fft_solver,
-                )
-                for start in range(0, n_genes, chunk_size)
-            ],
-            ignore_index=True,
+        anis = pd.DataFrame(
+            anisotropy[sample_idx],
+            columns=["anisotropy", "dominant_angle_deg", "total_power"],
         )
         anis.insert(0, "gene", genes)
         anis.insert(0, "group_label", group_label)
@@ -391,20 +474,64 @@ def _spatial_diagnostics_table(
     return pd.concat(rows, ignore_index=True, sort=False)
 
 
-def _spatial_diagnostics_cache_ready() -> bool:
-    """Return whether the diagnostics cache has every required metric basis."""
-    if not SPATIAL_DIAGNOSTICS_FILE.exists() or SPATIAL_DIAGNOSTICS_FILE.stat().st_size == 0:
-        return False
-    try:
-        diagnostics = pd.read_csv(SPATIAL_DIAGNOSTICS_FILE, usecols=["metric", "basis"])
-    except (OSError, ValueError, pd.errors.ParserError):
-        return False
-    observed = set(diagnostics[["metric", "basis"]].itertuples(index=False, name=None))
+def _diagnostics_signature_data() -> dict[str, Any]:
     return {
-        ("anisotropy", "raw_2d_power"),
-        ("effective_rank", "expression_spots"),
-        ("effective_rank", "radial_power_bins"),
-    }.issubset(observed)
+        "source": _stage_source(
+            _effective_rank_from_observations,
+            _spatial_diagnostics_table,
+            run_spatial_diagnostics_cache,
+        ),
+        "cache_revision": CACHE_REVISIONS["diagnostics"],
+        "spectra": path_fingerprint(SPECTRA_FILE),
+        "group_labels": GROUP_LABELS,
+    }
+
+
+def run_spatial_diagnostics_cache(
+    *, force: bool = False, _context: dict | None = None
+) -> dict[str, str]:
+    """Rebuild diagnostics from current spectra without repeating comparisons or NUFFTs."""
+    require_current_comparison_cache()
+    signature_data = _diagnostics_signature_data()
+    outputs = {"spatial_diagnostics": project_relative(SPATIAL_DIAGNOSTICS_FILE)}
+    if not force and cache_entry_is_current(
+        RESULT_DIR,
+        "diagnostics",
+        cache_signature(signature_data),
+        outputs=(SPATIAL_DIAGNOSTICS_FILE,),
+    ):
+        return outputs
+    with np.load(SPECTRA_FILE, allow_pickle=True) as cache:
+        sample_ids = cache["sample_ids"].astype(str).tolist()
+        groups = cache["groups"].astype(str)
+        genes = cache["genes"].astype(str).tolist()
+        spectra = cache["spectra"]
+        anisotropy = cache["anisotropy"]
+        meta = pd.DataFrame(
+            {
+                "sample_id": sample_ids,
+                "group": groups,
+                "h5ad_path": [
+                    str(DATA_ROOT.expanduser().resolve() / str(path))
+                    for path in cache["h5ad_paths"]
+                ],
+            }
+        )
+    aligned = (_context or {}).get("aligned_samples")
+    if aligned is None:
+        aligned, _ = load_normalized_samples_from_metadata(meta, genes=genes)
+    save_csv(
+        _spatial_diagnostics_table(anisotropy, spectra, aligned, sample_ids, groups, genes),
+        SPATIAL_DIAGNOSTICS_FILE,
+    )
+    update_cache_entry(
+        RESULT_DIR,
+        "diagnostics",
+        cache_signature(signature_data),
+        (SPATIAL_DIAGNOSTICS_FILE,),
+        signature_data=signature_data,
+    )
+    return outputs
 
 
 def _ranked_gene_sets(real_tests: pd.DataFrame, *, top_n: int = 100) -> dict[str, list[str]]:
@@ -416,51 +543,45 @@ def _ranked_gene_sets(real_tests: pd.DataFrame, *, top_n: int = 100) -> dict[str
     return ranked
 
 
-def _missing_enrichment_pairs(terms: pd.DataFrame) -> set[tuple[str, str]]:
-    """Return expected gene-set/source combinations absent from an enrichment table."""
-    expected = {
-        (gene_set, source) for gene_set in ("DE", "DF_norm") for source in ("GO:BP", "KEGG")
-    }
-    if not {"gene_set", "source"}.issubset(terms.columns):
-        return expected
-    observed = set(
-        terms[["gene_set", "source"]]
-        .dropna()
-        .astype(str)
-        .drop_duplicates()
-        .itertuples(index=False, name=None)
-    )
-    return expected - observed
+ENRICHMENT_COLUMNS = [
+    "gene_set",
+    "n_query_genes",
+    "source",
+    "native",
+    "name",
+    "description",
+    "p_value",
+    "p_adjust",
+    "q_value",
+    "intersection_size",
+    "term_size",
+    "hit_genes",
+    "semantic_simplified",
+]
 
 
 def _enrichment_cache_ready() -> bool:
-    """Return whether cached GO BP and KEGG results cover both ranked gene sets."""
-    signature_data = _enrichment_signature_data()
-    if not cache_entry_is_current(
+    """Include valid header-only results; R failures never publish cache entries."""
+    return cache_entry_is_current(
         RESULT_DIR,
         "enrichment",
-        cache_signature(signature_data),
+        cache_signature(_enrichment_signature_data()),
         outputs=(ENRICHMENT_TERMS_FILE,),
-    ):
-        return False
-    try:
-        terms = pd.read_csv(ENRICHMENT_TERMS_FILE)
-    except (OSError, ValueError, pd.errors.ParserError):
-        return False
-    return not _missing_enrichment_pairs(terms)
+    )
 
 
 def _read_enrichment_outputs(
     out_paths: dict[str, Path], gene_sets: dict[str, list[str]]
 ) -> list[pd.DataFrame]:
-    """Read non-empty clusterProfiler job outputs and restore gene-set labels."""
-    parts: list[pd.DataFrame] = []
+    """Require every submitted job's output, preserving successful empty tables."""
+    parts = []
     for gene_set, out_path in out_paths.items():
-        if not out_path.exists() or out_path.stat().st_size == 0:
-            continue
-        part = pd.read_csv(out_path)
-        if part.empty:
-            continue
+        part = pd.read_csv(out_path)  # Missing, zero-byte, or malformed outputs must fail.
+        required = set(ENRICHMENT_COLUMNS) - {"gene_set", "n_query_genes"}
+        if not required.issubset(part.columns):
+            raise ValueError(
+                f"Invalid enrichment output {out_path}: missing {sorted(required - set(part.columns))}"
+            )
         part.insert(0, "gene_set", gene_set)
         part.insert(1, "n_query_genes", len(gene_sets[gene_set]))
         parts.append(part)
@@ -473,7 +594,9 @@ def run_enrichment_cache(
 ) -> dict[str, str]:
     """Run GO BP + KEGG enrichment for top DE and DF-norm genes."""
     ensure_dirs()
-    if _enrichment_cache_ready() and not force:
+    require_current_comparison_cache()
+    signature_data = _enrichment_signature_data()
+    if not force and _enrichment_cache_ready():
         log("using cached clusterProfiler enrichment; pass --force to recompute")
         return {"enrichment": project_relative(ENRICHMENT_TERMS_FILE)}
     if ENRICHMENT_TERMS_FILE.exists() and not force:
@@ -529,17 +652,13 @@ def run_enrichment_cache(
             )
         parts = _read_enrichment_outputs(out_paths, gene_sets)
 
-    terms = pd.concat(parts, ignore_index=True, sort=False) if parts else pd.DataFrame()
-    missing = _missing_enrichment_pairs(terms)
-    if missing:
-        formatted = ", ".join(f"{gene_set}/{source}" for gene_set, source in sorted(missing))
-        raise RuntimeError(
-            "clusterProfiler returned incomplete enrichment results: "
-            f"{formatted}. Check the R output and KEGG network access."
-        )
+    terms = (
+        pd.concat(parts, ignore_index=True, sort=False)
+        if parts
+        else pd.DataFrame(columns=ENRICHMENT_COLUMNS)
+    )
     save_csv(terms, ENRICHMENT_TERMS_FILE)
     META_PROGRAM_GENE_MAP_FILE.unlink(missing_ok=True)
-    signature_data = _enrichment_signature_data()
     update_cache_entry(
         RESULT_DIR,
         "enrichment",
@@ -566,6 +685,18 @@ def _eligible_df_norm_pathways(enrichment: pd.DataFrame) -> pd.DataFrame:
     missing = required - set(enrichment.columns)
     if missing:
         raise KeyError(f"Enrichment table is missing columns: {sorted(missing)}")
+
+    if enrichment.empty or not enrichment["gene_set"].eq("DF_norm").any():
+        return pd.DataFrame(
+            columns=[
+                *enrichment.columns,
+                "df_norm_fdr",
+                "de_fdr",
+                "contrast_score",
+                "selection_score",
+                "metaprograms",
+            ]
+        )
 
     keys = ["source", "native"]
     de_fdr = (
@@ -604,6 +735,9 @@ def _eligible_df_norm_pathways(enrichment: pd.DataFrame) -> pd.DataFrame:
         np.maximum(terms["de_fdr"], eps) / np.maximum(terms["df_norm_fdr"], eps)
     )
     terms["selection_score"] = terms["contrast_score"] / np.log2(terms["term_size"] + 1)
+    if terms.empty:
+        terms["metaprograms"] = pd.Series(index=terms.index, dtype=object)
+        return terms
     pathway_text = (
         terms.reindex(columns=["name", "display_name", "description"], fill_value="")
         .fillna("")
@@ -750,8 +884,34 @@ def assign_top_df_norm_genes_to_metaprograms(
     return pd.DataFrame(rows).reindex(columns=columns)
 
 
-def run_metaprogram_gene_map_cache() -> dict[str, str]:
+def _metaprogram_signature_data() -> dict[str, Any]:
+    return {
+        "source": _stage_source(
+            _eligible_df_norm_pathways,
+            assign_top_df_norm_genes_to_metaprograms,
+            run_metaprogram_gene_map_cache,
+        ),
+        "cache_revision": CACHE_REVISIONS["metaprogram"],
+        "inputs": [path_fingerprint(REAL_TESTS_FILE), path_fingerprint(ENRICHMENT_TERMS_FILE)],
+        "fdr": FDR_ALPHA,
+        "programs": META_PROGRAMS,
+        "keywords": META_PROGRAM_PATHWAY_KEYWORDS,
+    }
+
+
+def run_metaprogram_gene_map_cache(*, force: bool = False) -> dict[str, str]:
     """Regenerate the top-100 DF-norm meta-program map from current caches."""
+    require_current_comparison_cache()
+    if not _enrichment_cache_ready():
+        raise RuntimeError("Stale or missing glioma enrichment cache; rerun glioma_idh.workflow.")
+    signature_data = _metaprogram_signature_data()
+    if not force and cache_entry_is_current(
+        RESULT_DIR,
+        "metaprogram",
+        cache_signature(signature_data),
+        outputs=(META_PROGRAM_GENE_MAP_FILE,),
+    ):
+        return {"metaprogram_gene_map": project_relative(META_PROGRAM_GENE_MAP_FILE)}
     missing = [path for path in (REAL_TESTS_FILE, ENRICHMENT_TERMS_FILE) if not path.exists()]
     if missing:
         raise FileNotFoundError(f"Missing inputs for meta-program assignment: {missing}")
@@ -760,6 +920,13 @@ def run_metaprogram_gene_map_cache() -> dict[str, str]:
         pd.read_csv(ENRICHMENT_TERMS_FILE),
     )
     save_csv(gene_map, META_PROGRAM_GENE_MAP_FILE)
+    update_cache_entry(
+        RESULT_DIR,
+        "metaprogram",
+        cache_signature(signature_data),
+        (META_PROGRAM_GENE_MAP_FILE,),
+        signature_data=signature_data,
+    )
     assigned = int(gene_map["metaprogram"].ne("unassigned").sum())
     mixed = int(gene_map["is_mixed"].sum())
     log(
@@ -771,26 +938,30 @@ def run_metaprogram_gene_map_cache() -> dict[str, str]:
 
 def run_idh_status_comparison_cache(
     *,
-    data_root: Path | str | None = None,
     force: bool = False,
     n_jobs: int = 1,
+    _context: dict | None = None,
 ) -> dict[str, str]:
-    """Cache the IDH-status DE/DF comparison, nulls, spectra, and diagnostics."""
+    """Cache comparisons, label shuffles, and spectra with streamed anisotropy."""
     ensure_dirs()
-    resolved_data_root = resolve_data_root(data_root)
-    if _idh_status_comparison_cache_ready(resolved_data_root) and not force:
+    signature_data = _comparison_signature_data()
+    if not force and cache_entry_is_current(
+        RESULT_DIR,
+        "comparison",
+        cache_signature(signature_data),
+        outputs=tuple(COMPARISON_CACHE_FILES.values()),
+    ):
         log("using cached glioma IDH-status comparison; pass --force to recompute")
         return {
             "real_tests": project_relative(REAL_TESTS_FILE),
             "permutation_null": project_relative(PERMUTATION_NULL_FILE),
             "spectra": project_relative(SPECTRA_FILE),
-            "spatial_diagnostics": project_relative(SPATIAL_DIAGNOSTICS_FILE),
         }
 
     META_PROGRAM_GENE_MAP_FILE.unlink(missing_ok=True)
-    log(f"data_root={resolved_data_root}")
+    log(f"data_root={DATA_ROOT}")
     # Load all samples once, normalize in memory, then keep only the selected genes.
-    samples, meta = load_normalized_samples(resolved_data_root)
+    samples, meta = load_normalized_samples()
     sample_ids = meta["sample_id"].tolist()
     groups = meta["group"].astype(str).to_numpy()
 
@@ -807,6 +978,7 @@ def run_idh_status_comparison_cache(
     # SONIC expects every sample to expose the same feature order.
     log("aligning samples to the selected gene panel")
     aligned_abundance = align_samples_to_genes(samples, genes)
+    del samples
     log(
         "fitting radial ComparatorIrregular "
         f"({len(sample_ids)} samples x {len(genes):,} genes x {N_RADIAL_BINS} bins)"
@@ -845,6 +1017,8 @@ def run_idh_status_comparison_cache(
     np.savez_compressed(
         SPECTRA_FILE,
         spectra=np.asarray(cmp.spectra_, dtype=np.float32),
+        presence=np.asarray(cmp.presence_, dtype=bool),
+        anisotropy=cmp.anisotropy_,
         freq_edges=np.asarray(cmp.freq_edges, dtype=np.float64),
         sample_ids=np.asarray(sample_ids, dtype=object),
         groups=np.asarray(groups, dtype=object),
@@ -853,29 +1027,21 @@ def run_idh_status_comparison_cache(
             dtype=object,
         ),
         h5ad_paths=np.asarray(
-            [str(Path(path).relative_to(resolved_data_root)) for path in meta["h5ad_path"]],
+            [
+                str(Path(path).relative_to(DATA_ROOT.expanduser().resolve()))
+                for path in meta["h5ad_path"]
+            ],
             dtype=object,
         ),
         genes=np.asarray(genes, dtype=object),
     )
     log(f"wrote {project_relative(SPECTRA_FILE)}")
 
-    # Compute per-sample anisotropy and effective ranks of expression and radial power.
-    # Radial bins discard angle, so stream raw 2D power from the fitted comparator.
-    log("computing per-sample anisotropy and covariance effective ranks")
-    save_csv(
-        _spatial_diagnostics_table(
-            cmp,
-            np.asarray(cmp.spectra_, dtype=float),
-            aligned_abundance,
-            sample_ids,
-            groups,
-            genes,
-        ),
-        SPATIAL_DIAGNOSTICS_FILE,
-    )
+    if not _comparison_outputs_valid():
+        raise RuntimeError("Incomplete comparison outputs; cache was not published.")
+    if _context is not None:
+        _context["aligned_samples"] = aligned_abundance
 
-    signature_data = _comparison_signature_data(resolved_data_root)
     update_cache_entry(
         RESULT_DIR,
         "comparison",
@@ -888,31 +1054,48 @@ def run_idh_status_comparison_cache(
         "real_tests": project_relative(REAL_TESTS_FILE),
         "permutation_null": project_relative(PERMUTATION_NULL_FILE),
         "spectra": project_relative(SPECTRA_FILE),
-        "spatial_diagnostics": project_relative(SPATIAL_DIAGNOSTICS_FILE),
     }
 
 
 def run_workflow(
     *,
-    data_root: Path | str | None = None,
     force: bool = False,
     n_jobs: int = 1,
     run_enrichment: bool = True,
 ) -> dict[str, Any]:
     """Compute/cache the analysis inputs consumed by ``visualization.ipynb``."""
     started_at = time.perf_counter()
-    resolved_data_root = resolve_data_root(data_root)
-    reused = [not force and _idh_status_comparison_cache_ready(resolved_data_root)]
-    if run_enrichment:
-        reused.append(not force and _enrichment_cache_ready())
+    reused = [not force and _idh_status_comparison_cache_ready()]
+    context: dict[str, Any] = {}
     outputs = run_idh_status_comparison_cache(
-        data_root=resolved_data_root,
         force=force,
         n_jobs=n_jobs,
+        _context=context,
     )
+    reused.append(
+        not force
+        and cache_entry_is_current(
+            RESULT_DIR,
+            "diagnostics",
+            cache_signature(_diagnostics_signature_data()),
+            outputs=(SPATIAL_DIAGNOSTICS_FILE,),
+        )
+    )
+    outputs.update(run_spatial_diagnostics_cache(force=force, _context=context))
+    context.clear()
     if run_enrichment:
+        reused.append(not force and _enrichment_cache_ready())
         outputs.update(run_enrichment_cache(force=force))
-        outputs.update(run_metaprogram_gene_map_cache())
+        reused.append(
+            not force
+            and cache_entry_is_current(
+                RESULT_DIR,
+                "metaprogram",
+                cache_signature(_metaprogram_signature_data()),
+                outputs=(META_PROGRAM_GENE_MAP_FILE,),
+            )
+        )
+        outputs.update(run_metaprogram_gene_map_cache(force=force))
     outputs["cache_manifest"] = project_relative(RESULT_DIR / CACHE_MANIFEST_FILENAME)
     manifest_path = write_workflow_manifest(
         "glioma_idh",
@@ -921,7 +1104,7 @@ def run_workflow(
         parameters={
             "cache_parameters": CACHE_PARAMETERS,
             "cache_revisions": CACHE_REVISIONS,
-            "data_root": str(data_root) if data_root is not None else None,
+            "data_root": project_relative(DATA_ROOT.expanduser().resolve()),
             "force": force,
             "n_jobs": n_jobs,
             "run_enrichment": run_enrichment,
@@ -938,12 +1121,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run/cache the Visium human glioma IDH-status analysis."
     )
-    parser.add_argument(
-        "--data-root",
-        type=Path,
-        default=None,
-        help="Root containing adata/*.h5ad. Defaults to data/visium_glioma_idh_status.",
-    )
     parser.add_argument("--force", action="store_true", help="Recompute cached outputs.")
     parser.add_argument("--n-jobs", type=int, default=1)
     parser.add_argument(
@@ -957,7 +1134,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     run_workflow(
-        data_root=args.data_root,
         force=args.force,
         n_jobs=args.n_jobs,
         run_enrichment=not args.skip_enrichment,

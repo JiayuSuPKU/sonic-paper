@@ -14,7 +14,6 @@ from scripts.paper_utils import (
     ensure_directories,
     log,
     project_relative,
-    resolve_cached_data_path,
     save_csv,
 )
 
@@ -34,17 +33,9 @@ def ensure_dirs() -> None:
     ensure_directories(RESULT_DIR, FIGURE_DIR)
 
 
-def resolve_data_root(data_root: Path | str | None) -> Path:
-    """Resolve the caller-supplied data root without baking in machine paths."""
-    if data_root is None:
-        from .config import DATA_ROOT
-
-        return DATA_ROOT
-    return Path(data_root).expanduser().resolve()
-
-
-def sample_metadata(data_root: Path) -> pd.DataFrame:
+def sample_metadata() -> pd.DataFrame:
     """Build a deterministic sample metadata table for the configured cohort."""
+    data_root = DATA_ROOT.expanduser().resolve()
     rows = []
     for sample_id, group in SAMPLES:
         rows.append(
@@ -70,14 +61,15 @@ def _load_normalized_samples_from_meta(
     meta: pd.DataFrame,
     *,
     missing_context: str,
+    genes: list[str] | None = None,
 ) -> tuple[dict[str, ad.AnnData], pd.DataFrame]:
     """Load h5ad paths from a metadata table and return log-normalized objects."""
     if "h5ad_path" not in meta.columns:
         raise KeyError("Sample metadata must include an 'h5ad_path' column.")
     meta = meta.copy()
-    meta["h5ad_path"] = [
-        str(resolve_cached_data_path(path, DATA_ROOT)) for path in meta["h5ad_path"]
-    ]
+    if any(not Path(path).expanduser().is_absolute() for path in meta["h5ad_path"]):
+        raise ValueError("Expected absolute sample paths under config.DATA_ROOT.")
+    meta["h5ad_path"] = [str(Path(path).expanduser()) for path in meta["h5ad_path"]]
     missing = [Path(p) for p in meta["h5ad_path"] if not Path(p).exists()]
     if missing:
         formatted = "\n".join(f"  - {p}" for p in missing[:8])
@@ -85,8 +77,7 @@ def _load_normalized_samples_from_meta(
         raise FileNotFoundError(
             f"Missing {len(missing)} glioma .h5ad files {missing_context}:\n"
             f"{formatted}{extra}\n"
-            "Run download_glioma_data.py, rerun workflow.py with --data-root, "
-            "or pass --data-root to an existing cache."
+            "Check DATA_ROOT in config.py and run download_glioma_data.py."
         )
 
     samples: dict[str, ad.AnnData] = {}
@@ -94,33 +85,41 @@ def _load_normalized_samples_from_meta(
         sid = str(row.sample_id)
         path = Path(row.h5ad_path)
         log(f"loading {sid}")
+        from .download_glioma_data import _h5ad_is_current
+
+        if not _h5ad_is_current(path):
+            raise ValueError(
+                f"Stale QC or coordinate metadata in {path}; rerun download_glioma_data."
+            )
         a = ad.read_h5ad(path)
         if a.n_obs == 0:
             raise ValueError(f"{path} has 0 spots")
         a.var_names_make_unique()
         normalize_total_log1p(a)
-        samples[sid] = a
+        samples[sid] = a if genes is None else align_samples_to_genes({sid: a}, genes)[sid]
+        del a
     return samples, meta
 
 
-def load_normalized_samples(
-    data_root: Path,
-) -> tuple[dict[str, ad.AnnData], pd.DataFrame]:
-    """Load every configured glioma sample from a data root."""
-    meta = sample_metadata(data_root)
+def load_normalized_samples() -> tuple[dict[str, ad.AnnData], pd.DataFrame]:
+    """Load every configured glioma sample under config.DATA_ROOT."""
+    meta = sample_metadata()
     return _load_normalized_samples_from_meta(
         meta,
-        missing_context=f"under {data_root}",
+        missing_context=f"under {DATA_ROOT}",
     )
 
 
 def load_normalized_samples_from_metadata(
     meta: pd.DataFrame,
+    *,
+    genes: list[str] | None = None,
 ) -> tuple[dict[str, ad.AnnData], pd.DataFrame]:
-    """Load samples from cached workflow metadata h5ad paths."""
+    """Normalize full libraries, then retain only requested genes when supplied."""
     return _load_normalized_samples_from_meta(
         meta.copy(),
         missing_context="referenced by cached spectra metadata",
+        genes=genes,
     )
 
 
