@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import gc
-import json
 import logging
 import shutil
 from collections.abc import Mapping, Sequence
@@ -12,11 +10,16 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy.stats import hypergeom, spearmanr
+from sonic.comparators.multisample import (
+    compare_two_groups,
+    compare_two_groups_masked,
+    compare_two_groups_scalar,
+)
 
 from scripts.paper_utils import CLUSTERPROFILER_SCRIPT, cache_signature
 
 from . import config as C
-from . import embeddings, metrics, orthology, utils
+from . import metrics, orthology, utils
 
 LOGGER = logging.getLogger("embryo_xspecies.temporal")
 RESULT_DIR = C.COMPARISON_RESULT_DIR / "temporal"
@@ -160,7 +163,7 @@ def _temporal_conservation(
     table.loc[~mouse_top & human_top, "dynamic_group"] = "human-specific dynamic"
     table.loc[mouse_top & human_top, "dynamic_group"] = "conserved dynamic"
     overlap = int((mouse_top & human_top).sum())
-    expected = int(mouse_top.sum()) * int(human_top.sum()) / len(table)
+    expected = int(mouse_top.sum()) * int(human_top.sum()) / max(len(table), 1)
     rho, rho_p = spearmanr(
         table["between_stage_variance_mouse"],
         table["between_stage_variance_human"],
@@ -173,7 +176,7 @@ def _temporal_conservation(
         "mouse_specific_top_decile": int((mouse_top & ~human_top).sum()),
         "human_specific_top_decile": int((~mouse_top & human_top).sum()),
         "top_decile_expected": expected,
-        "top_decile_fold_enrichment": overlap / expected,
+        "top_decile_fold_enrichment": overlap / expected if expected else float("nan"),
         "top_decile_hypergeom_p": float(
             hypergeom.sf(
                 overlap - 1,
@@ -217,14 +220,19 @@ def _select_temporal_examples(
         ranked = conservation[conservation["dynamic_group"].eq(category)].sort_values(
             columns, ascending=ascending
         )
+        if ranked.empty:
+            LOGGER.warning("No eligible temporal example for %s.", category)
+            continue
         group_terms = displayed_terms[displayed_terms["query_group"].eq(category)]
         symbol_column = "human_symbol" if category == "human-specific dynamic" else "mouse_symbol"
-        if group_terms.empty:
+        hit_genes = set("/".join(group_terms["hit_genes"].dropna().astype(str)).split("/"))
+        go_ranked = ranked[ranked[symbol_column].isin(hit_genes)]
+        if go_ranked.empty:
+            group_terms = group_terms.iloc[:0]
             selection_basis = "temporal variation percentile; no specific GO term"
             pathway_terms = ""
         else:
-            hit_genes = set("/".join(group_terms["hit_genes"].dropna().astype(str)).split("/"))
-            ranked = ranked[ranked[symbol_column].isin(hit_genes)]
+            ranked = go_ranked
             selection_basis = (
                 "highest focal temporal variation percentile among displayed GO term genes"
             )
@@ -251,7 +259,18 @@ def _select_temporal_examples(
                 "pathway_terms": pathway_terms,
             }
         )
-    return pd.DataFrame(selected)
+    return pd.DataFrame(
+        selected,
+        columns=[
+            "category",
+            "mouse_symbol",
+            "human_symbol",
+            "mouse_dynamic_percentile",
+            "human_dynamic_percentile",
+            "selection_basis",
+            "pathway_terms",
+        ],
+    )
 
 
 def quantify_stage_movements(
@@ -345,16 +364,25 @@ def _transition_tests(
     genes: list[str],
 ) -> pd.DataFrame:
     """Run DE, amplitude-sensitive DF, and shape-only DF through SONIC."""
-    comparator = embeddings.comparator_from_cached_spectra(bundle, section_indices, genes)
-    design = labels[section_indices]
+    indices = np.asarray(section_indices, dtype=int)
+    columns = np.asarray([bundle["name_to_col"][gene] for gene in genes], dtype=int)
+    spectra = bundle["spectra"][np.ix_(indices, columns)]
+    dc = bundle["dc"][np.ix_(indices, columns)]
+    presence = bundle["presence"][np.ix_(indices, columns)]
+    design = labels[indices]
+    compare_frequency = compare_two_groups if presence.all() else compare_two_groups_masked
+    frequency_args = {} if presence.all() else {"presence": presence}
     tables = [
         _test_table(
-            comparator.test_diff_expr(design, log_expression=False),
+            compare_two_groups_scalar(dc, design, gene_names=genes, log_expression=False),
             "de",
         ),
         _test_table(
-            comparator.test_diff_freq(
+            compare_frequency(
+                spectra,
                 design,
+                gene_names=genes,
+                **frequency_args,
                 statistic="log_l2",
                 null="analytic",
                 normalize_shape=False,
@@ -362,8 +390,11 @@ def _transition_tests(
             "df",
         ),
         _test_table(
-            comparator.test_diff_freq(
+            compare_frequency(
+                spectra,
                 design,
+                gene_names=genes,
+                **frequency_args,
                 statistic="log_l2",
                 null="analytic",
                 normalize_shape=True,
@@ -374,8 +405,6 @@ def _transition_tests(
     merged = tables[0]
     for table in tables[1:]:
         merged = merged.merge(table, on="feature", validate="one_to_one")
-    del comparator
-    gc.collect()
     return merged
 
 
@@ -569,6 +598,18 @@ def _summarize(
     return pd.DataFrame(rows)
 
 
+def require_current_cache(embedding: dict[str, Any]) -> dict[str, Any]:
+    """Reject stale or incomplete plotting inputs without recomputing analysis."""
+    manifest = utils.current_cache_manifest(
+        RESULT_DIR, _CACHE_ARTIFACTS, _input_signature_data(embedding)
+    )
+    if manifest is None:
+        raise RuntimeError(
+            f"Stale or incomplete cache: {RESULT_DIR}. Run python -m scripts.embryo_xspecies.workflow --force."
+        )
+    return manifest
+
+
 def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
     """Compute or load global variation and consecutive-stage statistics."""
     signature_data = _input_signature_data(embedding)
@@ -747,6 +788,6 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
             ),
         },
     }
-    (RESULT_DIR / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    utils.write_cache_manifest(RESULT_DIR, _CACHE_ARTIFACTS, manifest)
     LOGGER.info("Wrote temporal metrics to %s", RESULT_DIR)
     return manifest

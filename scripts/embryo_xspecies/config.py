@@ -108,7 +108,7 @@ GO_CACHE_PARAMETERS = {
     "source": GO_SOURCE,
     "orgdb": GO_ORGDB,
     "semantic_simplify": GO_SEMANTIC_SIMPLIFY,
-    "semantic_simplify_p_adjust_cutoff": GO_FDR_THRESHOLD,
+    "semantic_simplify_fdr_cutoff": GO_FDR_THRESHOLD,
     "maximum_term_universe_fraction": GO_MAX_TERM_UNIVERSE_FRACTION,
     "display_terms_per_group": GO_DISPLAY_TERMS_PER_GROUP,
     "timeout_seconds": GO_TIMEOUT_SECONDS,
@@ -117,7 +117,7 @@ METRICS_CACHE_PARAMETERS = {
     "n_pattern_clusters": N_PATTERN_CLUSTERS,
     "local_mixing_neighbors": LOCAL_MIXING_NEIGHBORS,
     "local_mixing_quantiles": LOCAL_MIXING_QUANTILES,
-    "go": GO_CACHE_PARAMETERS,
+    "go": {**GO_CACHE_PARAMETERS, "fdr_scope": "all cluster terms within each species"},
 }
 TEMPORAL_CACHE_PARAMETERS = {
     "max_within_stage_percentile": TEMPORAL_MAX_WITHIN_STAGE_PERCENTILE,

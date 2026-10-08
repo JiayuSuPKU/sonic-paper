@@ -23,7 +23,6 @@ from . import (
     metrics,
     orthology,
     preprocessing,
-    sv,
     temporal,
 )
 
@@ -81,13 +80,11 @@ def run(
     LOGGER.info("Step 3/7: strict human-mouse orthology")
     orthology.prepare_orthologs(force=force)
 
-    LOGGER.info("Step 4/7: per-section spatial variability")
-    sv.run(force=rebuild_derived)
-
-    LOGGER.info("Step 5/7: per-section radial spectra and joint PCA")
+    LOGGER.info("Steps 4-5/7: per-section SV and spectra with shared loading, then joint PCA")
     embedding = embeddings.load_spectra_and_fit_joint_embedding(
         force=rebuild_derived,
         progress=progress,
+        include_sv=True,
     )
 
     LOGGER.info("Step 6/7: embedding metrics")

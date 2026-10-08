@@ -174,33 +174,51 @@ read_universe <- function(path) {
   unique(as.character(universe$gene))
 }
 
+simplify_go <- function(go, fdr_column, fdr_cutoff) {
+  if (is.null(go)) return(NULL)
+  go@result <- go@result[
+    !is.na(go@result[[fdr_column]]) & go@result[[fdr_column]] <= fdr_cutoff,
+    , drop = FALSE
+  ]
+  if (nrow(go@result) == 0) return(character())
+  if (is.null(go_sem_data)) go_sem_data <<- GOSemSim::godata(ont = "BP")
+  simplified <- simplify(
+    go, cutoff = GO_SIMPLIFY_CUTOFF, by = fdr_column,
+    select_fun = min, measure = GO_SIMPLIFY_MEASURE, semData = go_sem_data
+  )
+  as.character(as.data.frame(simplified)$ID)
+}
+
 run_one <- function(sub) {
   sub <- sub[order(sub$rank), , drop = FALSE]
-  out_path <- sub$out_path[[1]]
-  dir.create(dirname(out_path), recursive = TRUE, showWarnings = FALSE)
-
   orgdb_name <- clean_scalar(sub$orgdb)
   organism <- clean_scalar(sub$organism)
   universe_path <- if ("universe_path" %in% colnames(sub)) clean_scalar(sub$universe_path) else ""
-  semantic_simplify <- !("semantic_simplify" %in% colnames(sub)) ||
-    isTRUE(as.logical(sub$semantic_simplify[[1]]))
-  semantic_simplify_p_adjust_cutoff <- if (
-    "semantic_simplify_p_adjust_cutoff" %in% colnames(sub)
-  ) as.numeric(sub$semantic_simplify_p_adjust_cutoff[[1]]) else 1
+  fdr_group <- if ("fdr_group" %in% colnames(sub)) clean_scalar(sub$fdr_group) else ""
+  if (nzchar(fdr_group) && nzchar(organism)) {
+    stop("Grouped FDR is supported for GO-only jobs.", call. = FALSE)
+  }
+  job <- list(
+    out_path = sub$out_path[[1]],
+    query_name = paste(sub$panel[[1]], sub$test[[1]], sub$variant[[1]], sep = "_"),
+    fdr_group = fdr_group,
+    semantic_simplify = !("semantic_simplify" %in% colnames(sub)) ||
+      isTRUE(as.logical(sub$semantic_simplify[[1]])),
+    fdr_cutoff = if ("semantic_simplify_fdr_cutoff" %in% colnames(sub))
+      as.numeric(sub$semantic_simplify_fdr_cutoff[[1]]) else 1,
+    go = NULL, kegg = NULL, entrez_to_symbol = character()
+  )
   orgdb <- load_orgdb(orgdb_name)
   mapped <- map_symbols_to_entrez(unique(as.character(sub$gene)), orgdb)
   universe_symbols <- read_universe(universe_path)
   universe_mapped <- if (is.null(universe_symbols)) NULL else map_symbols_to_entrez(universe_symbols, orgdb)
   if (nrow(mapped) < 5 || (!is.null(universe_mapped) && nrow(universe_mapped) < 10)) {
-    write.csv(empty_result(), out_path, row.names = FALSE, quote = TRUE)
-    return(invisible(NULL))
+    return(job)
   }
 
   entrez <- unique(as.character(mapped$ENTREZID))
   universe_entrez <- if (is.null(universe_mapped)) NULL else unique(as.character(universe_mapped$ENTREZID))
-  entrez_to_symbol <- setNames(mapped$SYMBOL, mapped$ENTREZID)
-  query_name <- paste(sub$panel[[1]], sub$test[[1]], sub$variant[[1]], sep = "_")
-
+  job$entrez_to_symbol <- setNames(mapped$SYMBOL, mapped$ENTREZID)
   go_args <- list(
     gene = entrez,
     OrgDb = orgdb,
@@ -208,44 +226,19 @@ run_one <- function(sub) {
     ont = "BP",
     pvalueCutoff = 1,
     qvalueCutoff = 1,
-    pAdjustMethod = "BH"
+    # Grouped jobs receive one BH correction after all raw GO tests are available.
+    pAdjustMethod = if (nzchar(fdr_group)) "none" else "BH"
   )
   if (!is.null(universe_entrez)) {
     go_args$universe <- universe_entrez
   }
-  go <- tryCatch(
+  job$go <- tryCatch(
     do.call(enrichGO, go_args),
     error = function(e) {
-      stop("enrichGO failed for ", query_name, ": ", conditionMessage(e), call. = FALSE)
+      stop("enrichGO failed for ", job$query_name, ": ", conditionMessage(e), call. = FALSE)
     }
   )
 
-  go_simplified_ids <- NULL
-  if (!is.null(go) && semantic_simplify) {
-    # Terms outside the display FDR cannot replace a significant term because
-    # simplify() retains the minimum-p.adjust representative.
-    go_for_simplify <- go
-    go_for_simplify@result <- go_for_simplify@result[
-      !is.na(go_for_simplify@result$p.adjust) &
-        go_for_simplify@result$p.adjust <= semantic_simplify_p_adjust_cutoff,
-      ,
-      drop = FALSE
-    ]
-    if (nrow(go_for_simplify@result) > 0) {
-      go_simplified <- simplify(
-        go_for_simplify,
-        cutoff = GO_SIMPLIFY_CUTOFF,
-        by = "p.adjust",
-        select_fun = min,
-        measure = GO_SIMPLIFY_MEASURE
-      )
-      go_simplified_ids <- as.character(as.data.frame(go_simplified)$ID)
-    } else {
-      go_simplified_ids <- character()
-    }
-  }
-
-  kegg <- NULL
   if (nzchar(organism)) {
     kegg_args <- list(
       gene = entrez,
@@ -257,25 +250,67 @@ run_one <- function(sub) {
     if (!is.null(universe_entrez)) {
       kegg_args$universe <- universe_entrez
     }
-    kegg <- tryCatch(
+    job$kegg <- tryCatch(
       do.call(enrichKEGG, kegg_args),
       error = function(e) {
-        stop("enrichKEGG failed for ", query_name, ": ", conditionMessage(e), call. = FALSE)
+        stop("enrichKEGG failed for ", job$query_name, ": ", conditionMessage(e), call. = FALSE)
       }
     )
   }
+  job
+}
 
+write_job <- function(job) {
+  pooled <- nzchar(job$fdr_group)
+  fdr_column <- if (pooled) "global_qvalue" else "p.adjust"
+  simplified_ids <- if (job$semantic_simplify) simplify_go(job$go, fdr_column, job$fdr_cutoff) else NULL
   result <- rbind(
-    standardize_result(go, "GO:BP", query_name, entrez_to_symbol, go_simplified_ids),
-    standardize_result(kegg, "KEGG", query_name, entrez_to_symbol)
+    standardize_result(job$go, "GO:BP", job$query_name, job$entrez_to_symbol, simplified_ids),
+    standardize_result(job$kegg, "KEGG", job$query_name, job$entrez_to_symbol)
   )
-  if (nrow(result) > 0) {
-    result <- result[order(result$p_value, result$p_raw, result$source), , drop = FALSE]
+  if (pooled) {
+    # Keep a single reported FDR; query-level adjustments have no role here.
+    result <- result[, !names(result) %in% c("p_value", "p_adjust", "q_value", "significant"), drop = FALSE]
+    result$global_qvalue <- if (is.null(job$go)) numeric() else
+      job$go@result$global_qvalue[match(result$native, job$go@result$ID)]
   }
-  write.csv(result, out_path, row.names = FALSE, quote = TRUE)
-  invisible(NULL)
+  if (nrow(result) > 0) {
+    score <- if (pooled) result$global_qvalue else result$p_value
+    result <- result[order(score, result$p_raw, result$source), , drop = FALSE]
+  }
+  dir.create(dirname(job$out_path), recursive = TRUE, showWarnings = FALSE)
+  write.csv(result, job$out_path, row.names = FALSE, quote = TRUE)
 }
 
-for (job_id in unique(jobs$job_id)) {
-  run_one(jobs[jobs$job_id == job_id, , drop = FALSE])
+go_sem_data <- NULL
+
+# Only pooled jobs must stay in memory until their correction family is complete.
+job_results <- list()
+for (id in unique(jobs$job_id)) {
+  job <- run_one(jobs[jobs$job_id == id, , drop = FALSE])
+  if (nzchar(job$fdr_group)) {
+    job_results[[length(job_results) + 1L]] <- job
+  } else {
+    write_job(job)
+  }
 }
+fdr_groups <- vapply(job_results, function(job) job$fdr_group, character(1))
+for (group in unique(fdr_groups[nzchar(fdr_groups)])) {
+  indices <- which(fdr_groups == group)
+  pvalues <- lapply(job_results[indices], function(job) {
+    if (is.null(job$go)) numeric() else job$go@result$pvalue
+  })
+  adjusted <- p.adjust(unlist(pvalues), method = "BH")
+  offset <- 0L
+  for (index in indices) {
+    go <- job_results[[index]]$go
+    if (is.null(go)) next
+    count <- nrow(go@result)
+    go@result$global_qvalue <- adjusted[offset + seq_len(count)]
+    job_results[[index]]$go <- go
+    offset <- offset + count
+  }
+}
+
+
+for (job in job_results) write_job(job)

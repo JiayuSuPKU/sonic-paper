@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gc
 import hashlib
 import json
 import logging
@@ -15,10 +14,13 @@ import pandas as pd
 import scipy.sparse as sp
 
 from scripts.paper_utils import (
-    cache_signature as canonical_cache_signature,
+    cache_entry_is_current,
+    path_fingerprint,
+    source_provenance,
+    update_cache_entry,
 )
 from scripts.paper_utils import (
-    path_fingerprint,
+    cache_signature as canonical_cache_signature,
 )
 
 from . import config as C
@@ -49,8 +51,9 @@ def cache_signature_data(
     if missing:
         raise FileNotFoundError(missing[0])
     return {
+        "source": source_provenance(__file__),
         "cache_revision": cache_revision,
-        "inputs": [path_fingerprint(path) for path in unique_paths],
+        "inputs": [path_fingerprint(path, recursive=path.is_dir()) for path in unique_paths],
         "arrays": [_array_fingerprint(array) for array in arrays or []],
         "parameters": parameters,
     }
@@ -62,7 +65,12 @@ def current_cache_manifest(
     signature_data: dict[str, Any],
 ) -> dict[str, Any] | None:
     """Return the manifest only when every owned artifact matches current inputs."""
-    if not all((result_dir / name).exists() for name in artifacts):
+    if not cache_entry_is_current(
+        result_dir,
+        "analysis",
+        canonical_cache_signature(signature_data),
+        outputs=[result_dir / name for name in artifacts],
+    ):
         return None
     manifest = json.loads((result_dir / "manifest.json").read_text())
     recorded = manifest.get("signature_data")
@@ -74,6 +82,23 @@ def current_cache_manifest(
         if canonical_cache_signature(recorded) == signature
         and manifest.get("cache_signature") == signature
         else None
+    )
+
+
+def write_cache_manifest(
+    result_dir: Path, artifacts: tuple[str, ...], manifest: dict[str, Any]
+) -> None:
+    """Commit stage metadata and output fingerprints only after all writes succeed."""
+    path = result_dir / "manifest.json"
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(manifest, indent=2) + "\n")
+    temporary.replace(path)
+    update_cache_entry(
+        result_dir,
+        "analysis",
+        manifest["cache_signature"],
+        [result_dir / name for name in artifacts],
+        signature_data=manifest["signature_data"],
     )
 
 
@@ -326,15 +351,15 @@ def _domain_union(tables: list[Any]) -> list[str]:
 
 
 def prepared_domain_labels(cfg: Any) -> list[str]:
-    """Return the annotation-label union without retaining section tables."""
-    import spatialdata as sd
+    """Read only annotation metadata; expression matrices are not needed."""
+    import zarr
+    from anndata.io import read_elem
 
     labels: set[str] = set()
     for sid in filtered_metadata(cfg)["section_id"].astype(str):
-        section = sd.read_zarr(cfg.SDATA_DIR / f"{sid}.zarr")
-        labels.update(_domain_union([section.tables["bins_table"]]))
-        del section
-        gc.collect()
+        root = zarr.open_group(cfg.SDATA_DIR / f"{sid}.zarr", mode="r")
+        values = pd.Series(read_elem(root["tables/bins_table/obs/annotation"]), dtype="string")
+        labels.update(str(value) for value in values.dropna().unique() if value != "")
     return sorted(labels)
 
 

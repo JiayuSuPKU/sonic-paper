@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 from . import config as C
-from . import utils
+from . import preprocessing, utils
 
 LOGGER = logging.getLogger("embryo_xspecies.sv")
 RESULT_COLUMNS = (
@@ -49,6 +49,7 @@ def _analysis_config() -> dict[str, Any]:
         "schema_version": 2,
         **C.SV_CACHE_PARAMETERS,
         "sonic_version": sonic.__version__,
+        "source": utils.source_provenance(__file__),
     }
 
 
@@ -65,7 +66,7 @@ def _manifest(cfg: Any, features: list[str], metadata: pd.DataFrame) -> dict[str
             {
                 "section_id": str(row.section_id),
                 "timepoint": str(row.timepoint),
-                "prepared_zarr_mtime_ns": zarr.stat().st_mtime_ns,
+                "prepared_zarr": utils.path_fingerprint(zarr, recursive=True),
             }
         )
     return {
@@ -188,18 +189,24 @@ def _compute_slide(
     section_id: str,
     timepoint: str,
     features: list[str],
+    *,
+    prepared: Any = None,
 ) -> pd.DataFrame:
     """Compute a single section's SV results using sonic Q-test."""
     from sonic import DetectorGrid
 
-    prepared, _, panel, _ = utils.load_prepared_sections(
-        cfg,
-        section_ids=[section_id],
-        gene_panel=features,
-        expression_mode=C.ANALYSIS_EXPRESSION_MODE,
-        normalization_target_sum=C.ANALYSIS_NORMALIZATION_TARGET_SUM,
-        include_domain_channels=False,
-    )
+    if prepared is None:
+        sections, _, panel, _ = utils.load_prepared_sections(
+            cfg,
+            section_ids=[section_id],
+            gene_panel=features,
+            expression_mode=C.ANALYSIS_EXPRESSION_MODE,
+            normalization_target_sum=C.ANALYSIS_NORMALIZATION_TARGET_SUM,
+            include_domain_channels=False,
+        )
+        prepared = sections[0]
+        if panel != features:
+            raise RuntimeError("Prepared SV feature order changed.")
     detector = DetectorGrid(
         kernel_method=C.SV_KERNEL_METHOD,
         rho=C.SV_RHO,
@@ -208,14 +215,14 @@ def _compute_slide(
         fft_solver=C.SV_FFT_SOLVER,
         workers=C.SV_FFT_WORKERS,
     ).setup_data(
-        prepared[0],
+        prepared,
         bins="bins",
         table_name="bins_table",
         col_key="array_col",
         row_key="array_row",
     )
     result = detector.compute_qstat(
-        features=list(panel),
+        features=list(features),
         n_jobs=C.SV_N_JOBS,
         workers=C.SV_FFT_WORKERS,
         return_pval=True,
@@ -239,10 +246,10 @@ def _compute_slide(
     return result
 
 
-def _run_species(cfg: Any, *, force: bool) -> dict[str, int]:
-    """Run SV test for all sections of a single species, caching results."""
-    features = utils.select_gene_panel(cfg)
-    metadata = utils.filtered_metadata(cfg)
+def prepare_species_cache(
+    cfg: Any, features: list[str], metadata: pd.DataFrame, *, force: bool
+) -> None:
+    """Initialize or validate the SV cache for standalone and fused workflows."""
     expected_manifest = _manifest(cfg, features, metadata)
     if force and cfg.SV_RESULT_DIR.exists():
         shutil.rmtree(cfg.SV_RESULT_DIR)
@@ -259,26 +266,41 @@ def _run_species(cfg: Any, *, force: bool) -> dict[str, int]:
         _write_json(cfg.SV_MANIFEST_JSON, expected_manifest)
     _validate_inventory(cfg, metadata)
 
-    for row in metadata.itertuples(index=False):
-        section_id = str(row.section_id)
-        timepoint = str(row.timepoint)
-        path = _slide_path(cfg, section_id)
-        if path.exists():
-            _load_slide(cfg, section_id, timepoint, features)
-            continue
-        LOGGER.info(
-            "SONIC spatial variability: %s %s (%d genes)",
-            cfg.PANEL_KEY,
-            section_id,
-            len(features),
-        )
-        result = _compute_slide(cfg, section_id, timepoint, features)
-        temporary = path.with_name(f"{path.name}.tmp")
-        result.to_csv(temporary, index=False, compression="gzip")
-        temporary.replace(path)
-        del result
-        gc.collect()
 
+def cache_slide(
+    cfg: Any,
+    section_id: str,
+    timepoint: str,
+    features: list[str],
+    *,
+    prepared: Any = None,
+) -> None:
+    """Validate a saved section or compute it from optional shared expression."""
+    path = _slide_path(cfg, section_id)
+    if path.exists():
+        _load_slide(cfg, section_id, timepoint, features)
+        return
+    LOGGER.info(
+        "SONIC spatial variability: %s %s (%d genes)",
+        cfg.PANEL_KEY,
+        section_id,
+        len(features),
+    )
+    result = _compute_slide(cfg, section_id, timepoint, features, prepared=prepared)
+    temporary = path.with_name(f"{path.name}.tmp")
+    result.to_csv(temporary, index=False, compression="gzip")
+    temporary.replace(path)
+
+
+def _run_species(cfg: Any, *, force: bool) -> dict[str, int]:
+    """Run SV test for all sections of a single species, caching results."""
+    preprocessing.require_current_preprocessing(cfg)
+    features = utils.select_gene_panel(cfg)
+    metadata = utils.filtered_metadata(cfg)
+    prepare_species_cache(cfg, features, metadata, force=force)
+    for row in metadata.itertuples(index=False):
+        cache_slide(cfg, str(row.section_id), str(row.timepoint), features)
+        gc.collect()
     return {
         "n_sections": len(metadata),
         "n_features": len(features),
@@ -319,6 +341,7 @@ def load(
         if not requested_features:
             raise ValueError(f"No SV features requested for {species!r}.")
         cfg = C.SPECIES_CONFIGS[species]
+        preprocessing.require_current_preprocessing(cfg)
         cached_features = utils.select_gene_panel(cfg)
         all_metadata = utils.filtered_metadata(cfg)
         _validate_manifest(cfg, _manifest(cfg, cached_features, all_metadata))

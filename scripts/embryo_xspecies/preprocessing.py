@@ -24,6 +24,14 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    path_fingerprint,
+    source_file_fingerprint,
+    update_cache_entry,
+)
+
 from . import config as C
 from . import utils
 from .config import SPECIES_CONFIGS, ensure_species_output_dirs
@@ -43,6 +51,35 @@ def _preprocessing_paths(cfg: Any) -> dict[str, Path]:
 
 _MOSTA_INDEX_RE = re.compile(r"^(\d+)_(\d+)(?:_.*)?$")
 _GENE_SUMMARY_CACHE_VERSION = 1
+
+
+def _preprocessing_source() -> str:
+    """Track only source files that define prepared expression and geometry."""
+    digest = hashlib.sha256()
+    for path in (Path(__file__), Path(utils.__file__), Path(C.__file__)):
+        digest.update(path.name.encode())
+        digest.update(source_file_fingerprint(path).encode())
+    return digest.hexdigest()
+
+
+def _section_signature_data(
+    cfg: Any, h5ad_path: Path, genes: list[str], annotation_col: str | None
+) -> dict[str, Any]:
+    return {
+        "source": _preprocessing_source(),
+        "raw_h5ad": path_fingerprint(h5ad_path),
+        "species": cfg.PANEL_KEY,
+        "gene_sha256": hashlib.sha256("\n".join(genes).encode()).hexdigest(),
+        "annotation_col": annotation_col or cfg.ANNOTATION_COL,
+        "bin_size_um": C.BIN_SIZE_UM,
+    }
+
+
+def require_current_preprocessing(cfg: Any) -> None:
+    if not preprocessing_is_current(cfg):
+        raise RuntimeError(
+            f"Stale or incomplete {cfg.PANEL_KEY} preprocessing. Run python -m scripts.embryo_xspecies.preprocessing --species {cfg.PANEL_KEY}."
+        )
 
 
 def _trim_heavy(adata: Any, *, drop_raw: bool = False) -> None:
@@ -297,7 +334,7 @@ def _read_configured_metadata(cfg: Any) -> pd.DataFrame:
     return meta.reset_index(drop=True)
 
 
-def preprocessing_is_current(cfg: Any) -> bool:
+def preprocessing_is_current(cfg: Any) -> bool:  # noqa: C901 — validate inputs, QC, and section outputs
     """Return whether one species' prepared zarr and QC cache is complete."""
     paths = _preprocessing_paths(cfg)
     required = [
@@ -311,7 +348,12 @@ def preprocessing_is_current(cfg: Any) -> bool:
 
     meta = _read_configured_metadata(cfg)
     section_ids = meta["section_id"].astype(str).tolist()
-    summary = json.loads(paths["summary"].read_text())
+    try:
+        summary = json.loads(paths["summary"].read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(summary, dict):
+        return False
     sources = [
         {
             "section_id": str(row.section_id),
@@ -321,7 +363,9 @@ def preprocessing_is_current(cfg: Any) -> bool:
         for row in meta.itertuples(index=False)
     ]
     expected = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "source": _preprocessing_source(),
+        "metadata": path_fingerprint(cfg.META_CSV),
         "complete": True,
         "species": cfg.PANEL_KEY,
         "section_ids": section_ids,
@@ -333,6 +377,14 @@ def preprocessing_is_current(cfg: Any) -> bool:
     if any(summary.get(key) != value for key, value in expected.items()):
         return False
 
+    if not cache_entry_is_current(
+        cfg.RESULT_DIR,
+        "preprocessing",
+        cache_signature(summary),
+        outputs=[*required, paths["gene_summary_cache"]],
+    ):
+        return False
+    prepared_genes = utils._prepared_genes_from_qc(cfg)
     for path in (
         paths["section_qc"],
         cfg.GEOMETRY_CSV,
@@ -350,7 +402,13 @@ def preprocessing_is_current(cfg: Any) -> bool:
             Path(row.h5ad_path_abs),
         ):
             return False
-        if not (cfg.SDATA_DIR / f"{row.section_id}.zarr").is_dir():
+        signature_data = _section_signature_data(cfg, Path(row.h5ad_path_abs), prepared_genes, None)
+        if not cache_entry_is_current(
+            cfg.RESULT_DIR,
+            f"prepared:{row.section_id}",
+            cache_signature(signature_data),
+            outputs=[cfg.SDATA_DIR / f"{row.section_id}.zarr"],
+        ):
             return False
     expected = set(section_ids)
     if {path.stem for path in paths["gene_summary_cache"].glob("*.npz")} != expected:
@@ -370,12 +428,16 @@ def _gene_summary_cache_is_current(path: Path, h5ad_path: Path) -> bool:
     if not path.exists():
         return False
     stat = h5ad_path.stat()
-    with np.load(path, allow_pickle=False) as z:
-        return (
-            int(z["cache_version"]) == _GENE_SUMMARY_CACHE_VERSION
-            and int(z["h5ad_size"]) == int(stat.st_size)
-            and int(z["h5ad_mtime_ns"]) == int(stat.st_mtime_ns)
-        )
+    try:
+        with np.load(path, allow_pickle=False) as z:
+            return (
+                int(z["cache_version"]) == _GENE_SUMMARY_CACHE_VERSION
+                and str(z["source"].item()) == _preprocessing_source()
+                and int(z["h5ad_size"]) == int(stat.st_size)
+                and int(z["h5ad_mtime_ns"]) == int(stat.st_mtime_ns)
+            )
+    except (OSError, ValueError, KeyError):
+        return False
 
 
 def _read_gene_summary_cache(path: Path, *, include_arrays: bool) -> dict[str, Any]:
@@ -434,6 +496,7 @@ def _write_gene_summary_cache(cfg: Any, r: Any, cache_path: Path) -> None:
         np.savez_compressed(
             f,
             cache_version=np.array(_GENE_SUMMARY_CACHE_VERSION, dtype=np.int16),
+            source=np.asarray(_preprocessing_source()),
             h5ad_size=np.array(stat.st_size, dtype=np.int64),
             h5ad_mtime_ns=np.array(stat.st_mtime_ns, dtype=np.int64),
             genes=genes,
@@ -598,7 +661,13 @@ def _convert_one_section(
 ) -> dict[str, Any]:
     """Build or reuse one prepared zarr store and return its geometry row."""
     zpath = cfg.SDATA_DIR / f"{section_id}.zarr"
-    if zpath.exists() and not force:
+    signature_data = _section_signature_data(cfg, h5ad_path, prepared_genes, annotation_col)
+    if not force and cache_entry_is_current(
+        cfg.RESULT_DIR,
+        f"prepared:{section_id}",
+        cache_signature(signature_data),
+        outputs=[zpath],
+    ):
         import spatialdata as sd
 
         sdata = sd.read_zarr(zpath)
@@ -669,12 +738,23 @@ def _convert_one_section(
         len(doms),
         "(observed bin50 lattice; no bin fill/drop/aggregation)",
     )
-    if zpath.exists():
-        shutil.rmtree(zpath)
+    temporary = zpath.with_name(zpath.name + ".tmp")
+    if temporary.exists():
+        shutil.rmtree(temporary)
     # Keep the current no-autosharding Zarr v3 layout explicit; AnnData warns
     # when this setting is left as None.
     with ad.settings.override(auto_shard_zarr_v3=False):
-        sdata.write(zpath)
+        sdata.write(temporary)
+    if zpath.exists():
+        shutil.rmtree(zpath)
+    temporary.replace(zpath)
+    update_cache_entry(
+        cfg.RESULT_DIR,
+        f"prepared:{section_id}",
+        cache_signature(signature_data),
+        [zpath],
+        signature_data=signature_data,
+    )
     logger.info("[%s] wrote %s", section_id, zpath)
     del sdata, binned, table
     gc.collect()
@@ -740,7 +820,9 @@ def run_preprocessing(
         for row in meta.itertuples(index=False)
     ]
     summary = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "source": _preprocessing_source(),
+        "metadata": path_fingerprint(cfg.META_CSV),
         "complete": False,
         "species": cfg.PANEL_KEY,
         "section_ids": meta["section_id"].astype(str).tolist(),
@@ -812,6 +894,19 @@ def run_preprocessing(
     geom.to_csv(cfg.GEOMETRY_CSV, index=False)
     summary["complete"] = True
     paths["summary"].write_text(json.dumps(summary, indent=2) + "\n")
+    update_cache_entry(
+        cfg.RESULT_DIR,
+        "preprocessing",
+        cache_signature(summary),
+        [
+            paths["gene_qc"],
+            paths["section_qc"],
+            paths["summary"],
+            cfg.GEOMETRY_CSV,
+            paths["gene_summary_cache"],
+        ],
+        signature_data=summary,
+    )
     logger.info("Wrote %s (%d sections).", cfg.GEOMETRY_CSV, len(geom))
 
     print("\n=== per-stage geometry (bin50) ===")

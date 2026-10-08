@@ -14,13 +14,15 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
-from scipy.stats import false_discovery_control, hypergeom
+from scipy.stats import hypergeom
 from sklearn.cluster import MiniBatchKMeans
 
 from scripts.paper_utils import (
     CLUSTERPROFILER_SCRIPT,
+    cache_entry_is_current,
     cache_signature,
     run_clusterprofiler,
+    update_cache_entry,
 )
 
 from . import config as C
@@ -33,12 +35,42 @@ RESULT_DIR = C.COMPARISON_RESULT_DIR / "metrics"
 PC_COLUMNS = [f"PC{index}" for index in range(1, C.N_PC + 1)]
 _CACHE_ARTIFACTS = (
     "cluster_go_enrichment.csv.gz",
-    "cluster_go_enrichment_manifest.json",
+    "cluster_go_queries.csv.gz",
+    "cluster_go_queries_manifest.json",
     "cluster_summary.csv",
     "gene_stage_cluster_membership.csv.gz",
     "local_mixing_by_section.csv",
     "manifest.json",
 )
+
+GO_COLUMNS = [
+    "query_group",
+    "source",
+    "native",
+    "name",
+    "display_name",
+    "p_value",
+    "p_raw",
+    "p_adjust",
+    "q_value",
+    "significant",
+    "description",
+    "term_size",
+    "query_size",
+    "intersection_size",
+    "effective_domain_size",
+    "precision",
+    "recall",
+    "query",
+    "parents",
+    "geneID",
+    "hit_entrez",
+    "hit_genes",
+    "semantic_simplified",
+    "semantic_simplify_cutoff",
+    "semantic_simplify_measure",
+    "method",
+]
 
 # Concise figure labels curated from GO terms significantly enriched in both
 # species. The supporting IDs are validated on every run to prevent stale labels.
@@ -61,8 +93,14 @@ def cached_go_enrichment(  # noqa: C901
     panel: str,
     variant: str,
     result_dir: Path = RESULT_DIR,
+    fdr_groups: Mapping[str, str] | None = None,
 ) -> pd.DataFrame:
-    """Run and cache named clusterProfiler queries with explicit universes."""
+    """Cache GO tests, optionally pooling BH correction across named queries.
+
+    ``fdr_groups`` maps every query to its correction family. Grouped results
+    report only ``global_qvalue`` and use it for semantic simplification.
+    Ungrouped temporal/transition queries retain their per-query BH correction.
+    """
     wrapper = CLUSTERPROFILER_SCRIPT
     if not wrapper.exists():
         raise FileNotFoundError(f"Missing clusterProfiler wrapper: {wrapper}")
@@ -70,18 +108,23 @@ def cached_go_enrichment(  # noqa: C901
     for name, (genes, universe, orgdb) in queries.items():
         query_genes = sorted(set(map(str, genes)))
         universe_genes = sorted(set(map(str, universe)))
-        if not query_genes:
-            raise ValueError(f"GO query {name!r} has no genes.")
         if not set(query_genes).issubset(universe_genes):
             raise ValueError(f"GO query {name!r} contains genes outside its universe.")
         normalized[name] = (query_genes, universe_genes, orgdb)
+
+    if fdr_groups is not None and (
+        set(fdr_groups) != set(normalized)
+        or any(not isinstance(group, str) or not group.strip() for group in fdr_groups.values())
+    ):
+        raise ValueError("fdr_groups must assign every GO query to a nonempty correction family.")
 
     cache_config = {
         "panel": panel,
         "variant": variant,
         "wrapper_sha256": hashlib.sha256(wrapper.read_bytes()).hexdigest(),
         "semantic_simplify": C.GO_SEMANTIC_SIMPLIFY,
-        "semantic_simplify_p_adjust_cutoff": C.GO_FDR_THRESHOLD,
+        "semantic_simplify_fdr_cutoff": C.GO_FDR_THRESHOLD,
+        "fdr_groups": dict(fdr_groups) if fdr_groups is not None else None,
         "queries": {
             name: {
                 "genes_sha256": hashlib.sha256("\n".join(genes).encode()).hexdigest(),
@@ -96,19 +139,18 @@ def cached_go_enrichment(  # noqa: C901
     result_dir.mkdir(parents=True, exist_ok=True)
     cache_path = result_dir / f"{cache_name}.csv.gz"
     manifest_path = result_dir / f"{cache_name}_manifest.json"
-    if cache_path.exists() != manifest_path.exists():
-        raise RuntimeError(f"Incomplete GO cache: expected both {cache_path} and {manifest_path}.")
-    if cache_path.exists():
-        cached_config = json.loads(manifest_path.read_text())
-        cached_config.pop("clusterprofiler_provenance", None)
-        if cached_config == cache_config:
-            return pd.read_csv(cache_path)
+    signature = cache_signature(cache_config)
+    outputs_owned = [cache_path, manifest_path]
+    if cache_entry_is_current(result_dir, f"go:{cache_name}", signature, outputs=outputs_owned):
+        return pd.read_csv(cache_path)
 
     with tempfile.TemporaryDirectory(prefix=f"embryo_{cache_name}_") as temporary:
         root = Path(temporary)
         jobs = []
         outputs = {}
         for index, (name, (genes, universe, orgdb)) in enumerate(normalized.items()):
+            if not genes:
+                continue
             universe_path = root / f"universe_{index}.csv"
             output = root / f"query_{index}.csv"
             pd.DataFrame({"gene": universe}).to_csv(universe_path, index=False)
@@ -125,31 +167,66 @@ def cached_go_enrichment(  # noqa: C901
                     "orgdb": orgdb,
                     "organism": "",
                     "universe_path": universe_path,
+                    "fdr_group": fdr_groups[name] if fdr_groups is not None else "",
                     "semantic_simplify": C.GO_SEMANTIC_SIMPLIFY,
-                    "semantic_simplify_p_adjust_cutoff": C.GO_FDR_THRESHOLD,
+                    "semantic_simplify_fdr_cutoff": C.GO_FDR_THRESHOLD,
                 }
                 for rank, gene in enumerate(genes, start=1)
             )
         jobs_path = root / "jobs.csv"
         pd.DataFrame(jobs).to_csv(jobs_path, index=False)
-        provenance = run_clusterprofiler(
-            jobs_path,
-            cwd=C.PROJECT_ROOT,
-            timeout_seconds=C.GO_TIMEOUT_SECONDS,
+        provenance = (
+            run_clusterprofiler(
+                jobs_path,
+                cwd=C.PROJECT_ROOT,
+                timeout_seconds=C.GO_TIMEOUT_SECONDS,
+            )
+            if jobs
+            else {"status": "no query genes"}
         )
         frames = []
         for name, output in outputs.items():
             frame = pd.read_csv(output)
-            if frame.empty:
-                continue
             frame.insert(0, "query_group", name)
             frames.append(frame)
-    if not frames:
-        raise RuntimeError(f"clusterProfiler returned no terms for {panel}.")
-    enrichment = pd.concat(frames, ignore_index=True)
-    enrichment.to_csv(cache_path, index=False)
-    manifest_path.write_text(
-        json.dumps({**cache_config, "clusterprofiler_provenance": provenance}, indent=2) + "\n"
+    enrichment = (
+        pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=GO_COLUMNS)
+    )
+    if fdr_groups is not None and enrichment.empty:
+        enrichment = enrichment.drop(
+            columns=["p_value", "p_adjust", "q_value", "significant"], errors="ignore"
+        )
+        enrichment["global_qvalue"] = pd.Series(dtype=float)
+    temporary_csv = cache_path.with_suffix(".tmp")
+    enrichment.to_csv(temporary_csv, index=False, compression="gzip")
+    temporary_csv.replace(cache_path)
+    query_results = {
+        name: {
+            "n_query_genes": len(genes),
+            "n_universe_genes": len(universe),
+            "n_terms": int(enrichment["query_group"].eq(name).sum()),
+        }
+        for name, (genes, universe, _) in normalized.items()
+    }
+    temporary_manifest = manifest_path.with_suffix(".json.tmp")
+    temporary_manifest.write_text(
+        json.dumps(
+            {
+                **cache_config,
+                "clusterprofiler_provenance": provenance,
+                "query_results": query_results,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    temporary_manifest.replace(manifest_path)
+    update_cache_entry(
+        result_dir,
+        f"go:{cache_name}",
+        signature,
+        outputs_owned,
+        signature_data=cache_config,
     )
     return enrichment
 
@@ -325,25 +402,28 @@ def _gene_stage_memberships(
     return memberships
 
 
-def _cluster_functional_labels(enrichment: pd.DataFrame) -> pd.DataFrame:
+def _cluster_functional_labels(enrichment: pd.DataFrame, clusters: Sequence[int]) -> pd.DataFrame:
     """Validate concise labels against significant terms in both species."""
+    # Semantic simplification removes redundant display terms, not biological support.
     eligible = enrichment[
         enrichment["global_qvalue"].le(C.GO_FDR_THRESHOLD)
         & (enrichment["term_size"] / enrichment["effective_domain_size"]).le(
             C.GO_MAX_TERM_UNIVERSE_FRACTION
         )
-        & enrichment["semantic_simplified"].eq(True)
     ]
     rows = []
-    for cluster, (label, go_ids) in CLUSTER_FUNCTIONAL_LABELS.items():
+    for cluster in clusters:
+        label, go_ids = CLUSTER_FUNCTIONAL_LABELS.get(cluster, (f"Cluster {cluster}", ()))
         support = eligible[eligible["cluster"].eq(cluster) & eligible["native"].isin(go_ids)]
         observed = set(support[["species", "native"]].itertuples(index=False, name=None))
         expected = {(species, go_id) for species in C.GO_ORGDB for go_id in go_ids}
-        if observed != expected:
-            raise RuntimeError(
-                f"Cluster {cluster} label {label!r} lacks cross-species GO support: "
-                f"{sorted(expected - observed)}"
+        supported = bool(go_ids) and observed == expected
+        if not supported:
+            LOGGER.warning(
+                "Cluster %s: curated label lacks current GO support; using a generic label.",
+                cluster,
             )
+            label, go_ids = f"Cluster {cluster}", ()
         names = (
             support[["native", "display_name"]]
             .drop_duplicates("native")
@@ -353,6 +433,7 @@ def _cluster_functional_labels(enrichment: pd.DataFrame) -> pd.DataFrame:
             {
                 "cluster": cluster,
                 "functional_label": label,
+                "curated_label_supported": supported,
                 "consensus_go_ids": ";".join(go_ids),
                 "consensus_go_terms": "; ".join(names.loc[list(go_ids)]),
             }
@@ -610,6 +691,18 @@ def _input_signature_data(embedding: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def require_current_cache(embedding: dict[str, Any]) -> dict[str, Any]:
+    """Reject stale or incomplete plotting inputs without recomputing analysis."""
+    manifest = utils.current_cache_manifest(
+        RESULT_DIR, _CACHE_ARTIFACTS, _input_signature_data(embedding)
+    )
+    if manifest is None:
+        raise RuntimeError(
+            f"Stale or incomplete cache: {RESULT_DIR}. Run python -m scripts.embryo_xspecies.workflow --force."
+        )
+    return manifest
+
+
 def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
     """Compute or load all joint-embedding analysis metrics."""
     signature_data = _input_signature_data(embedding)
@@ -650,23 +743,21 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
             )
     enrichment = cached_go_enrichment(
         queries,
-        cache_name="cluster_go_enrichment",
+        cache_name="cluster_go_queries",
         panel="embryo_embedding",
         variant="stage_aware_membership",
+        result_dir=RESULT_DIR,
+        fdr_groups={name: name.split(":", 1)[0] for name in queries},
     )
-    groups = enrichment["query_group"].str.split(":", expand=True)
+    groups = enrichment["query_group"].str.split(":", expand=True).reindex(columns=[0, 1])
     enrichment["species"] = groups[0]
     enrichment["cluster"] = groups[1].astype(int)
-    # Apply global FDR correction within each species, combining all cluster-specific tests.
-    enrichment["global_qvalue"] = enrichment.groupby("species")["p_raw"].transform(
-        lambda values: false_discovery_control(values.fillna(1).to_numpy(float))
-    )
     # Compute fold enrichment relative to the species-specific background genes (effective_domain_size).
     enrichment["fold_enrichment"] = (enrichment["intersection_size"] / enrichment["query_size"]) / (
         enrichment["term_size"] / enrichment["effective_domain_size"]
     )
     enrichment.to_csv(RESULT_DIR / "cluster_go_enrichment.csv.gz", index=False)
-    functional_labels = _cluster_functional_labels(enrichment)
+    functional_labels = _cluster_functional_labels(enrichment, centres["cluster"].tolist())
     centres = centres.merge(functional_labels, on="cluster", validate="one_to_one")
     centres.to_csv(RESULT_DIR / "cluster_summary.csv", index=False)
     memberships.to_csv(RESULT_DIR / "gene_stage_cluster_membership.csv.gz", index=False)
@@ -699,6 +790,8 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
                 species: f"{C.GO_SOURCE} via local {orgdb}" for species, orgdb in C.GO_ORGDB.items()
             },
             "global_fdr_scope": "all cluster terms within each species",
+            "semantic_simplification_score": "global_qvalue",
+            "within_cluster_fdr": "no separate BH correction or cutoff",
             "functional_labels": "manually shortened from GO IDs significant in both species",
         },
     }
@@ -725,6 +818,7 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
             "orgdb": C.GO_ORGDB,
             "semantic_simplify": C.GO_SEMANTIC_SIMPLIFY,
             "display_filters": {
+                "fdr_column": "global_qvalue",
                 "fdr_threshold": C.GO_FDR_THRESHOLD,
                 "maximum_term_universe_fraction": C.GO_MAX_TERM_UNIVERSE_FRACTION,
                 "clusterprofiler_semantic_simplified_only": True,
@@ -732,6 +826,6 @@ def run(embedding: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
             },
         },
     }
-    (RESULT_DIR / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    utils.write_cache_manifest(RESULT_DIR, _CACHE_ARTIFACTS, manifest)
     LOGGER.info("Wrote embedding metrics to %s", RESULT_DIR)
     return manifest

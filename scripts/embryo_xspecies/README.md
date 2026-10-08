@@ -53,7 +53,24 @@ same in-memory joint PCA.
   conservation, selected genes, per-gene stage transitions, and GO results.
 
 PCA coordinates and the long per-gene-section table are reconstructed in
-memory and are not cached.
+memory and are not cached. Prepared sections track raw inputs, annotation settings,
+preprocessing source, and their written outputs. Metrics and enrichment caches
+also validate output fingerprints. Changes to the numerical code, configuration 
+values, ordinary strings, logging argument expressions, and dependency versions 
+will invalidate the cache. Non-Python sources (including the R enrichment wrapper) 
+retain byte-level hashes.
+
+## GO pathway selection
+
+Cluster GO uses one Benjamini-Hochberg correction across all cluster-term tests
+within each species. Candidate terms must pass this across-cluster FDR (<= 0.05); 
+Wang semantic simplification (cutoff 0.7) uses the same FDR to select representatives. 
+The figure then keeps terms covering at most 5% of the effective universe and 
+displays the four most significant retained terms per species-cluster. 
+Full tested-term tables remain cached, with raw p-values and `global_qvalue`.
+
+Temporal and stage-transition GO retain their per-query BH correction and use
+that same FDR for candidate selection, simplification, and display.
 
 ## Rendering Figures
 
@@ -66,6 +83,9 @@ conda run -n sonic_paper python -m jupyter nbconvert --to notebook --execute \
   --ExecutePreprocessor.timeout=1800 \
   --ExecutePreprocessor.kernel_name=sonic_paper
 ```
+
+The notebook validates preprocessing, SV/spectrum caches, and both downstream
+analysis manifests before drawing panels.
 
 The notebook previews every panel before saving flat under
 `figures/embryo_xspecies/`. Previews remain in the notebook; only PDFs are

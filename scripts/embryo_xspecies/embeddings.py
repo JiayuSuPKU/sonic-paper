@@ -26,7 +26,7 @@ import pandas as pd
 from sklearn.decomposition import PCA
 
 from . import config as C
-from . import utils
+from . import preprocessing, sv, utils
 
 LOGGER = logging.getLogger("embryo_xspecies.embeddings")
 _EPS = 1e-12
@@ -72,6 +72,7 @@ def _section_manifest(
         "feature_scope": "all genes returned by utils.select_gene_panel plus domain masks",
         **C.SPECTRAL_CACHE_PARAMETERS,
         "sonic_version": sonic.__version__,
+        "source": utils.source_provenance(__file__),
         "frequency_edges": [float(value) for value in freq_edges],
         "n_genes": len(genes),
         "n_features": len(features),
@@ -80,7 +81,7 @@ def _section_manifest(
         "section": {
             "section_id": section_id,
             "timepoint": str(metadata_row.timepoint),
-            "prepared_zarr_mtime_ns": zarr.stat().st_mtime_ns,
+            "prepared_zarr": utils.path_fingerprint(zarr, recursive=True),
         },
         "artifact": f"{section_id}.npz",
     }
@@ -166,17 +167,23 @@ def _write_section_cache(
     temporary.replace(path)
 
 
-def _cache_species_sections(
+def _cache_species_sections(  # noqa: C901 — resume independent SV/spectra caches, sharing cold loads
     cfg: Any,
     *,
     freq_edges: np.ndarray,
     force: bool,
     progress: bool,
+    include_sv: bool = False,
+    read_only: bool = False,
 ) -> tuple[Any, list[str], list[str]]:
     """Compute or validate one species' independent section caches."""
+    if read_only and (force or include_sv):
+        raise ValueError("read_only cannot be combined with force or include_sv.")
+    preprocessing.require_current_preprocessing(cfg)
     if force and cfg.SPECTRA_RESULT_DIR.exists():
         shutil.rmtree(cfg.SPECTRA_RESULT_DIR)
-    cfg.SPECTRA_RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    if not read_only:
+        cfg.SPECTRA_RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
     genes = utils.select_gene_panel(cfg)
     metadata = utils.filtered_metadata(cfg)
@@ -184,7 +191,10 @@ def _cache_species_sections(
     domain_channels = [f"{C.DOMAIN_CHANNEL_PREFIX}{label}" for label in domain_labels]
     features = genes + domain_channels
     section_ids = metadata["section_id"].astype(str).tolist()
-    _validate_inventory(cfg, section_ids)
+    if cfg.SPECTRA_RESULT_DIR.exists():
+        _validate_inventory(cfg, section_ids)
+    if include_sv:
+        sv.prepare_species_cache(cfg, genes, metadata, force=force)
 
     n_sections = len(section_ids)
     n_features = len(features)
@@ -203,6 +213,13 @@ def _cache_species_sections(
                 expected_edges=freq_edges,
                 expected_manifest=manifest,
             )
+        elif read_only:
+            raise RuntimeError(f"Missing {path}; run python -m scripts.embryo_xspecies.workflow.")
+        need_spectra = not path.exists()
+        need_sv = include_sv and not sv._slide_path(cfg, section_id).exists()
+        if include_sv and not need_sv:
+            sv.cache_slide(cfg, section_id, str(row.timepoint), genes)
+        if not need_spectra and not need_sv:
             continue
 
         LOGGER.info(
@@ -221,9 +238,16 @@ def _cache_species_sections(
             expression_mode=C.ANALYSIS_EXPRESSION_MODE,
             normalization_target_sum=C.ANALYSIS_NORMALIZATION_TARGET_SUM,
             domain_labels=domain_labels,
+            include_domain_channels=need_spectra,
         )
-        if panel != genes or loaded_domain_channels != domain_channels:
+        if panel != genes or loaded_domain_channels != (domain_channels if need_spectra else []):
             raise RuntimeError(f"{cfg.PANEL_KEY} {section_id} feature order changed.")
+        if need_sv:
+            sv.cache_slide(cfg, section_id, str(row.timepoint), genes, prepared=sections[0])
+        if not need_spectra:
+            del sections
+            gc.collect()
+            continue
         section_comparator = utils.build_comparator(
             sections,
             features,
@@ -302,59 +326,6 @@ def _load_species_arrays(
         "domain_cols": domain_cols,
         "domain_labels": [name.removeprefix(C.DOMAIN_CHANNEL_PREFIX) for name in domain_channels],
     }
-
-
-def comparator_from_cached_spectra(
-    bundle: dict[str, Any],
-    section_indices: Sequence[int] | np.ndarray,
-    gene_names: Sequence[str],
-) -> Any:
-    """Restore a fitted comparator view for selected sections and genes.
-
-    Prepared expression is loaded only for the requested sections so SONIC's
-    public differential-test methods can operate on the cached spectral state
-    without recomputing FFTs or materializing every section at once.
-    """
-    indices = np.asarray(section_indices, dtype=int)
-    if indices.ndim != 1 or not len(indices):
-        raise ValueError("section_indices must be a non-empty one-dimensional array.")
-    if np.any(indices < 0) or np.any(indices >= len(bundle["section_ids"])):
-        raise IndexError("section_indices contains an out-of-range section.")
-    genes = list(map(str, gene_names))
-    if not genes or len(genes) != len(set(genes)):
-        raise ValueError("gene_names must be non-empty and unique.")
-    missing = sorted(set(genes) - set(bundle["name_to_col"]))
-    if missing:
-        raise KeyError(f"Genes are absent from the spectra cache: {missing[:5]}")
-
-    section_ids = [bundle["section_ids"][index] for index in indices]
-    sections, metadata, loaded_genes, domain_channels = utils.load_prepared_sections(
-        bundle["cfg"],
-        section_ids=section_ids,
-        gene_panel=genes,
-        expression_mode=C.ANALYSIS_EXPRESSION_MODE,
-        normalization_target_sum=C.ANALYSIS_NORMALIZATION_TARGET_SUM,
-        include_domain_channels=False,
-    )
-    if metadata["section_id"].astype(str).tolist() != section_ids:
-        raise RuntimeError("Prepared sections do not match the cached section order.")
-    if loaded_genes != genes or domain_channels:
-        raise RuntimeError("Prepared comparator feature order changed.")
-
-    comparator = utils.build_comparator(
-        sections,
-        genes,
-        freq_edges=np.asarray(bundle["freq_edges"]),
-        adaptive_freq_edges=False,
-    )
-    columns = np.asarray([bundle["name_to_col"][gene] for gene in genes], dtype=int)
-    comparator.spectra_ = bundle["spectra"][indices][:, columns, :]
-    comparator.dc_ = bundle["dc"][indices][:, columns]
-    comparator.presence_ = bundle["presence"][indices][:, columns]
-    comparator.frequency_bin_intervals_ = np.column_stack(
-        [bundle["freq_edges"][:-1], bundle["freq_edges"][1:]]
-    )
-    return comparator
 
 
 # ---------------------------------------------------------------------------
@@ -456,10 +427,18 @@ def cache_species_spectra(*, force: bool = False, progress: bool = False) -> np.
 
 
 def load_spectra_and_fit_joint_embedding(
-    *, force: bool = False, progress: bool = False
+    *,
+    force: bool = False,
+    progress: bool = False,
+    include_sv: bool = False,
+    read_only: bool = False,
 ) -> dict[str, Any]:
-    """Load or cache spectra, then fit the joint PCA embedding in memory."""
-    C.ensure_output_dirs()
+    """Fit PCA from section caches, optionally sharing section loading with SV.
+
+    ``read_only`` validates existing caches for plotting and never computes spectra.
+    """
+    if not read_only:
+        C.ensure_output_dirs()
     freq_edges = utils.shared_supported_freq_edges(list(C.SPECIES_CONFIGS.values()))
     # Load per-slide cached spectral arrays for each species
     species = {}
@@ -469,6 +448,8 @@ def load_spectra_and_fit_joint_embedding(
             freq_edges=freq_edges,
             force=force,
             progress=progress,
+            include_sv=include_sv,
+            read_only=read_only,
         )
         species[name] = _load_species_arrays(
             cfg,
