@@ -15,7 +15,6 @@ from scripts.paper_utils import (
     cache_entry_is_current,
     cache_signature,
     path_fingerprint,
-    source_provenance,
     update_cache_entry,
 )
 
@@ -31,7 +30,7 @@ from .config import (
     LINEAGE_TARGET_METADATA_FILE,
     LINEAGE_TREE_DIR,
 )
-from .utils import cache_is_reusable, parse_newick
+from .utils import cache_is_reusable, parse_newick, source_provenance
 
 LOGGER = logging.getLogger(__name__)
 

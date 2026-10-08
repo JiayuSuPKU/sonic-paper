@@ -20,7 +20,6 @@ from scripts.paper_utils import (
     cache_entry_is_current,
     cache_signature,
     path_fingerprint,
-    source_provenance,
     update_cache_entry,
 )
 
@@ -36,6 +35,7 @@ from .config import (
     SMALL_INTESTINE_SCORES_FILE,
     ensure_output_dirs,
 )
+from .utils import source_provenance
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_CHUNK_SIZE = 64

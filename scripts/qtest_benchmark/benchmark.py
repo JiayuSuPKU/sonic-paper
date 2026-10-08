@@ -40,7 +40,6 @@ from scripts.paper_utils import (
     cache_entry_is_current,
     cache_signature,
     max_rss_gb,
-    source_provenance,
     update_cache_entry,
 )
 
@@ -58,7 +57,7 @@ from .config import (
     VALIDATION_RESULT_DIR,
     ensure_output_dirs,
 )
-from .utils import cache_is_reusable
+from .utils import cache_is_reusable, source_provenance
 
 LOGGER = logging.getLogger(__name__)
 

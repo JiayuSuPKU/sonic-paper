@@ -109,6 +109,8 @@ Cheap lineage summaries and tree layouts are reconstructed in memory.
 The notebook validates source, input, and output fingerprints before loading
 each cache group. It rejects legacy or stale caches and uses the small-intestine
 source recorded by the scoring run, including a custom `--source` path.
+Source fingerprints include Q-test Python modules, shared Python helpers, SONIC,
+and numerical dependency versions. The unused R enrichment script is excluded.
 
 After the workflow completes, execute the notebook:
 

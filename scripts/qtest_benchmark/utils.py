@@ -1,10 +1,13 @@
 """Small helpers shared by Q-test analyses and figure notebooks."""
 
+import hashlib
 import logging
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
+from scripts import paper_utils
 from scripts.paper_utils import (
     COMPUTER_MODERN_MATHTEXT,
     FIGURE_WIDTH_MM,
@@ -13,6 +16,21 @@ from scripts.paper_utils import (
 )
 
 __all__ = ["COMPUTER_MODERN_MATHTEXT", "FIGURE_WIDTH_MM", "FONT_CONFIG"]
+
+
+def source_provenance(analysis_file: str | Path) -> dict[str, Any]:
+    """Fingerprint Q-test Python dependencies, excluding unused R enrichment code."""
+    provenance = paper_utils.source_provenance(analysis_file)
+    root = Path(analysis_file).resolve().parent
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*.py")):
+        digest.update(str(path.relative_to(root)).encode())
+        digest.update(path.read_bytes())
+    shared_source = Path(paper_utils.__file__)
+    digest.update(shared_source.name.encode())
+    digest.update(shared_source.read_bytes())
+    provenance["analysis_source_sha256"] = digest.hexdigest()
+    return provenance
 
 
 def cache_is_reusable(

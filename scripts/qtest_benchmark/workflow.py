@@ -16,7 +16,6 @@ from scripts.paper_utils import (
     installed_version,
     path_fingerprint,
     project_relative,
-    source_provenance,
     update_cache_entry,
     write_workflow_manifest,
 )
@@ -80,6 +79,7 @@ from .small_intestine import (
     PATTERN_SMOOTHING_SIGMA,
     cache_small_intestine_kernel_results,
 )
+from .utils import source_provenance
 
 LOGGER = logging.getLogger(__name__)
 
