@@ -37,6 +37,8 @@ from .config import (
     REMAP_TF_TARGETS_HG38,
     RESULT_DIR,
     SDATA_ZARR,
+    TABLE_CODEWORD,
+    TABLE_GENE,
     TCGA_ANALYSIS_DIR,
     TCGA_DATA_DIR,
 )
@@ -74,12 +76,34 @@ def selected_to_dense(x: Any) -> np.ndarray:
     return np.asarray(x)
 
 
-def load_sdata():
+def load_sdata(tables=(TABLE_CODEWORD, TABLE_GENE)):
+    import anndata
     import spatialdata as sd
 
     if not SDATA_ZARR.exists():
         raise FileNotFoundError(f"Missing SpatialData store: {SDATA_ZARR}")
-    return sd.read_zarr(SDATA_ZARR)
+    return sd.SpatialData(
+        tables={name: anndata.read_zarr(SDATA_ZARR / "tables" / name) for name in tables}
+    )
+
+
+def log_normalized_gene_expression(adata, genes, row_order=None):
+    """Return selected gene counts as sparse log1p-CP10K without changing input."""
+    if row_order is None:
+        row_order = np.arange(adata.n_obs)
+    selected = adata[row_order, genes].X
+    values = sp.csr_matrix(selected, dtype=np.float32, copy=True)
+    totals = (
+        adata.obs.iloc[row_order]["total_counts"].to_numpy(dtype=float)
+        if "total_counts" in adata.obs
+        else np.asarray(adata[row_order, :].X.sum(axis=1)).ravel().astype(float)
+    )
+    scale = np.divide(
+        10_000.0, totals, out=np.zeros_like(totals, dtype=np.float32), where=totals > 0
+    )
+    values = values.multiply(scale[:, None]).tocsr()
+    values.data = np.log1p(values.data).astype(np.float32)
+    return values.astype(np.float32)
 
 
 def bh_fdr(pvalues: np.ndarray) -> np.ndarray:

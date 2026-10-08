@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
+from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
@@ -205,11 +207,57 @@ def installed_version(distribution: str) -> str:
         return "unknown"
 
 
+@lru_cache(maxsize=128)
+def _python_source_fingerprint(content: bytes) -> str:
+    """Cache by content so cosmetic edits are cheap without hiding later code edits."""
+    tree = ast.parse(content)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            if (
+                node.body
+                and isinstance(node.body[0], ast.Expr)
+                and isinstance(node.body[0].value, ast.Constant)
+                and isinstance(node.body[0].value.value, str)
+            ):
+                node.body = node.body[1:]
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in {"logging", "logger", "LOGGER"}
+            and node.func.attr in {"debug", "info", "warning", "error", "exception", "critical"}
+            and node.args
+        ):
+            message = node.args[0]
+            if isinstance(message, ast.Constant) and isinstance(message.value, str):
+                node.args[0] = ast.Constant(value="<log message>")
+            elif isinstance(message, ast.JoinedStr):
+                # Keep evaluated expressions and formatting operations intact.
+                message.values = [
+                    part for part in message.values if not isinstance(part, ast.Constant)
+                ]
+    content = ast.dump(tree, include_attributes=False).encode()
+    return hashlib.sha256(content).hexdigest()
+
+
+def source_file_fingerprint(path: str | Path) -> str:
+    """Hash Python syntax, ignoring documentation and standard log-message wording.
+
+    Ordinary strings, logging arguments/expressions, and executable statements
+    remain significant. Non-Python files retain exact byte-level fingerprints.
+    """
+    path = Path(path)
+    content = path.read_bytes()
+    if path.suffix == ".py":
+        return _python_source_fingerprint(content)
+    return hashlib.sha256(content).hexdigest()
+
+
 def source_provenance(analysis_file: str | Path) -> dict[str, Any]:
-    """Fingerprint imported SONIC and the analysis module's source directory."""
+    """Fingerprint SONIC and analysis code without cosmetic Python source changes."""
     import sonic
 
-    provenance = {}
+    provenance = {"fingerprint_schema": "python-ast-v1"}
     for name, root in (
         ("sonic", Path(sonic.__file__).resolve().parent),
         ("analysis", Path(analysis_file).resolve().parent),
@@ -217,12 +265,12 @@ def source_provenance(analysis_file: str | Path) -> dict[str, Any]:
         digest = hashlib.sha256()
         for path in sorted(root.rglob("*.py")):
             digest.update(str(path.relative_to(root)).encode())
-            digest.update(path.read_bytes())
+            digest.update(source_file_fingerprint(path).encode())
         if name == "analysis":
             for path in (Path(__file__), CLUSTERPROFILER_SCRIPT):
                 if path.is_file():
                     digest.update(path.name.encode())
-                    digest.update(path.read_bytes())
+                    digest.update(source_file_fingerprint(path).encode())
         provenance[f"{name}_source_sha256"] = digest.hexdigest()
     provenance["versions"] = {
         name: installed_version(name)

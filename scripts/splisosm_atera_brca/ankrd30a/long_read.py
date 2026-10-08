@@ -18,14 +18,24 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    path_fingerprint,
+    update_cache_entry,
+)
+from scripts.splisosm_utils import source_provenance
+
 from ..config import (
     ANKRD30A_PROBE_MAPPINGS_CSV,
     ANKRD30A_REGULATOR_PRIORITY_CSV,
     ANKRD30A_TRANSCRIPT_ANNOTATIONS_CSV,
     ANKRD30A_VISUALIZATION_CACHE_DIR,
+    DU_CSV,
     GENCODE_GTF,
     PACBIO_FL_COUNTS_TSV,
     PACBIO_GFF,
+    REMAP_NR_HG38_BED,
     SQANTI_TXT,
     SVP_PROBE_RESULT_DIR,
 )
@@ -43,8 +53,12 @@ from .common import (
 )
 
 
-@lru_cache(maxsize=1)
 def all_pacbio_ankrd30a_transcript_ids() -> tuple[str, ...]:
+    return _all_pacbio_transcript_ids(cache_signature(path_fingerprint(PACBIO_GFF)))
+
+
+@lru_cache(maxsize=1)
+def _all_pacbio_transcript_ids(_input_signature: str) -> tuple[str, ...]:
     """Return every PB-QC-passed ANKRD30A transcript in the PacBio GFF."""
     transcript_ids: list[str] = []
     with open_text(PACBIO_GFF) as handle:
@@ -322,7 +336,9 @@ def _add_pb_tss_metadata(transcripts: pd.DataFrame) -> pd.DataFrame:
 
 
 @lru_cache(maxsize=1)
-def _compute_ankrd30a_long_read_annotations() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def _compute_ankrd30a_long_read_annotations(
+    _input_signature: str,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Build ANKRD30A PacBio structures and FL-count summaries from source files."""
     # Start from PB-QC structural rows, then enrich transcript rows with SQANTI
     # ORF/coding calls and ER-stratified sample-level FL support.
@@ -355,7 +371,14 @@ def prepare_ankrd30a_long_read_annotations(
     """
     if force:
         _compute_ankrd30a_long_read_annotations.cache_clear()
-    return _copy_frames(_compute_ankrd30a_long_read_annotations())  # type: ignore[return-value]
+    signature = cache_signature(
+        {
+            "inputs": [
+                path_fingerprint(path) for path in (PACBIO_GFF, SQANTI_TXT, PACBIO_FL_COUNTS_TSV)
+            ]
+        }
+    )
+    return _copy_frames(_compute_ankrd30a_long_read_annotations(signature))  # type: ignore[return-value]
 
 
 # Visualization cache assembly
@@ -363,17 +386,8 @@ def prepare_ankrd30a_long_read_annotations(
 
 def load_ankrd30a_visualization_cache() -> dict[str, pd.DataFrame]:
     """Load the plain-CSV ANKRD30A tables consumed by ``visualization.ipynb``."""
-    missing = [
-        path
-        for path in ANKRD30A_VISUALIZATION_CACHE_FILES
-        if not path.exists() or path.stat().st_size == 0
-    ]
-    if missing:
-        missing_text = ", ".join(project_path(path) for path in missing)
-        raise FileNotFoundError(
-            f"Missing ANKRD30A visualization cache file(s): {missing_text}. "
-            "Run scripts/splisosm_atera_brca/workflow.py before rendering figures."
-        )
+    if not _visualization_cache_ready():
+        raise RuntimeError("Stale ANKRD30A visualization cache; rerun splisosm_atera_brca.workflow")
     cache = {
         "transcript_annotations": pd.read_csv(ANKRD30A_TRANSCRIPT_ANNOTATIONS_CSV),
         "probe_mappings": pd.read_csv(ANKRD30A_PROBE_MAPPINGS_CSV),
@@ -411,14 +425,31 @@ def load_ankrd30a_visualization_cache() -> dict[str, pd.DataFrame]:
     return cache
 
 
+def _visualization_signature_data() -> dict:
+    return {
+        "source": source_provenance(__file__),
+        "inputs": [
+            path_fingerprint(path, recursive=path.is_dir())
+            for path in (
+                DU_CSV,
+                GENCODE_GTF,
+                PACBIO_GFF,
+                SQANTI_TXT,
+                PACBIO_FL_COUNTS_TSV,
+                REMAP_NR_HG38_BED,
+                SVP_PROBE_RESULT_DIR,
+            )
+        ],
+    }
+
+
 def _visualization_cache_ready() -> bool:
-    """Return true when the three plain-CSV notebook cache files are readable."""
-    if any(
-        not path.exists() or path.stat().st_size == 0 for path in ANKRD30A_VISUALIZATION_CACHE_FILES
-    ):
-        return False
-    load_ankrd30a_visualization_cache()
-    return True
+    return cache_entry_is_current(
+        ANKRD30A_VISUALIZATION_CACHE_DIR,
+        "visualization",
+        cache_signature(_visualization_signature_data()),
+        outputs=ANKRD30A_VISUALIZATION_CACHE_FILES,
+    )
 
 
 def _ankrd30a_compatibility_from_svp_cache() -> pd.DataFrame:
@@ -663,7 +694,12 @@ def _write_ankrd30a_visualization_cache(
     are small figure-specific tables. Probe mappings and DU regulator priority
     remain separate files for easier inspection.
     """
-    if _visualization_cache_ready() and not force:
+    signature_data = _visualization_signature_data()
+    if (
+        not force
+        and _visualization_cache_ready()
+        and ANKRD30A_REGULATOR_PRIORITY_CSV.read_text() == regulator_priority.to_csv(index=False)
+    ):
         return {
             "status": "cached",
             "outputs": [str(path) for path in ANKRD30A_VISUALIZATION_CACHE_FILES],
@@ -683,6 +719,13 @@ def _write_ankrd30a_visualization_cache(
     save_csv(annotations, ANKRD30A_TRANSCRIPT_ANNOTATIONS_CSV)
     save_csv(probe_segments, ANKRD30A_PROBE_MAPPINGS_CSV)
     save_csv(regulator_priority, ANKRD30A_REGULATOR_PRIORITY_CSV)
+    update_cache_entry(
+        ANKRD30A_VISUALIZATION_CACHE_DIR,
+        "visualization",
+        cache_signature(signature_data),
+        ANKRD30A_VISUALIZATION_CACHE_FILES,
+        signature_data=signature_data,
+    )
     return {
         "status": "computed",
         "outputs": [str(path) for path in ANKRD30A_VISUALIZATION_CACHE_FILES],

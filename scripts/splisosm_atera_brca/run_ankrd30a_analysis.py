@@ -12,6 +12,14 @@ if __package__ in {None, ""}:
 
 import pandas as pd
 
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    path_fingerprint,
+    update_cache_entry,
+)
+from scripts.splisosm_utils import source_provenance
+
 from .ankrd30a.atera_du import (
     ankrd30a_regulator_priority_table,
     select_ankrd30a_focus_regulators,
@@ -30,8 +38,30 @@ from .ankrd30a.tcga import (
     prepare_tcga_regulator_expression,
     quantify_tcga_ankrd30a,
 )
-from .config import DU_CSV, TCGA_ER_POSITIVE_CORRELATION_CSV
+from .config import (
+    ANKRD30A_REGULATOR_PRIORITY_CSV,
+    DU_CSV,
+    RESULT_DIR,
+    TCGA_CBIO_RSEM_TXT,
+    TCGA_ER_POSITIVE_CORRELATION_CSV,
+    TCGA_METRIC_TABLE_TSV,
+)
 from .utils import log, save_csv
+
+
+def _correlation_signature_data() -> dict:
+    return {
+        "source": source_provenance(__file__),
+        "inputs": [
+            path_fingerprint(path)
+            for path in (
+                DU_CSV,
+                ANKRD30A_REGULATOR_PRIORITY_CSV,
+                TCGA_METRIC_TABLE_TSV,
+                TCGA_CBIO_RSEM_TXT,
+            )
+        ],
+    }
 
 
 def run_ankrd30a_analysis(
@@ -60,9 +90,25 @@ def run_ankrd30a_analysis(
     # TCGA expression is loaded only for the prioritized regulators to avoid
     # caching a large derived expression table; expr is a long table of raw
     # cBioPortal RSEM values, log1p-transformed inside the correlation test.
-    expr = prepare_tcga_regulator_expression(regulators)
-    correlations = compute_regulator_correlations(metrics, regulators, expr)
-    save_csv(correlations, TCGA_ER_POSITIVE_CORRELATION_CSV)
+    signature_data = _correlation_signature_data()
+    if not force and cache_entry_is_current(
+        RESULT_DIR,
+        "tcga_correlations",
+        cache_signature(signature_data),
+        outputs=(TCGA_ER_POSITIVE_CORRELATION_CSV,),
+    ):
+        correlations = pd.read_csv(TCGA_ER_POSITIVE_CORRELATION_CSV)
+    else:
+        expr = prepare_tcga_regulator_expression(regulators)
+        correlations = compute_regulator_correlations(metrics, regulators, expr)
+        save_csv(correlations, TCGA_ER_POSITIVE_CORRELATION_CSV)
+        update_cache_entry(
+            RESULT_DIR,
+            "tcga_correlations",
+            cache_signature(signature_data),
+            (TCGA_ER_POSITIVE_CORRELATION_CSV,),
+            signature_data=signature_data,
+        )
     status = {
         "visualization_cache_status": visualization_cache_status,
         "download_status": download_status,

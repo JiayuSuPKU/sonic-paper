@@ -14,7 +14,11 @@ if __package__ in {None, ""}:
 
 import pandas as pd
 
-from scripts.paper_utils import write_workflow_manifest
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    write_workflow_manifest,
+)
 
 from .config import (
     CACHE_REVISIONS,
@@ -40,6 +44,56 @@ from .utils import ensure_dirs, project_path
 
 # Cache-defining knobs are documented here and written to workflow_manifest.json.
 CACHE_PARAMETERS = {"sv": SV_CACHE_PARAMETERS, "du": DU_CACHE_PARAMETERS}
+
+
+def require_current_figure_cache() -> None:
+    """Validate all notebook dependencies without computing or writing results."""
+    from scripts.paper_utils import require_files
+
+    from .ankrd30a.long_read import _visualization_cache_ready
+    from .ankrd30a.run_trps1_proseq import require_current_signal_cache
+    from .ankrd30a.tcga import load_tcga_metrics
+    from .config import (
+        DU_LML_APPROX_RANK,
+        REMAP_TF_TARGETS_HG38,
+        SV_CSV,
+        SVP_PROBE_RESULT_DIR,
+        TCGA_ER_POSITIVE_CORRELATION_CSV,
+    )
+    from .du import _du_cache_signature_data
+    from .probe_mapping import _expected_cache_metadata, _svp_probe_cache_paths
+    from .run_ankrd30a_analysis import _correlation_signature_data
+    from .sv import _sv_cache_signature_data
+
+    require_files(
+        (REMAP_TF_TARGETS_HG38,), label="cached ReMap regulator list; run the workflow first"
+    )
+
+    if not cache_entry_is_current(RESULT_DIR, "sv", cache_signature(_sv_cache_signature_data())):
+        raise RuntimeError("Stale Atera SV cache; rerun splisosm_atera_brca.workflow")
+    sv = pd.read_csv(SV_CSV)
+    data = _du_cache_signature_data(sv, lml_approx_rank=DU_LML_APPROX_RANK)
+    if not cache_entry_is_current(RESULT_DIR, "du", cache_signature(data)):
+        raise RuntimeError("Stale Atera DU cache; rerun splisosm_atera_brca.workflow")
+    mapping = _expected_cache_metadata(svp_target_genes(sv))
+    if not cache_entry_is_current(
+        SVP_PROBE_RESULT_DIR,
+        "mapping",
+        cache_signature(mapping),
+        outputs=tuple(_svp_probe_cache_paths(SVP_PROBE_RESULT_DIR).values()),
+    ):
+        raise RuntimeError("Stale Atera probe mapping; rerun splisosm_atera_brca.workflow")
+    if not _visualization_cache_ready():
+        raise RuntimeError("Stale ANKRD30A visualization cache; rerun splisosm_atera_brca.workflow")
+    load_tcga_metrics(read_only=True)
+    require_current_signal_cache()
+    if not cache_entry_is_current(
+        RESULT_DIR,
+        "tcga_correlations",
+        cache_signature(_correlation_signature_data()),
+        outputs=(TCGA_ER_POSITIVE_CORRELATION_CSV,),
+    ):
+        raise RuntimeError("Stale TCGA correlations; rerun splisosm_atera_brca.workflow")
 
 
 def run_workflow(

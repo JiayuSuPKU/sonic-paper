@@ -37,6 +37,14 @@ import numpy as np
 import pandas as pd
 import pyBigWig
 
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    path_fingerprint,
+    update_cache_entry,
+)
+from scripts.splisosm_utils import source_provenance
+
 from ..config import (
     ANKRD30A_TRANSCRIPT_ANNOTATIONS_CSV,
     ANKRD30A_TRPS1_PROSEQ_DATA_DIR,
@@ -247,7 +255,11 @@ def _write_region_bigwig(
     force: bool = False,
 ) -> str:
     """Write a local bigWig containing only the ANKRD30A genomic interval."""
-    if path.exists() and not force:
+    signature_data = {"source_url": source_url, "region": region}
+    section = f"bigwig:{path.name}"
+    if not force and cache_entry_is_current(
+        path.parent, section, cache_signature(signature_data), outputs=(path,)
+    ):
         return "cached"
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -277,6 +289,13 @@ def _write_region_bigwig(
                 values=out_values,
             )
     tmp.replace(path)
+    update_cache_entry(
+        path.parent,
+        section,
+        cache_signature(signature_data),
+        (path,),
+        signature_data=signature_data,
+    )
     return "downloaded_region"
 
 
@@ -330,33 +349,32 @@ def download_region_bigwigs(
     return pd.DataFrame(rows)
 
 
-def _local_bigwigs_complete(manifest: pd.DataFrame) -> bool:
-    """Return whether every local partial bigWig exists."""
-    paths = [
-        Path(str(row[col]))
-        for _, row in manifest.iterrows()
-        for col in ("pos_bigwig_path", "neg_bigwig_path")
-    ]
-    return all(path.exists() and path.stat().st_size > 0 for path in paths)
+def _signal_signature_data(manifest: pd.DataFrame, windows: pd.DataFrame) -> dict:
+    return {
+        "source": source_provenance(__file__),
+        "manifest": manifest.to_dict("records"),
+        "windows": windows.to_dict("records"),
+        "inputs": [
+            path_fingerprint(Path(str(row[col])))
+            for _, row in manifest.iterrows()
+            for col in ("pos_bigwig_path", "neg_bigwig_path")
+        ],
+    }
 
 
-def _signal_cache_is_current(signal: pd.DataFrame) -> bool:
-    """Return whether the cached table uses summed, not length-normalized, signal."""
-    required = {
-        "combined_abs_sum",
-        "baseline_combined_abs_sum",
-        "delta_combined_abs_sum_vs_0h",
-        "log2fc_combined_abs_sum_vs_0h",
-    }
-    legacy_normalized_columns = {
-        "combined_mean_abs_signal",
-        "baseline_combined_mean_abs_signal",
-        "delta_combined_mean_abs_signal_vs_0h",
-        "log2fc_combined_mean_abs_signal_vs_0h",
-    }
-    return required.issubset(signal.columns) and not (
-        legacy_normalized_columns & set(signal.columns)
-    )
+def require_current_signal_cache() -> None:
+    data = _signal_signature_data(build_sample_manifest(), build_ankrd30a_signal_windows())
+    if not cache_entry_is_current(
+        ANKRD30A_TRPS1_PROSEQ_RESULT_DIR,
+        "signal",
+        cache_signature(data),
+        outputs=(
+            ANKRD30A_TRPS1_PROSEQ_SIGNAL_CSV,
+            ANKRD30A_TRPS1_PROSEQ_SAMPLE_MANIFEST_CSV,
+            ANKRD30A_TRPS1_PROSEQ_SIGNAL_WINDOWS_CSV,
+        ),
+    ):
+        raise RuntimeError("Stale PRO-seq signals; rerun splisosm_atera_brca.workflow")
 
 
 def _combined_signal(
@@ -442,8 +460,6 @@ def run_trps1_proseq(
             ],
         }
 
-    save_csv(manifest, ANKRD30A_TRPS1_PROSEQ_SAMPLE_MANIFEST_CSV)
-    save_csv(windows, ANKRD30A_TRPS1_PROSEQ_SIGNAL_WINDOWS_CSV)
     # Downloading is idempotent unless --force is used; cached partial bigWigs
     # are reused for local signal extraction.
     download_status = download_region_bigwigs(
@@ -453,23 +469,29 @@ def run_trps1_proseq(
         dry_run=False,
     )
 
-    if (
-        ANKRD30A_TRPS1_PROSEQ_SIGNAL_CSV.exists()
-        and not force
-        and _local_bigwigs_complete(manifest)
+    signature_data = _signal_signature_data(manifest, windows)
+    outputs = (
+        ANKRD30A_TRPS1_PROSEQ_SIGNAL_CSV,
+        ANKRD30A_TRPS1_PROSEQ_SAMPLE_MANIFEST_CSV,
+        ANKRD30A_TRPS1_PROSEQ_SIGNAL_WINDOWS_CSV,
+    )
+    if not force and cache_entry_is_current(
+        ANKRD30A_TRPS1_PROSEQ_RESULT_DIR, "signal", cache_signature(signature_data), outputs=outputs
     ):
         signal = pd.read_csv(ANKRD30A_TRPS1_PROSEQ_SIGNAL_CSV)
-        if _signal_cache_is_current(signal):
-            status = "cached"
-        else:
-            signal = quantify_signal_changes(manifest, windows)
-            save_csv(signal, ANKRD30A_TRPS1_PROSEQ_SIGNAL_CSV)
-            status = "computed"
+        status = "cached"
     else:
-        # Recompute signal when requested, when the signal CSV is missing, or
-        # when any local partial bigWig is incomplete.
         signal = quantify_signal_changes(manifest, windows)
         save_csv(signal, ANKRD30A_TRPS1_PROSEQ_SIGNAL_CSV)
+        save_csv(manifest, ANKRD30A_TRPS1_PROSEQ_SAMPLE_MANIFEST_CSV)
+        save_csv(windows, ANKRD30A_TRPS1_PROSEQ_SIGNAL_WINDOWS_CSV)
+        update_cache_entry(
+            ANKRD30A_TRPS1_PROSEQ_RESULT_DIR,
+            "signal",
+            cache_signature(signature_data),
+            outputs,
+            signature_data=signature_data,
+        )
         status = "computed"
 
     return {

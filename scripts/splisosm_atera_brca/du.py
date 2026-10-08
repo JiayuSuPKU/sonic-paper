@@ -12,10 +12,10 @@ from anndata import AnnData
 from scripts.paper_utils import (
     cache_entry_is_current,
     cache_signature,
-    installed_version,
     path_fingerprint,
     update_cache_entry,
 )
+from scripts.splisosm_utils import source_provenance
 
 from .config import (
     CACHE_REVISIONS,
@@ -45,6 +45,7 @@ from .config import (
 from .sv import svp_target_genes
 from .utils import (
     load_sdata,
+    log_normalized_gene_expression,
     max_rss_gb,
     normalize_gene_symbol,
     regulator_class_keys,
@@ -62,6 +63,8 @@ def _gene_row_order(adata_gene: AnnData, codeword_cell_ids: pd.Index) -> np.ndar
         gene_cell_ids = adata_gene.obs["cell_id"].astype(str)
     else:
         gene_cell_ids = pd.Index(adata_gene.obs_names).astype(str)
+    if not pd.Index(gene_cell_ids).is_unique or not codeword_cell_ids.is_unique:
+        raise ValueError("Gene and codeword cell IDs must be unique")
     indexer = pd.Series(np.arange(adata_gene.n_obs), index=gene_cell_ids)
     missing = codeword_cell_ids[~codeword_cell_ids.isin(indexer.index)]
     if len(missing):
@@ -145,19 +148,7 @@ def build_regulator_design(
         )
 
     kept_symbols = present.loc[keep, "gene_table_symbol"].astype(str).tolist()
-    x_keep = x_raw[:, keep].tocsr()
-    if "total_counts" in adata_gene.obs:
-        cell_totals = adata_gene.obs.iloc[row_order]["total_counts"].astype(float).to_numpy()
-    else:
-        cell_totals = np.asarray(adata_gene[row_order, :].X.sum(axis=1)).ravel().astype(float)
-    scale = np.divide(
-        10_000.0,
-        cell_totals,
-        out=np.zeros_like(cell_totals, dtype=np.float32),
-        where=cell_totals > 0,
-    )
-    x_norm = x_keep.multiply(scale[:, None]).tocsr()
-    x_norm.data = np.log1p(x_norm.data).astype(np.float32, copy=False)
+    x_norm = log_normalized_gene_expression(adata_gene, kept_symbols, row_order)
 
     # Status records every requested regulator, including missing/filtered genes.
     status = requested.merge(
@@ -199,52 +190,21 @@ def _target_adata(sdata, svp: pd.DataFrame) -> tuple[AnnData, list[str]]:
     return adata[:, mask.to_numpy()].copy(), target_genes
 
 
-def _cached_du_matches(svp: pd.DataFrame, covariates: list[str]) -> bool:
-    if not all(
-        path.exists()
-        for path in [
-            DU_CSV,
-            DU_SUMMARY_JSON,
-            DU_METRICS_CSV,
-            DU_REGULATOR_STATUS_CSV,
-        ]
-    ):
-        return False
-
-    import json
-
-    summary = json.loads(DU_SUMMARY_JSON.read_text())
-    target_keys = [normalize_gene_symbol(g) for g in svp_target_genes(svp)]
-    covariate_keys = [normalize_gene_symbol(c) for c in covariates]
-    # Hash target/covariate identities so cache reuse is tied to the tested design.
-    return (
-        summary.get("target_gene_key_hash") == stable_hash_values(target_keys)
-        and summary.get("covariate_key_hash") == stable_hash_values(covariate_keys)
-        and summary.get("parameters", {}).get("gpr_backend") == DU_GPR_BACKEND
-        and summary.get("parameters", {}).get("min_counts") == MIN_COUNTS
-        and summary.get("parameters", {}).get("min_bin_pct") == MIN_BIN_PCT
-        and summary.get("parameters", {}).get("min_component_size") == MIN_COMPONENT_SIZE
-    )
-
-
 def _du_cache_signature_data(
     svp: pd.DataFrame,
-    covariates: list[str],
     *,
     lml_approx_rank: int,
 ) -> dict[str, Any]:
     target_keys = [normalize_gene_symbol(gene) for gene in svp_target_genes(svp)]
-    covariate_keys = [normalize_gene_symbol(gene) for gene in covariates]
     class_keys = regulator_class_keys()
     return {
         "cache_revision": CACHE_REVISIONS["du"],
-        "dependencies": {"splisosm": installed_version("splisosm")},
-        "inputs": [path_fingerprint(SDATA_ZARR)],
+        "source": source_provenance(__file__),
+        "inputs": [path_fingerprint(SDATA_ZARR, recursive=True)],
         "parameters": {
             **DU_CACHE_PARAMETERS,
             "gpr_lml_approx_rank": lml_approx_rank,
             "target_gene_key_hash": stable_hash_values(target_keys),
-            "covariate_key_hash": stable_hash_values(covariate_keys),
             "rbp_gene_key_hash": stable_hash_values(class_keys["rbp"]),
             "tf_chip_gene_key_hash": stable_hash_values(class_keys["tf_chip"]),
         },
@@ -332,30 +292,20 @@ def run_du(
     lml_approx_rank: int = DU_LML_APPROX_RANK,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Run/load DU for all segmented SVP genes against all configured regulators."""
+    signature_data = _du_cache_signature_data(svp, lml_approx_rank=lml_approx_rank)
+    signature = cache_signature(signature_data)
+    outputs = (DU_CSV, DU_METRICS_CSV, DU_REGULATOR_STATUS_CSV, DU_SUMMARY_JSON)
+    if not force and cache_entry_is_current(RESULT_DIR, "du", signature, outputs=outputs):
+        return (
+            pd.read_csv(DU_CSV),
+            pd.read_csv(DU_REGULATOR_STATUS_CSV),
+            pd.read_csv(DU_METRICS_CSV),
+        )
+
     sdata = load_sdata()
     target_adata, target_genes = _target_adata(sdata, svp)
     codeword_cell_ids = pd.Index(target_adata.obs_names).astype(str)
-    design, covariates, status = build_regulator_design(
-        sdata.tables[TABLE_GENE],
-        codeword_cell_ids,
-    )
-
-    signature_data = _du_cache_signature_data(
-        svp,
-        covariates,
-        lml_approx_rank=lml_approx_rank,
-    )
-    signature = cache_signature(signature_data)
-    outputs = (DU_CSV, DU_METRICS_CSV, DU_REGULATOR_STATUS_CSV, DU_SUMMARY_JSON)
-    if (
-        not force
-        and _cached_du_matches(svp, covariates)
-        and cache_entry_is_current(RESULT_DIR, "du", signature, outputs=outputs)
-    ):
-        du = pd.read_csv(DU_CSV)
-        metrics = pd.read_csv(DU_METRICS_CSV)
-        cached_status = pd.read_csv(DU_REGULATOR_STATUS_CSV)
-        return du, cached_status, metrics
+    design, covariates, status = build_regulator_design(sdata.tables[TABLE_GENE], codeword_cell_ids)
 
     import splisosm
     from splisosm import SplisosmNP

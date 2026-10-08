@@ -25,6 +25,14 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    path_fingerprint,
+    update_cache_entry,
+)
+from scripts.splisosm_utils import source_provenance
+
 from ..config import (
     PACBIO_GFF,
     SVP_PROBE_RESULT_DIR,
@@ -84,33 +92,62 @@ def _sample_key(row: dict[str, object]) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("_") or "NA"
 
 
-def tcga_quantification_ready() -> bool:
-    """Return whether all TCGA validation matrices are present and complete."""
+def _quantification_signature_data(rows: list[dict]) -> dict:
+    return {
+        "source": source_provenance(__file__),
+        "inputs": [
+            path_fingerprint(path)
+            for path in (
+                TCGA_BAM_MANIFEST_TSV,
+                PACBIO_GFF,
+                SVP_PROBE_RESULT_DIR / "svp_probe_mappings.csv",
+                *(Path(str(row["local_slice_bam"])) for row in rows),
+            )
+        ],
+        "sample_keys": sorted(_sample_key(row) for row in rows),
+    }
 
-    def has_required_features(filename: str, required_features: Iterable[str]) -> bool:
-        path = _quant_path(filename)
-        if not path.exists() or path.stat().st_size == 0:
+
+def _quantification_tables_valid(rows: list[dict]) -> bool:
+    expected = {_sample_key(row) for row in rows}
+    if not expected or len(expected) != len(rows):
+        return False
+    transcripts = all_pacbio_ankrd30a_transcript_ids()
+    for name in TCGA_QUANTIFICATION_OUTPUTS:
+        try:
+            table = pd.read_csv(_quant_path(name), sep="\t")
+            features = (
+                transcripts
+                if name in (TRANSCRIPT_COUNT_NAME, TRANSCRIPT_USAGE_NAME)
+                else PROBE_REGION_FEATURES
+            )
+            if table.empty or not {*features, "sample_matrix_key"}.issubset(table.columns):
+                return False
+            keys = table["sample_matrix_key"].astype(str)
+            if not keys.is_unique or set(keys) != expected:
+                return False
+            if name in (PROBE_REGION_COUNTS_NAME, PROBE_REGION_USAGE_NAME):
+                if (
+                    PROBE_REGION_AGGREGATION_COLUMN not in table
+                    or not table[PROBE_REGION_AGGREGATION_COLUMN]
+                    .eq(PROBE_REGION_AGGREGATION_VALUE)
+                    .all()
+                ):
+                    return False
+        except (OSError, ValueError, pd.errors.ParserError):
             return False
-        table = pd.read_csv(path, sep="\t", nrows=1)
-        return set(map(str, required_features)).issubset(set(table.columns.astype(str)))
+    return True
 
-    # The figure focuses on four PB event transcripts, but StringTie must use
-    # every PB-QC ANKRD30A transcript as its guide reference. Requiring all
-    # source transcripts here prevents stale four-transcript caches from being
-    # silently reused.
-    all_pb_transcripts = all_pacbio_ankrd30a_transcript_ids()
-    return (
-        has_required_features(TRANSCRIPT_COUNT_NAME, all_pb_transcripts)
-        and has_required_features(TRANSCRIPT_USAGE_NAME, all_pb_transcripts)
-        and has_required_features(
-            PROBE_REGION_COUNTS_NAME,
-            [*PROBE_REGION_FEATURES, PROBE_REGION_AGGREGATION_COLUMN],
-        )
-        and has_required_features(
-            PROBE_REGION_USAGE_NAME,
-            [*PROBE_REGION_FEATURES, PROBE_REGION_AGGREGATION_COLUMN],
-        )
-    )
+
+def tcga_quantification_ready() -> bool:
+    """Require complete sample coverage and current quantification provenance."""
+    rows = _resolve_tcga_bam_rows()
+    return cache_entry_is_current(
+        _quant_path(TRANSCRIPT_COUNT_NAME).parent,
+        "quantification",
+        cache_signature(_quantification_signature_data(rows)),
+        outputs=tuple(_quant_path(name) for name in TCGA_QUANTIFICATION_OUTPUTS),
+    ) and _quantification_tables_valid(rows)
 
 
 def _resolve_tcga_bam_rows() -> list[dict[str, object]]:
@@ -517,22 +554,39 @@ def quantify_tcga_ankrd30a(
     force: bool = False,
 ) -> dict[str, object]:
     """Quantify TCGA ANKRD30A with StringTie transcripts and featureCounts probes."""
-    if tcga_quantification_ready() and not force:
+    rows = _resolve_tcga_bam_rows()
+    signature_data = _quantification_signature_data(rows)
+    outputs = tuple(_quant_path(name) for name in TCGA_QUANTIFICATION_OUTPUTS)
+    if (
+        not force
+        and cache_entry_is_current(
+            outputs[0].parent, "quantification", cache_signature(signature_data), outputs=outputs
+        )
+        and _quantification_tables_valid(rows)
+    ):
         return {
             "status": "cached",
             "n_bams": None,
             "outputs": [str(_quant_path(name)) for name in TCGA_QUANTIFICATION_OUTPUTS],
         }
 
-    rows = _resolve_tcga_bam_rows()
     # Recompute the four matrices together so count and usage outputs stay in sync.
     _write_tcga_quantification_matrices(rows)
     computed_outputs = [
         str(_quant_path(name)) for name in TCGA_QUANTIFICATION_OUTPUTS if _quant_path(name).exists()
     ]
 
-    if not tcga_quantification_ready():
-        raise RuntimeError("TCGA ANKRD30A quantification did not produce all required matrices")
+    if not _quantification_tables_valid(rows):
+        raise RuntimeError(
+            "TCGA ANKRD30A quantification did not produce all required samples/features"
+        )
+    update_cache_entry(
+        outputs[0].parent,
+        "quantification",
+        cache_signature(signature_data),
+        outputs,
+        signature_data=signature_data,
+    )
     status = "computed"
     return {"status": status, "n_bams": len(rows), "outputs": computed_outputs}
 
@@ -657,15 +711,35 @@ def _add_event_fraction_metrics(metrics: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def prepare_tcga_metric_table(*, force: bool = False) -> pd.DataFrame:  # noqa: C901
+def _metric_signature_data() -> dict:
+    return {
+        "source": source_provenance(__file__),
+        "inputs": [
+            path_fingerprint(path)
+            for path in (
+                *(_quant_path(name) for name in TCGA_QUANTIFICATION_OUTPUTS),
+                TCGA_CBIO_CLINICAL_SAMPLE_TXT,
+            )
+        ],
+    }
+
+
+def prepare_tcga_metric_table(*, force: bool = False, read_only: bool = False) -> pd.DataFrame:  # noqa: C901
     """Build or load the merged TCGA sample metric table.
 
     Transcript and direct probe-region matrices are stored separately on disk.
     This function joins the focused columns needed by the validation panels into
     one compact sample table.
     """
-    quant_ready = tcga_quantification_ready()
-    if TCGA_METRIC_TABLE_TSV.exists() and not force and quant_ready:
+    if not tcga_quantification_ready():
+        raise RuntimeError("Stale TCGA quantification; rerun splisosm_atera_brca.workflow")
+    signature_data = _metric_signature_data()
+    if not force and cache_entry_is_current(
+        TCGA_METRIC_TABLE_TSV.parent,
+        "metrics",
+        cache_signature(signature_data),
+        outputs=(TCGA_METRIC_TABLE_TSV,),
+    ):
         cached = pd.read_csv(TCGA_METRIC_TABLE_TSV, sep="\t")
         _require_columns(
             cached,
@@ -679,6 +753,8 @@ def prepare_tcga_metric_table(*, force: bool = False) -> pd.DataFrame:  # noqa: 
             "cached TCGA ANKRD30A metric table",
         )
         return cached
+    if read_only:
+        raise RuntimeError("Stale TCGA metrics; rerun splisosm_atera_brca.workflow")
 
     base = _read_required_tsv(
         _quant_path(TRANSCRIPT_COUNT_NAME), "TCGA PacBio transcript count matrix"
@@ -790,6 +866,13 @@ def prepare_tcga_metric_table(*, force: bool = False) -> pd.DataFrame:  # noqa: 
     TCGA_METRIC_TABLE_TSV.parent.mkdir(parents=True, exist_ok=True)
     metrics.to_csv(TCGA_METRIC_TABLE_TSV, sep="\t", index=False)
     log(f"wrote {project_path(TCGA_METRIC_TABLE_TSV)}")
+    update_cache_entry(
+        TCGA_METRIC_TABLE_TSV.parent,
+        "metrics",
+        cache_signature(signature_data),
+        (TCGA_METRIC_TABLE_TSV,),
+        signature_data=signature_data,
+    )
     return metrics
 
 
@@ -830,9 +913,9 @@ def _primary_tumor_metrics(metrics: pd.DataFrame) -> pd.DataFrame:
     return metrics
 
 
-def load_tcga_metrics(*, force: bool = False) -> pd.DataFrame:
+def load_tcga_metrics(*, force: bool = False, read_only: bool = False) -> pd.DataFrame:
     """Load primary-tumor TCGA metrics with ER status normalized for tests."""
-    metrics = prepare_tcga_metric_table(force=force)
+    metrics = prepare_tcga_metric_table(force=force, read_only=read_only)
     return _primary_tumor_metrics(metrics)
 
 

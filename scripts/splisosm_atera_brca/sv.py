@@ -10,10 +10,10 @@ import pandas as pd
 from scripts.paper_utils import (
     cache_entry_is_current,
     cache_signature,
-    installed_version,
     path_fingerprint,
     update_cache_entry,
 )
+from scripts.splisosm_utils import source_provenance
 
 from .config import (
     CACHE_REVISIONS,
@@ -48,8 +48,8 @@ from .utils import (
 def _sv_cache_signature_data() -> dict[str, Any]:
     return {
         "cache_revision": CACHE_REVISIONS["sv"],
-        "dependencies": {"splisosm": installed_version("splisosm")},
-        "inputs": [path_fingerprint(SDATA_ZARR)],
+        "source": source_provenance(__file__),
+        "inputs": [path_fingerprint(SDATA_ZARR, recursive=True)],
         "parameters": SV_CACHE_PARAMETERS,
     }
 
@@ -117,7 +117,7 @@ def run_sv(*, force: bool = False, n_jobs: int = 8) -> tuple[pd.DataFrame, pd.Da
     import splisosm
     from splisosm import SplisosmNP
 
-    sdata = load_sdata()
+    sdata = load_sdata((TABLE_CODEWORD,))
     adata = sdata.tables[TABLE_CODEWORD]
     model = SplisosmNP(k_neighbors=K_NEIGHBORS, rho=RHO, standardize_cov=False)
     # setup_data applies the same feature and connected-component filters used

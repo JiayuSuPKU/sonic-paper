@@ -64,12 +64,18 @@ read its outputs.
 from __future__ import annotations
 
 import gzip
-import json
 from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    update_cache_entry,
+)
+from scripts.splisosm_utils import source_provenance
 
 from .config import (
     GENCODE_GTF,
@@ -205,6 +211,7 @@ def _expected_cache_metadata(genes: Iterable[str]) -> dict[str, object]:
     }
     return {
         "schema_version": CACHE_SCHEMA_VERSION,
+        "source": source_provenance(__file__),
         "requested_gene_keys": gene_keys,
         "requested_gene_key_hash": stable_hash_values(gene_keys),
         "n_requested_genes": len(gene_keys),
@@ -215,19 +222,6 @@ def _expected_cache_metadata(genes: Iterable[str]) -> dict[str, object]:
         },
         "input_files": input_files,
     }
-
-
-def _cache_metadata_matches(path: Path, expected: dict[str, object]) -> bool:
-    """Return true only when an existing cache was built from the same request."""
-    if not path.exists():
-        return False
-    observed = json.loads(path.read_text())
-    return (
-        observed.get("schema_version") == expected.get("schema_version")
-        and observed.get("requested_gene_key_hash") == expected.get("requested_gene_key_hash")
-        and observed.get("mapping_parameters") == expected.get("mapping_parameters")
-        and observed.get("input_files") == expected.get("input_files")
-    )
 
 
 def _segment_payload(segments: list[tuple[str, int, int]]) -> dict[str, object]:
@@ -1191,11 +1185,8 @@ def prepare_svp_probe_mapping_cache(
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = _svp_probe_cache_paths(out_dir)
     expected_metadata = _expected_cache_metadata(genes)
-    table_paths = _table_cache_paths(paths)
-    if (
-        all(path.exists() for path in table_paths.values())
-        and _cache_metadata_matches(paths["metadata"], expected_metadata)
-        and not force
+    if not force and cache_entry_is_current(
+        out_dir, "mapping", cache_signature(expected_metadata), outputs=tuple(paths.values())
     ):
         log(f"SVP probe mapping cache exists: {paths['mapping']}")
         return paths
@@ -1205,4 +1196,11 @@ def prepare_svp_probe_mapping_cache(
     tables = _build_svp_probe_mapping_tables(genes)
     _write_svp_probe_mapping_tables(tables, paths)
     save_json(expected_metadata, paths["metadata"])
+    update_cache_entry(
+        out_dir,
+        "mapping",
+        cache_signature(expected_metadata),
+        tuple(paths.values()),
+        signature_data=expected_metadata,
+    )
     return paths

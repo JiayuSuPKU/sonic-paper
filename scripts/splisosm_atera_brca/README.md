@@ -6,11 +6,21 @@ Atera FFPE human BRCA SV/DU analysis. The analysis uses segmented
 long-read/TCGA validation example.
 
 SV is run on all segmented codeword features with `hsic-ir`. DU is run once for
-all SVP genes (`SV pvalue_adj < 0.01`) against one combined regulator design
+all SVP genes (`SV pvalue_adj <= 0.01`) against one combined regulator design
 matrix containing configured POSTAR3 RBPs and ReMap human TF-ChIP covariates
 (`hsic-gp`, `gpr_backend="nufft"`). The canonical filters are
 `min_counts=100`, `min_bin_pct=0.05`, `min_component_size=100`,
 `rho=0.99`, and `k_neighbors=4`.
+
+Caches validate recursive input fingerprints, installed SPLISOSM/analysis source,
+and output fingerprints. ANKRD30A annotation/priority, TCGA cohort/clinical, and
+PRO-seq window/track changes invalidate their downstream caches.
+Source fingerprints ignore Python comments, docstrings, formatting, and log-message
+wording. Only imported shared helpers and their dependencies are included; SONIC
+code/version changes do not invalidate SPLISOSM caches. 
+
+Notebook TF expression panels use the same log1p-CP10K normalization as DU covariates;
+their direction indicates the difference in mean normalized log expression.
 
 ## Minimal Dependencies
 
@@ -82,7 +92,7 @@ The standalone `run_ankrd30a_analysis.py` file wraps the ANKRD30A-specific analy
 ## Analysis Policy
 
 - SV uses segmented `table_codeword`, `SplisosmNP`, and `hsic-ir`.
-- DU targets are all canonical SVP genes with `SV pvalue_adj < 0.01`.
+- DU targets are all canonical SVP genes with `SV pvalue_adj <= 0.01`.
 - DU uses one combined regulator matrix from configured POSTAR3 RBPs plus ReMap
   2022 human hg38 TF-ChIP covariates.
 - DU uses `hsic-gp` with `gpr_backend="nufft"` and no spatial kernel in the

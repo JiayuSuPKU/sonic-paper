@@ -39,7 +39,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import spatialdata as sd
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
@@ -52,8 +51,13 @@ from scripts.paper_utils import (
     FONT_CONFIG,
     PAPER_CATEGORICAL,
     PAPER_COLORS,
+    cache_entry_is_current,
+    cache_signature,
     configure_paper_matplotlib,
+    path_fingerprint,
+    update_cache_entry,
 )
+from scripts.splisosm_utils import source_provenance
 
 from .config import (
     GENCODE_GTF,
@@ -75,7 +79,7 @@ from .probe_mapping import (
     read_pacbio_subset,
     read_probe_info,
 )
-from .utils import log, project_path, selected_to_dense
+from .utils import load_sdata, log, project_path, selected_to_dense
 
 configure_paper_matplotlib(
     fonts=FONT_CONFIG,
@@ -696,7 +700,7 @@ def _load_svp_probe_cache(
     )
 
 
-def prepare_top20_panel_inputs(
+def prepare_top20_panel_inputs(  # noqa: C901 — cache validation and per-gene rendering
     *,
     force: bool = False,
     n_top: int = N_TOP,
@@ -726,7 +730,16 @@ def prepare_top20_panel_inputs(
     if top.empty:
         raise ValueError("No SVP genes were selected for top-panel rendering")
     genes = top["gene"].astype(str).tolist()
-    if inventory_path.exists() and not force:
+    signature_data = {
+        "source": source_provenance(__file__),
+        "genes": genes,
+        "render_figures": render_figures,
+        "inputs": [
+            path_fingerprint(path, recursive=path.is_dir())
+            for path in (SVP_CSV, cache_dir, SDATA_ZARR, PROBE_CSV, GENCODE_GTF, PACBIO_GFF)
+        ],
+    }
+    if not force and cache_entry_is_current(OUT_DIR, "panels", cache_signature(signature_data)):
         inventory = pd.read_csv(inventory_path, sep="\t")
         if _inventory_matches_request(inventory, top) and (
             not render_figures or _inventory_complete(inventory)
@@ -759,7 +772,7 @@ def prepare_top20_panel_inputs(
     # Spatial expression summaries are lightweight and specific to the chosen
     # display genes, so they stay in this renderer instead of the main workflow.
     log(f"reading {project_path(SDATA_ZARR)}")
-    sdata = sd.read_zarr(SDATA_ZARR)
+    sdata = load_sdata((TABLE_CODEWORD,))
     coords, norm_df = build_normalized_values(sdata, genes, probe_info)
 
     top.to_csv(OUT_DIR / "top20_svp_genes.csv", index=False)
@@ -853,6 +866,12 @@ def prepare_top20_panel_inputs(
     inventory = pd.DataFrame(inventory_rows)
     inventory.to_csv(inventory_path, sep="\t", index=False)
     log(f"wrote {project_path(inventory_path)}")
+    outputs = [inventory_path, OUT_DIR / "top20_svp_genes.csv", norm_summary_path]
+    if render_figures:
+        outputs.extend(Path(path) for path in inventory["figure"])
+    update_cache_entry(
+        OUT_DIR, "panels", cache_signature(signature_data), outputs, signature_data=signature_data
+    )
     return inventory
 
 
