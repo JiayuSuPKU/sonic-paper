@@ -11,6 +11,7 @@ FIGURE_DIR = PROJECT_ROOT / "figures" / "qtest_benchmark"
 # Runtime and implementation benchmark files
 BENCHMARK_SCALING_FILE = RESULT_DIR / "benchmark_scaling.csv"
 BENCHMARK_PROJECTION_FILE = RESULT_DIR / "benchmark_projection.csv"
+BENCHMARK_RUNS_FILE = RESULT_DIR / "benchmark_runs.jsonl"
 VALIDATION_RESULT_DIR = RESULT_DIR / "validation"
 
 # Small intestine illustration input and output files
@@ -24,6 +25,7 @@ LINEAGE_ANALYSIS_DATA_FILE = LINEAGE_DATA_DIR / "analysis_tumors.h5ad"
 LINEAGE_TREE_DIR = LINEAGE_DATA_DIR / "trees"
 
 LINEAGE_RESULT_DIR = RESULT_DIR / "lineage_tracing"
+LINEAGE_QC_FILE = LINEAGE_RESULT_DIR / "qtest_qc.csv"
 LINEAGE_CLUSTER_SCORES_FILE = LINEAGE_RESULT_DIR / "cluster_scores.csv.gz"
 LINEAGE_GENE_SCORES_FILE = LINEAGE_RESULT_DIR / "gene_scores.csv.gz"
 LINEAGE_BIVARIATE_SUMMARY_FILE = LINEAGE_RESULT_DIR / "bivariate_summary.csv"
@@ -50,7 +52,10 @@ PIXEL_SIZE_UM = 16.0
 
 # Runtime benchmark parameters
 M_FEATURES = 10_000
-RUNTIME_MEMORY_BUDGET_MB = 8_000
+RUNTIME_CORES = 8
+RUNTIME_MEMORY_BUDGET_BYTES = 16 * 1024**3
+RUNTIME_REPEATS = 3
+RUNTIME_JITTER_FRACTION = 0.25
 BENCHMARK_TARGETS = (
     ("Visium", 5_000, "regular"),
     ("Slide-seqV2", 50_000, "irregular"),

@@ -11,6 +11,14 @@ import numpy as np
 import pandas as pd
 from scipy import sparse, stats
 
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    path_fingerprint,
+    source_provenance,
+    update_cache_entry,
+)
+
 from .config import (
     LINEAGE_ANALYSIS_DATA_FILE,
     LINEAGE_BIVARIATE_DIAGNOSTICS_FILE,
@@ -18,6 +26,7 @@ from .config import (
     LINEAGE_CLUSTER_SCORES_FILE,
     LINEAGE_GENE_DIAGNOSTICS_FILE,
     LINEAGE_GENE_SCORES_FILE,
+    LINEAGE_QC_FILE,
     LINEAGE_RESULT_DIR,
     LINEAGE_TARGET_METADATA_FILE,
     LINEAGE_TREE_DIR,
@@ -71,13 +80,16 @@ def _ancestral_connectivity(parent: dict[str, str], leaves: list[str]) -> sparse
     return matrix.tocsr()
 
 
-def _normalized_adjacency(matrix: np.ndarray) -> np.ndarray:
-    """Return the symmetric degree-normalized graph operator."""
-    symmetric = 0.5 * (matrix + matrix.T)
-    degrees = symmetric.sum(axis=1)
-    inverse = np.zeros_like(degrees)
-    inverse[degrees > 0] = 1 / np.sqrt(degrees[degrees > 0])
-    return inverse[:, None] * symmetric * inverse[None, :]
+def _moran_i(q: pd.Series, detector) -> pd.Series:
+    """Conventional Moran I for the tested symmetric degree-normalized weights.
+
+    SONIC reports Q=z'W_norm z using sample-standardized z, so
+    I = n Q / ((n-1) sum(W_norm)) on the retained observations.
+    """
+    weights = detector.adata.obsp["lineage"]
+    inverse = 1 / np.sqrt(np.asarray(weights.sum(axis=1)).ravel())
+    weight_sum = float(inverse @ (weights @ inverse))
+    return q * detector.n / ((detector.n - 1) * weight_sum)
 
 
 def _run_lineage_q_tests(
@@ -88,24 +100,27 @@ def _run_lineage_q_tests(
     features: list[str] | None = None,
     min_cells: int = 1,
     min_cells_frac: float | None = None,
+    detectors: dict[str, Any] | None = None,
 ) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
-    """Run Moran and CAR tests on the same lineage graph and observations."""
+    """Reuse fitted operators while changing the observation/gene support filter."""
     from sonic import DetectorIrregular
 
-    data.obsp["lineage"] = connectivity
-    results: dict[str, pd.DataFrame] = {}
-    detectors = {}
-    for method, parameters in (
-        ("moran", {}),
-        ("car", {"rho": CAR_RHO, "standardize": False}),
-    ):
-        detector = DetectorIrregular(kernel_method=method, backend="matrix", **parameters)
-        detector.setup_data(
-            data,
-            obsp_key="lineage",
-            is_distance=False,
-            min_cells=min_cells,
-            min_cells_frac=min_cells_frac,
+    if detectors is None:
+        data.obsp["lineage"] = connectivity
+        detectors = {}
+        for method, parameters in (
+            ("moran", {}),
+            ("car", {"rho": CAR_RHO, "standardize": False}),
+        ):
+            detector = DetectorIrregular(kernel_method=method, backend="matrix", **parameters)
+            detector.setup_data(data, obsp_key="lineage", is_distance=False)
+            detectors[method] = detector
+    results = {}
+    for method, detector in detectors.items():
+        detector.min_cells = (
+            max(1, int(min_cells_frac * detector.n))
+            if min_cells_frac is not None
+            else max(1, min(min_cells, detector.n))
         )
         results[method] = detector.compute_qstat(
             source=source,
@@ -113,7 +128,6 @@ def _run_lineage_q_tests(
             n_jobs=1,
             show_progress=False,
         )
-        detectors[method] = detector
     return results, detectors
 
 
@@ -134,26 +148,28 @@ def _bivariate_disagreement(
     if len(selected) < 2:
         LOGGER.info("Lineage %s: skipping R statistics (<2 shared Q hits)", tumor)
         return []
-    r_moran = detectors["moran"].compute_rstat(
-        features_x=selected,
-        n_jobs=1,
-        return_pval=True,
-        show_progress=False,
-    )
-    r_car = detectors["car"].compute_rstat(
-        features_x=selected,
-        n_jobs=1,
-        return_pval=True,
-        show_progress=False,
-    )
-    pairs = _canonical_pairs(r_moran, "Z_Moran").join(_canonical_pairs(r_car, "Z_CAR"), how="inner")
+    tables = []
+    for method, column in (("moran", "Z_Moran"), ("car", "Z_CAR")):
+        table = detectors[method].compute_rstat(
+            features_x=selected,
+            n_jobs=1,
+            return_pval=True,
+            show_progress=False,
+        )
+        tables.append(_canonical_pairs(table, column))
+        del table
+    pairs = tables[0].join(tables[1], how="inner")
+    del tables
     if len(pairs) < BIVARIATE_MIN_PAIRS:
-        LOGGER.info("Lineage %s: skipping R statistics (<10 gene pairs)", tumor)
+        LOGGER.info(
+            "Lineage %s: skipping R statistics (<%d gene pairs)", tumor, BIVARIATE_MIN_PAIRS
+        )
         return []
 
-    regression = stats.linregress(pairs["Z_Moran"], pairs["Z_CAR"])
-    residual = pairs["Z_CAR"] - (regression.intercept + regression.slope * pairs["Z_Moran"])
-    deviation = residual / residual.std()
+    regression = _pair_regression(pairs)
+    deviation = pairs["Deviation_Z"]
+    if tumor == "3730_NT_T2":
+        _write_bivariate_diagnostics(detectors["moran"], selected, pairs, regression)
     records = []
     for threshold in BIVARIATE_SIGMA_THRESHOLDS:
         for group, mask in (
@@ -177,6 +193,9 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
         LINEAGE_CLUSTER_SCORES_FILE,
         LINEAGE_GENE_SCORES_FILE,
         LINEAGE_BIVARIATE_SUMMARY_FILE,
+        LINEAGE_QC_FILE,
+        LINEAGE_GENE_DIAGNOSTICS_FILE,
+        LINEAGE_BIVARIATE_DIAGNOSTICS_FILE,
     )
     tree_files = tuple(sorted(LINEAGE_TREE_DIR.glob("*.newick")))
     if cache_is_reusable(
@@ -199,6 +218,26 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
     cluster_scores = []
     gene_scores = []
     bivariate_summaries = []
+    qc_rows = []
+    diagnostic_tumors = set()
+    LINEAGE_RESULT_DIR.mkdir(parents=True, exist_ok=True)
+
+    def record_qc(tumor, n_input, feature_type, results, detectors):
+        for method, table in results.items():
+            detector = detectors[method]
+            qc_rows.append(
+                {
+                    "Tumor": tumor,
+                    "feature_type": feature_type,
+                    "method": method,
+                    "n_input": n_input,
+                    "n_retained": detector.n,
+                    "min_cells": detector.min_cells,
+                    "n_eligible": len(table),
+                    "n_discoveries": int((table["P_adj"] <= FDR_CUTOFF).sum()),
+                }
+            )
+
     try:
         trees = []
         for path in tree_files:
@@ -220,17 +259,18 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
             connectivity = _ancestral_connectivity(parent, leaves)
 
             # Cluster indicators use a fixed ten-cell support threshold.
-            cluster_results, _ = _run_lineage_q_tests(
+            cluster_results, detectors = _run_lineage_q_tests(
                 tumor_data,
                 connectivity,
                 source="obs",
                 features=["Cluster-Name"],
                 min_cells=CLUSTER_MIN_CELLS,
             )
+            record_qc(tumor, tumor_data.n_obs, "cluster", cluster_results, detectors)
             clusters = _merge_q_results(cluster_results)
             clusters["Tumor"] = tumor
             clusters["Cluster"] = clusters.index.str.replace("Cluster-Name_", "", regex=False)
-            clusters["I_moran"] = clusters["Q_moran"] / tumor_data.n_obs
+            clusters["I_moran"] = _moran_i(clusters["Q_moran"], detectors["moran"])
             cluster_scores.append(clusters[["Tumor", "Cluster", "I_moran", "Q_car", "Z_score_car"]])
 
             if tumor_data.n_obs > MAX_GENE_ANALYSIS_CELLS:
@@ -240,6 +280,7 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
                     tumor_data.n_obs,
                     MAX_GENE_ANALYSIS_CELLS,
                 )
+                del detectors, tumor_data
                 continue
 
             # Gene tests use the original 5% expression-support filter.
@@ -248,10 +289,12 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
                 connectivity,
                 source="var",
                 min_cells_frac=GENE_MIN_CELLS_FRAC,
+                detectors=detectors,
             )
+            record_qc(tumor, tumor_data.n_obs, "gene", gene_results, gene_detectors)
             genes = _merge_q_results(gene_results)
             genes["Tumor"] = tumor
-            genes["I_moran"] = genes["Q_moran"] / tumor_data.n_obs
+            genes["I_moran"] = _moran_i(genes["Q_moran"], gene_detectors["moran"])
             genes["Sig_moran"] = genes["P_adj_moran"] <= FDR_CUTOFF
             genes["Sig_car"] = genes["P_adj_car"] <= FDR_CUTOFF
             # SONIC removes zero-degree leaves before testing; measure support
@@ -262,7 +305,7 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
                 raise ValueError("Q-statistic output contains genes absent from local data")
             values = tested.X[:, columns]
             genes["Sparsity"] = (
-                1 - values.getnnz(axis=0) / tested.n_obs
+                1 - np.asarray((values != 0).sum(axis=0)).ravel() / tested.n_obs
                 if sparse.issparse(values)
                 else np.mean(np.asarray(values) == 0, axis=0)
             )
@@ -280,14 +323,28 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
                     ]
                 ]
             )
-            bivariate_summaries.extend(_bivariate_disagreement(tumor, gene_detectors, genes))
+            if tumor == "3430_NT_T2":
+                _write_gene_diagnostics(gene_detectors["moran"], genes)
+                diagnostic_tumors.add(tumor)
+            summaries = _bivariate_disagreement(tumor, gene_detectors, genes)
+            bivariate_summaries.extend(summaries)
+            if tumor == "3730_NT_T2" and summaries:
+                diagnostic_tumors.add(tumor)
+            # Release fitted operators and expression views before the next tumor.
+            del detectors, gene_detectors, tumor_data, tested, values
     finally:
         source.file.close()
 
-    LINEAGE_RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    if diagnostic_tumors != set(EXAMPLE_TUMORS):
+        raise ValueError(
+            f"Missing eligible lineage diagnostics for {set(EXAMPLE_TUMORS) - diagnostic_tumors}"
+        )
+    pd.DataFrame(qc_rows).to_csv(LINEAGE_QC_FILE, index=False)
     pd.concat(cluster_scores, ignore_index=True).to_csv(LINEAGE_CLUSTER_SCORES_FILE, index=False)
     pd.concat(gene_scores, ignore_index=True).to_csv(LINEAGE_GENE_SCORES_FILE, index=False)
-    pd.DataFrame(bivariate_summaries).to_csv(LINEAGE_BIVARIATE_SUMMARY_FILE, index=False)
+    pd.DataFrame(bivariate_summaries, columns=["Tumor", "Sigma", "Group", "Proportion"]).to_csv(
+        LINEAGE_BIVARIATE_SUMMARY_FILE, index=False
+    )
     LOGGER.info(
         "Lineage cross-tumor statistics: cached %d cluster and %d gene tumors",
         len(cluster_scores),
@@ -295,44 +352,20 @@ def _cache_cross_tumor_statistics(*, force: bool) -> None:  # noqa: C901
     )
 
 
-def _cache_gene_diagnostics(*, force: bool) -> None:
-    if cache_is_reusable(
-        LINEAGE_GENE_DIAGNOSTICS_FILE,
-        force=force,
-        inputs=(LINEAGE_GENE_SCORES_FILE, *LINEAGE_INPUTS),
-        logger=LOGGER,
-        label="Lineage gene cancellation",
-    ):
-        return
-
-    tumor = "3430_NT_T2"
-    scores = pd.read_csv(LINEAGE_GENE_SCORES_FILE)
-    scores = scores[scores["Tumor"].eq(tumor)].copy()
-    _, _, parent, leaves = parse_newick(LINEAGE_TREE_DIR / f"{tumor}.newick")
-    connectivity = _ancestral_connectivity(parent, leaves)
-    keep = np.asarray(connectivity.sum(axis=1)).ravel() > 0
-    normalized = _normalized_adjacency(connectivity[keep][:, keep].toarray())
-    # Project standardized gene expression onto the finite Moran operator's
-    # eigenvectors so positive and negative modal contributions can be separated.
+def _write_gene_diagnostics(detector, scores: pd.DataFrame) -> None:
+    """Decompose the tested Moran operator on exactly its retained cells."""
+    features = pd.Index(scores.index)
+    target = detector.adata[:, features]
+    normalized = detector.kernel_.realization()
     eigenvalues, eigenvectors = np.linalg.eigh(normalized)
     order = np.argsort(eigenvalues)[::-1]
     eigenvalues, eigenvectors = eigenvalues[order], eigenvectors[:, order]
-
-    features = pd.Index(scores["Feature"])
-    source = ad.read_h5ad(LINEAGE_ANALYSIS_DATA_FILE, backed="r")
-    try:
-        missing = features.difference(source.var_names)
-        if len(missing):
-            raise ValueError(f"{len(missing)} scored lineage genes are absent from local data")
-        target = source[leaves, features].to_memory()
-    finally:
-        source.file.close()
-    expression = target.X[keep]
+    expression = target.X
     expression = expression.toarray() if sparse.issparse(expression) else np.asarray(expression)
     marker_expression = expression.astype(np.float64, copy=False)
     expression = marker_expression.copy()
     expression -= expression.mean(axis=0)
-    standard_deviation = expression.std(axis=0)
+    standard_deviation = expression.std(axis=0, ddof=1)
     if np.any(standard_deviation == 0):
         raise ValueError("Constant genes remain in the lineage score table")
     expression /= standard_deviation
@@ -347,7 +380,9 @@ def _cache_gene_diagnostics(*, force: bool) -> None:
         out=np.zeros_like(total),
         where=total > 0,
     )
-    diagnostics = scores[["Feature", "Sig_moran", "Sig_car", "Sparsity"]].copy()
+    diagnostics = scores.assign(Feature=scores.index)[
+        ["Feature", "Sig_moran", "Sig_car", "Sparsity"]
+    ].copy()
     diagnostics["Positive_contribution"] = positive
     diagnostics["Negative_contribution"] = negative
     diagnostics["Cancellation_fraction"] = cancellation
@@ -360,7 +395,7 @@ def _cache_gene_diagnostics(*, force: bool) -> None:
         ("Both", "CAR only", "Moran only"),
         default="Neither",
     )
-    labels = target.obs.iloc[np.flatnonzero(keep)]["Cluster-Name"].astype(str).to_numpy()
+    labels = target.obs["Cluster-Name"].astype(str).to_numpy()
     counts = pd.Series(labels).value_counts()
     small_states = counts[(counts >= 2) & (counts <= max(2, np.ceil(0.1 * len(labels))))].index
     markers = np.zeros(expression.shape[1], dtype=bool)
@@ -435,104 +470,64 @@ def _canonical_pairs(table: pd.DataFrame, value_name: str) -> pd.DataFrame:
             value_name: table["Z_score"].to_numpy(),
         }
     )
+    result = result[(first != second) & np.isfinite(result[value_name])]
     return result.drop_duplicates(("Gene_1", "Gene_2")).set_index(["Gene_1", "Gene_2"])
 
 
-def _cache_bivariate_diagnostics(*, force: bool) -> None:  # noqa: C901
-    if cache_is_reusable(
-        LINEAGE_BIVARIATE_DIAGNOSTICS_FILE,
-        force=force,
-        inputs=(
-            LINEAGE_GENE_SCORES_FILE,
-            LINEAGE_ANALYSIS_DATA_FILE,
-            LINEAGE_TREE_DIR / "3730_NT_T2.newick",
-        ),
-        logger=LOGGER,
-        label="Lineage bivariate diagnostics",
-    ):
-        return
-    from sonic import DetectorIrregular
-
-    tumor = "3730_NT_T2"
-    scores = pd.read_csv(LINEAGE_GENE_SCORES_FILE)
-    scores = scores[scores["Tumor"].eq(tumor)]
-    selected = sorted(scores.loc[scores["Sig_moran"] & scores["Sig_car"], "Feature"].astype(str))
-    if len(selected) < 2:
-        raise ValueError("Fewer than two genes are significant under both lineage kernels")
-    _, _, parent, leaves = parse_newick(LINEAGE_TREE_DIR / f"{tumor}.newick")
-    source = ad.read_h5ad(LINEAGE_ANALYSIS_DATA_FILE, backed="r")
-    try:
-        tumor_data = source[leaves, selected].to_memory()
-    finally:
-        source.file.close()
-    connectivity = _ancestral_connectivity(parent, leaves)
-    tumor_data.obsp["lineage"] = connectivity
-
-    # Reuse the cross-tumor Q calls and compute only the target R statistics.
-    detectors = {}
-    for method, params in (
-        ("moran", {}),
-        ("car", {"rho": CAR_RHO, "standardize": False}),
-    ):
-        detector = DetectorIrregular(kernel_method=method, backend="matrix", **params)
-        detector.setup_data(
-            tumor_data.copy(),
-            obsp_key="lineage",
-            is_distance=False,
-            min_cells_frac=GENE_MIN_CELLS_FRAC,
-        )
-        detectors[method] = detector
-    r_moran = detectors["moran"].compute_rstat(
-        features_x=selected, n_jobs=1, return_pval=True, show_progress=False
-    )
-    r_car = detectors["car"].compute_rstat(
-        features_x=selected, n_jobs=1, return_pval=True, show_progress=False
-    )
-    pairs = _canonical_pairs(r_moran, "Z_Moran").join(_canonical_pairs(r_car, "Z_CAR"), how="inner")
-    regression = stats.linregress(pairs["Z_Moran"], pairs["Z_CAR"])
-    pairs["Predicted"] = regression.intercept + regression.slope * pairs["Z_Moran"]
-    pairs["Residual"] = pairs["Z_CAR"] - pairs["Predicted"]
-    residual_sd = pairs["Residual"].std()
-    pairs["Deviation_Z"] = pairs["Residual"] / residual_sd
+def _pair_regression(pairs: pd.DataFrame):
+    """Fit finite cross-pair scores; an exact fit has zero residual outliers."""
+    values = pairs[["Z_Moran", "Z_CAR"]].to_numpy()
+    if len(pairs) < 2 or not np.isfinite(values).all() or np.ptp(values[:, 0]) == 0:
+        raise ValueError("R-score regression needs finite, varying cross-pair scores")
+    regression = stats.linregress(values[:, 0], values[:, 1])
+    residual = values[:, 1] - (regression.intercept + regression.slope * values[:, 0])
+    residual_sd = residual.std(ddof=1)
+    if not np.isfinite(residual_sd):
+        raise ValueError("R-score regression has non-finite residual variance")
+    tolerance = 32 * np.finfo(float).eps * max(1.0, np.max(np.abs(values)))
+    pairs["Deviation_Z"] = residual / residual_sd if residual_sd > tolerance else 0.0
     pairs["Group"] = np.select(
         (pairs["Deviation_Z"] < -3, pairs["Deviation_Z"] > 3),
         ("Moran dominant", "CAR dominant"),
         default="Consistent",
     )
-    # Store symmetric pair results as compact upper triangles for plotting.
-    gene_index = {gene: index for index, gene in enumerate(selected)}
-    matrix_moran = np.zeros((len(selected), len(selected)), dtype=np.float32)
-    matrix_car = np.zeros_like(matrix_moran)
-    group_codes = np.zeros_like(matrix_moran, dtype=np.int8)
-    code_for_group = {"Consistent": 0, "Moran dominant": 1, "CAR dominant": 2}
-    for (gene_1, gene_2), row in pairs.iterrows():
-        i, j = gene_index[gene_1], gene_index[gene_2]
-        matrix_moran[i, j] = matrix_moran[j, i] = row["Z_Moran"]
-        matrix_car[i, j] = matrix_car[j, i] = row["Z_CAR"]
-        group_codes[i, j] = group_codes[j, i] = code_for_group[row["Group"]]
-    upper = np.triu_indices(len(selected))
+    return regression
+
+
+def _write_bivariate_diagnostics(detector, selected, pairs, regression) -> None:
+    """Save the already-computed R results and a matching example decomposition."""
+    missing = set(PAIR_GENES).difference(selected)
+    if missing:
+        raise ValueError(f"Configured example genes are not shared Q hits: {sorted(missing)}")
+    upper = np.triu_indices(len(selected), k=1)
+    names = np.asarray(selected)
+    index = pd.MultiIndex.from_arrays([names[upper[0]], names[upper[1]]], names=pairs.index.names)
+    ordered = pairs.reindex(index)
+    if ordered[["Z_Moran", "Z_CAR"]].isna().any().any():
+        raise ValueError("Missing cross-pair scores in the lineage diagnostics")
+    codes = ordered["Group"].map({"Consistent": 0, "Moran dominant": 1, "CAR dominant": 2})
     # Decompose the selected example pair to expose modes with opposing signed
     # contributions to Moran's relational statistic.
-    normalized = _normalized_adjacency(connectivity.toarray())
+    normalized = detector.kernel_.realization()
     eigenvalues, eigenvectors = np.linalg.eigh(normalized)
     order = np.argsort(eigenvalues)[::-1]
     eigenvalues = eigenvalues[order]
     eigenvectors = eigenvectors[:, order]
-    expression = tumor_data[:, list(PAIR_GENES)].X
+    expression = detector.adata[:, list(PAIR_GENES)].X
     expression = expression.toarray() if sparse.issparse(expression) else np.asarray(expression)
-    expression = stats.zscore(expression, axis=0)
+    expression = stats.zscore(np.asarray(expression, dtype=float), axis=0, ddof=1)
     coefficients = eigenvectors.T @ expression
     contributions = coefficients[:, 0] * coefficients[:, 1] * eigenvalues
-    positive_mode = int(np.argmax(contributions[1:]) + 1)
-    negative_mode = int(np.argmin(contributions[1:]) + 1)
+    positive_mode = int(np.argmax(contributions))
+    negative_mode = int(np.argmin(contributions))
     np.savez_compressed(
         LINEAGE_BIVARIATE_DIAGNOSTICS_FILE,
         genes=np.asarray(selected),
-        z_moran=matrix_moran[upper],
-        z_car=matrix_car[upper],
-        group=group_codes[upper],
+        z_moran=ordered["Z_Moran"].to_numpy(np.float32),
+        z_car=ordered["Z_CAR"].to_numpy(np.float32),
+        group=codes.to_numpy(np.int8),
         regression=np.asarray((regression.slope, regression.intercept, regression.rvalue**2)),
-        cells=np.asarray(leaves),
+        cells=detector.adata.obs_names.to_numpy(str),
         pair_genes=np.asarray(PAIR_GENES),
         pair_expression=expression,
         eigenvalues=eigenvalues,
@@ -549,8 +544,34 @@ def cache_lineage_results(
     force: bool = False,
 ) -> None:
     """Compute every plot-ready cache from the repository's lineage data."""
+    outputs = (
+        LINEAGE_CLUSTER_SCORES_FILE,
+        LINEAGE_GENE_SCORES_FILE,
+        LINEAGE_BIVARIATE_SUMMARY_FILE,
+        LINEAGE_GENE_DIAGNOSTICS_FILE,
+        LINEAGE_TARGET_METADATA_FILE,
+        LINEAGE_BIVARIATE_DIAGNOSTICS_FILE,
+        LINEAGE_QC_FILE,
+    )
+    signature_data = {
+        "source": source_provenance(__file__),
+        "inputs": [
+            path_fingerprint(LINEAGE_ANALYSIS_DATA_FILE),
+            path_fingerprint(LINEAGE_TREE_DIR, recursive=True),
+        ],
+    }
+    signature = cache_signature(signature_data)
+    force = force or not cache_entry_is_current(
+        LINEAGE_RESULT_DIR, "lineage", signature, outputs=outputs
+    )
     _cache_cross_tumor_statistics(force=force)
-    _cache_gene_diagnostics(force=force)
     _cache_target_metadata(force=force)
-    _cache_bivariate_diagnostics(force=force)
+    if force:
+        update_cache_entry(
+            LINEAGE_RESULT_DIR,
+            "lineage",
+            signature,
+            outputs,
+            signature_data=signature_data,
+        )
     LOGGER.info("Lineage analysis caches are ready")

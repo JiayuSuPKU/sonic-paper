@@ -205,6 +205,40 @@ def installed_version(distribution: str) -> str:
         return "unknown"
 
 
+def source_provenance(analysis_file: str | Path) -> dict[str, Any]:
+    """Fingerprint imported SONIC and the analysis module's source directory."""
+    import sonic
+
+    provenance = {}
+    for name, root in (
+        ("sonic", Path(sonic.__file__).resolve().parent),
+        ("analysis", Path(analysis_file).resolve().parent),
+    ):
+        digest = hashlib.sha256()
+        for path in sorted(root.rglob("*.py")):
+            digest.update(str(path.relative_to(root)).encode())
+            digest.update(path.read_bytes())
+        if name == "analysis":
+            for path in (Path(__file__), CLUSTERPROFILER_SCRIPT):
+                if path.is_file():
+                    digest.update(path.name.encode())
+                    digest.update(path.read_bytes())
+        provenance[f"{name}_source_sha256"] = digest.hexdigest()
+    provenance["versions"] = {
+        name: installed_version(name)
+        for name in (
+            "sonic-spatial",
+            "numpy",
+            "scipy",
+            "finufft",
+            "joblib",
+            "threadpoolctl",
+            "psutil",
+        )
+    }
+    return provenance
+
+
 def path_fingerprint(
     path: str | Path,
     *,
@@ -253,13 +287,32 @@ def _manifest_output(path: str | Path, project_root: Path) -> str:
     return project_relative(Path(path), project_root)
 
 
+def _cache_output_fingerprints(
+    outputs: Sequence[str | Path], project_root: Path
+) -> list[dict[str, Any]]:
+    fingerprints = []
+    for output in outputs:
+        path = Path(output)
+        if not path.is_absolute():
+            path = project_root / path
+        fingerprint = path_fingerprint(path, recursive=True, project_root=project_root)
+        if not path.exists() or (path.is_file() and path.stat().st_size == 0):
+            raise ValueError(f"Missing or empty cache output: {path}")
+        if path.is_dir() and not fingerprint.get("files"):
+            raise ValueError(f"Empty cache output directory: {path}")
+        fingerprints.append(fingerprint)
+    return fingerprints
+
+
 def _load_cache_manifest(path: Path) -> dict[str, Any]:
     try:
         manifest = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return {"schema_version": CACHE_MANIFEST_SCHEMA_VERSION, "entries": {}}
-    if manifest.get("schema_version") != CACHE_MANIFEST_SCHEMA_VERSION or not isinstance(
-        manifest.get("entries"), dict
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != CACHE_MANIFEST_SCHEMA_VERSION
+        or not isinstance(manifest.get("entries"), dict)
     ):
         return {"schema_version": CACHE_MANIFEST_SCHEMA_VERSION, "entries": {}}
     return manifest
@@ -296,6 +349,8 @@ def cache_entry_is_current(
     """Return whether one manifest section and all of its outputs are current."""
     manifest = _load_cache_manifest(result_dir / CACHE_MANIFEST_FILENAME)
     entry = manifest["entries"].get(section, {})
+    if not isinstance(entry, dict):
+        return False
     owned = entry.get("outputs")
     if entry.get("signature") != signature or not isinstance(owned, list) or not owned:
         return False
@@ -304,12 +359,12 @@ def cache_entry_is_current(
         return False
     if outputs is not None and owned != [_manifest_output(path, project_root) for path in outputs]:
         return False
-    for output in owned:
-        path = Path(output)
-        if not path.is_absolute():
-            path = project_root / path
-        if not path.exists() or (path.is_file() and path.stat().st_size == 0):
-            return False
+    try:
+        current = _cache_output_fingerprints(owned, project_root)
+    except (OSError, ValueError):
+        return False
+    if entry.get("output_fingerprints") != current:
+        return False
     _record_cache_activity(result_dir, section, "reused")
     return True
 
@@ -330,6 +385,7 @@ def update_cache_entry(
     entry: dict[str, Any] = {
         "signature": signature,
         "outputs": [_manifest_output(output, project_root) for output in outputs],
+        "output_fingerprints": _cache_output_fingerprints(outputs, project_root),
     }
     if cache_signature(signature_data) != signature:
         raise ValueError("signature does not match signature_data")

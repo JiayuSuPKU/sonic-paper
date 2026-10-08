@@ -9,11 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from scripts.paper_utils import (
+    PROJECT_ROOT,
+    _load_cache_manifest,
     cache_entry_is_current,
     cache_signature,
     installed_version,
     path_fingerprint,
     project_relative,
+    source_provenance,
     update_cache_entry,
     write_workflow_manifest,
 )
@@ -26,10 +29,12 @@ from .benchmark import (
     VALIDATION_KERNEL_PARAMETERS,
     cache_runtime_scaling_results,
     cache_validation_benchmark_results,
+    runtime_provenance,
 )
 from .config import (
     ARTIFACT_GENES,
     BENCHMARK_PROJECTION_FILE,
+    BENCHMARK_RUNS_FILE,
     BENCHMARK_SCALING_FILE,
     BENCHMARK_TARGETS,
     CAR_K_NEIGHBORS,
@@ -42,13 +47,13 @@ from .config import (
     LINEAGE_CLUSTER_SCORES_FILE,
     LINEAGE_GENE_DIAGNOSTICS_FILE,
     LINEAGE_GENE_SCORES_FILE,
+    LINEAGE_QC_FILE,
+    LINEAGE_RESULT_DIR,
     LINEAGE_TARGET_METADATA_FILE,
     LINEAGE_TREE_DIR,
-    M_FEATURES,
     PIXEL_SIZE_UM,
     RAW_SPATIALDATA,
     RESULT_DIR,
-    RUNTIME_MEMORY_BUDGET_MB,
     SLOW_DECAY_RHO,
     SMALL_INTESTINE_PATTERN_RANKS_FILE,
     SMALL_INTESTINE_SCORES_FILE,
@@ -79,7 +84,7 @@ from .small_intestine import (
 LOGGER = logging.getLogger(__name__)
 
 # Bump a section revision only when computation changes outside its explicit parameters.
-CACHE_REVISIONS = {"synthetic": 1, "small-intestine": 1, "lineage": 1}
+CACHE_REVISIONS = {"validation": 2, "small-intestine": 1, "lineage": 1}
 
 SYNTHETIC_CACHE_PARAMETERS = {
     "runtime": {
@@ -92,8 +97,6 @@ SYNTHETIC_CACHE_PARAMETERS = {
             }
             for implementation in RUNTIME_IMPLEMENTATIONS
         ],
-        "m_features": M_FEATURES,
-        "memory_budget_mb": RUNTIME_MEMORY_BUDGET_MB,
         "sample_sizes": BENCHMARK_SAMPLE_SIZES,
         "targets": BENCHMARK_TARGETS,
     },
@@ -138,7 +141,8 @@ LINEAGE_CACHE_PARAMETERS = {
 
 # Canonical cache parameters are kept here so every invalidating knob is auditable.
 CACHE_PARAMETERS = {
-    "synthetic": SYNTHETIC_CACHE_PARAMETERS,
+    "runtime": SYNTHETIC_CACHE_PARAMETERS["runtime"],
+    "validation": SYNTHETIC_CACHE_PARAMETERS["validation"],
     "small-intestine": SMALL_INTESTINE_CACHE_PARAMETERS,
     "lineage": LINEAGE_CACHE_PARAMETERS,
 }
@@ -151,9 +155,10 @@ def _group_signature_data(
     recursive: tuple[Path, ...] = (),
 ) -> dict[str, Any]:
     return {
+        "source": runtime_provenance() if group == "validation" else source_provenance(__file__),
         "cache_revision": CACHE_REVISIONS[group],
         "dependencies": {"sonic-spatial": installed_version("sonic-spatial")},
-        "inputs": [path_fingerprint(path) for path in inputs]
+        "inputs": [path_fingerprint(path, recursive=path.is_dir()) for path in inputs]
         + [path_fingerprint(path, recursive=True) for path in recursive],
         "parameters": parameters,
         "section": group,
@@ -168,7 +173,7 @@ def generate_analysis_caches(
 ) -> dict[str, Any]:
     """Generate one analysis cache group or all default cache groups."""
     started_at = time.perf_counter()
-    valid_analyses = {"all", "synthetic", "small-intestine", "lineage"}
+    valid_analyses = {"all", "runtime", "validation", "small-intestine", "lineage"}
     if analysis not in valid_analyses:
         raise ValueError(f"Unknown analysis {analysis!r}; choose from {sorted(valid_analyses)}")
     if source is not None and analysis not in {"all", "small-intestine"}:
@@ -176,42 +181,41 @@ def generate_analysis_caches(
 
     outputs: dict[str, str] = {}
     cache_groups: list[str] = []
-    if analysis in {"all", "synthetic"}:
-        LOGGER.info("Running synthetic-data analyses")
-        synthetic_outputs = (
-            BENCHMARK_SCALING_FILE,
-            BENCHMARK_PROJECTION_FILE,
-            *(VALIDATION_RESULT_DIR / name for name in VALIDATION_CACHE_FILES.values()),
-        )
-        signature_data = _group_signature_data(
-            "synthetic",
-            CACHE_PARAMETERS["synthetic"],
-        )
-        signature = cache_signature(signature_data)
-        refresh = force or not cache_entry_is_current(
-            RESULT_DIR,
-            "synthetic",
-            signature,
-            outputs=synthetic_outputs,
-        )
-        cache_runtime_scaling_results(force=refresh)
-        cache_validation_benchmark_results(force=refresh)
-        if refresh:
-            update_cache_entry(
-                RESULT_DIR,
-                "synthetic",
-                signature,
-                synthetic_outputs,
-                signature_data=signature_data,
-            )
-        cache_groups.append("synthetic")
+    if analysis in {"all", "runtime"}:
+        LOGGER.info("Running runtime benchmarks (8 cores / 16 GiB projection)")
+        cache_runtime_scaling_results(force=force)
+        cache_groups.append("runtime")
         outputs.update(
             {
                 "benchmark_scaling": project_relative(BENCHMARK_SCALING_FILE),
                 "benchmark_projection": project_relative(BENCHMARK_PROJECTION_FILE),
-                "validation": project_relative(VALIDATION_RESULT_DIR),
+                "benchmark_runs": project_relative(BENCHMARK_RUNS_FILE),
             }
         )
+    if analysis in {"all", "validation"}:
+        LOGGER.info("Running implementation-agreement, null-calibration, and power validation")
+        validation_outputs = tuple(
+            VALIDATION_RESULT_DIR / name for name in VALIDATION_CACHE_FILES.values()
+        )
+        signature_data = _group_signature_data("validation", CACHE_PARAMETERS["validation"])
+        signature = cache_signature(signature_data)
+        refresh = force or not cache_entry_is_current(
+            RESULT_DIR,
+            "validation",
+            signature,
+            outputs=validation_outputs,
+        )
+        cache_validation_benchmark_results(force=refresh)
+        if refresh:
+            update_cache_entry(
+                RESULT_DIR,
+                "validation",
+                signature,
+                validation_outputs,
+                signature_data=signature_data,
+            )
+        cache_groups.append("validation")
+        outputs["validation"] = project_relative(VALIDATION_RESULT_DIR)
     if analysis in {"all", "small-intestine"}:
         LOGGER.info("Running small-intestine analysis")
         effective_source = source if source is not None else RAW_SPATIALDATA
@@ -258,6 +262,7 @@ def generate_analysis_caches(
             LINEAGE_GENE_DIAGNOSTICS_FILE,
             LINEAGE_BIVARIATE_DIAGNOSTICS_FILE,
             LINEAGE_TARGET_METADATA_FILE,
+            LINEAGE_QC_FILE,
         )
         signature_data = _group_signature_data(
             "lineage",
@@ -284,6 +289,7 @@ def generate_analysis_caches(
         cache_groups.append("lineage")
         outputs.update(
             {
+                "lineage_qc": project_relative(LINEAGE_QC_FILE),
                 "lineage_cluster_scores": project_relative(LINEAGE_CLUSTER_SCORES_FILE),
                 "lineage_gene_scores": project_relative(LINEAGE_GENE_SCORES_FILE),
                 "lineage_bivariate_summary": project_relative(LINEAGE_BIVARIATE_SUMMARY_FILE),
@@ -314,12 +320,80 @@ def generate_analysis_caches(
     return {"outputs": outputs, "cache_groups": cache_groups}
 
 
+def require_current_figure_cache(group: str) -> Path | None:
+    """Reject stale plot inputs and return the scoring run's SpatialData source.
+
+    Validate the direct cache manifests so interactive cache generation is also
+    supported. Recorded settings describe the run; source, inputs and outputs
+    must still match. This function never computes an analysis.
+    """
+    locations = {
+        "runtime": (
+            RESULT_DIR,
+            "runtime",
+            (BENCHMARK_SCALING_FILE, BENCHMARK_PROJECTION_FILE, BENCHMARK_RUNS_FILE),
+        ),
+        "validation": (
+            VALIDATION_RESULT_DIR,
+            "validation",
+            tuple(VALIDATION_RESULT_DIR / name for name in VALIDATION_CACHE_FILES.values()),
+        ),
+        "small-intestine": (
+            RESULT_DIR,
+            "small-intestine-scores",
+            (SMALL_INTESTINE_SCORES_FILE, SMALL_INTESTINE_PATTERN_RANKS_FILE),
+        ),
+        "lineage": (
+            LINEAGE_RESULT_DIR,
+            "lineage",
+            (
+                LINEAGE_CLUSTER_SCORES_FILE,
+                LINEAGE_GENE_SCORES_FILE,
+                LINEAGE_BIVARIATE_SUMMARY_FILE,
+                LINEAGE_GENE_DIAGNOSTICS_FILE,
+                LINEAGE_TARGET_METADATA_FILE,
+                LINEAGE_BIVARIATE_DIAGNOSTICS_FILE,
+                LINEAGE_QC_FILE,
+            ),
+        ),
+    }
+    result_dir, section, outputs = locations[group]
+    entry = _load_cache_manifest(result_dir / "cache_manifest.json")["entries"].get(section, {})
+    recorded = entry.get("signature_data") if isinstance(entry, dict) else None
+    message = (
+        f"Stale or missing {group} cache; rerun workflow.py --analysis {group} before plotting."
+    )
+    if not isinstance(recorded, dict):
+        raise RuntimeError(message)
+    current = dict(recorded)
+    if group == "runtime":
+        current["provenance"] = runtime_provenance()
+    else:
+        current["source"] = source_provenance(__file__)
+    paths = []
+    try:
+        for fingerprint in recorded.get("inputs", []):
+            path = Path(fingerprint["path"])
+            paths.append(path if path.is_absolute() else PROJECT_ROOT / path)
+        if "inputs" in recorded:
+            current["inputs"] = [path_fingerprint(path, recursive=path.is_dir()) for path in paths]
+    except (KeyError, TypeError, OSError) as exc:
+        raise RuntimeError(message) from exc
+    if not cache_entry_is_current(result_dir, section, cache_signature(current), outputs=outputs):
+        raise RuntimeError(message)
+    if group == "small-intestine":
+        if len(paths) != 1:
+            raise RuntimeError(message)
+        return paths[0].resolve()
+    return None
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--analysis",
-        choices=("all", "synthetic", "small-intestine", "lineage"),
+        choices=("all", "runtime", "validation", "small-intestine", "lineage"),
         default="all",
     )
     parser.add_argument(

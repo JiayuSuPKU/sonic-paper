@@ -6,12 +6,23 @@ import logging
 import time
 from pathlib import Path
 
+import anndata as ad
 import numpy as np
 import pandas as pd
 import scipy.fft
 from scipy.ndimage import gaussian_filter
+from sonic._rasterize import _mean_fill_missing
+from sonic.detectors.grid import _OccupiedGridKernel
 from sonic.kernels.fft import FFTKernel
-from sonic.statistics import spatial_q_test
+from sonic.statistics import compute_null_params, spatial_q_test_fft_many
+
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    path_fingerprint,
+    source_provenance,
+    update_cache_entry,
+)
 
 from .config import (
     ARTIFACT_GENES,
@@ -25,7 +36,6 @@ from .config import (
     SMALL_INTESTINE_SCORES_FILE,
     ensure_output_dirs,
 )
-from .utils import cache_is_reusable
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_CHUNK_SIZE = 64
@@ -48,9 +58,7 @@ def load_gene_maps(source: Path) -> tuple[np.ndarray, np.ndarray, list[str]]:
             f"SpatialData source not found: {source}. Pass --source to override it."
         )
 
-    import spatialdata as sd
-
-    table = sd.read_zarr(source).tables["square_016um"]
+    table = ad.read_zarr(source / "tables" / "square_016um")
     genes = ARTIFACT_GENES + IMMUNE_GENES
     gene_indices = _gene_indices(table, genes)
 
@@ -58,20 +66,21 @@ def load_gene_maps(source: Path) -> tuple[np.ndarray, np.ndarray, list[str]]:
     cols_raw = table.obs["array_col"].to_numpy(dtype=int)
     rows, cols = rows_raw - rows_raw.min(), cols_raw - cols_raw.min()
     shape = (int(rows.max()) + 1, int(cols.max()) + 1)
-    maps = np.zeros((len(genes), *shape), dtype=np.float32)
-    maps[:, rows, cols] = table.X[:, gene_indices].toarray().T.astype(np.float32)
+    maps = np.zeros((len(genes), *shape), dtype=np.float64)
+    maps[:, rows, cols] = table.X[:, gene_indices].toarray().T
     mask = np.zeros(shape, dtype=bool)
     mask[rows, cols] = True
 
-    return maps.astype(float), mask, list(genes)
+    return maps, mask, list(genes)
 
 
 def mean_fill_structural_holes(maps: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """Fill off-tissue bins by each gene mean, matching DetectorGrid behavior."""
     filled = np.asarray(maps, dtype=float).copy()
-    means = filled[:, mask].mean(axis=1)
-    filled[:, ~mask] = means[:, None]
-    return filled
+    if mask.shape != filled.shape[1:] or mask.sum() < 2:
+        raise ValueError("At least two observed bins on the same grid are required")
+    filled[:, ~mask] = np.nan
+    return _mean_fill_missing(filled, axis=(1, 2))
 
 
 def radial_profile(
@@ -84,8 +93,9 @@ def radial_profile(
     radius = np.sqrt(fy[:, None] ** 2 + fx[None, :] ** 2)
     max_radius = 1.0 / (2.0 * pixel_size_um)
     edges = np.linspace(0.0, max_radius, n_bins + 1)
-    idx = np.clip(np.digitize(radius.ravel(), edges) - 1, 0, n_bins - 1)
-    sums = np.bincount(idx, weights=np.asarray(values).ravel(), minlength=n_bins)
+    inside = radius.ravel() <= max_radius
+    idx = np.minimum(np.digitize(radius.ravel()[inside], edges) - 1, n_bins - 1)
+    sums = np.bincount(idx, weights=np.asarray(values).ravel()[inside], minlength=n_bins)
     counts = np.bincount(idx, minlength=n_bins)
     profile = np.divide(sums, counts, out=np.zeros_like(sums), where=counts > 0)
     centers = 0.5 * (edges[:-1] + edges[1:])
@@ -109,12 +119,14 @@ def cache_small_intestine_kernel_results(
         raise ValueError("chunk_size must be positive")
     ensure_output_dirs()
     outputs = (SMALL_INTESTINE_SCORES_FILE, SMALL_INTESTINE_PATTERN_RANKS_FILE)
-    if cache_is_reusable(
-        *outputs,
-        force=force,
-        inputs=(source,),
-        logger=LOGGER,
-        label="Small-intestine analysis",
+    signature_data = {
+        "source": source_provenance(__file__),
+        "inputs": [path_fingerprint(source.resolve(), recursive=True)],
+        "chunk_size": chunk_size,
+    }
+    signature = cache_signature(signature_data)
+    if not force and cache_entry_is_current(
+        outputs[0].parent, "small-intestine-scores", signature, outputs=outputs
     ):
         return pd.read_csv(SMALL_INTESTINE_SCORES_FILE)
     if not source.exists():
@@ -123,10 +135,9 @@ def cache_small_intestine_kernel_results(
             f"{SMALL_INTESTINE_SCORES_FILE.name}."
         )
 
-    import spatialdata as sd
-
-    # Load the 16 µm square SpatialData and test all genes expressed in at least 10 bins.
-    table = sd.read_zarr(source).tables["square_016um"]
+    # Load only the 16 µm table; other resolutions and shapes are not used.
+    # Retain genes with at least ten total counts (not ten expressing bins).
+    table = ad.read_zarr(source / "tables" / "square_016um")
     panel_genes = ARTIFACT_GENES + IMMUNE_GENES
     totals = np.asarray(table.X.sum(axis=0)).ravel()
     keep = np.flatnonzero(totals >= MIN_TOTAL_COUNTS)
@@ -156,7 +167,7 @@ def cache_small_intestine_kernel_results(
     # For selected example genes, prepare expression with mean-filling similar to
     # DetectorGrid for later hyperparameter fitting.
     panel_indices = _gene_indices(table, panel_genes)
-    panel_maps = np.zeros((len(panel_genes), *shape), dtype=np.float32)
+    panel_maps = np.zeros((len(panel_genes), *shape), dtype=np.float64)
     panel_maps[:, rows, cols] = table[:, panel_indices].X.toarray().T
     standardized = mean_fill_structural_holes(panel_maps, mask)
     standardized -= standardized.mean(axis=(1, 2), keepdims=True)
@@ -182,18 +193,30 @@ def cache_small_intestine_kernel_results(
         kernels[key] = kernel
         fit_metrics[key] = (fit_seconds, kernel.spectrum.nbytes / 1e6)
 
-    # For each kernel, run the spatial Q-test on all genes.
+    # Z needs only the first two null moments, including occupancy and the
+    # finite-sample correction. Avoid higher-trace probes for these score-only plots.
+    nulls = {
+        key: compute_null_params(
+            kernel if mask.all() else _OccupiedGridKernel(kernel, mask), method="welch"
+        )
+        for key, kernel in kernels.items()
+    }
     z_scores = {key: np.empty(len(keep), dtype=float) for key in kernels}
 
     for start in range(0, len(keep), chunk_size):
         end = min(start + chunk_size, len(keep))
-        maps = np.zeros((end - start, *shape), dtype=np.float32)
+        maps = np.zeros((end - start, *shape), dtype=np.float64)
         maps[:, rows, cols] = table.X[:, keep[start:end]].toarray().T
-        maps[:, ~mask] = maps[:, mask].mean(axis=1)[:, None]
+        maps = mean_fill_structural_holes(maps, mask)
         data = np.moveaxis(maps, 0, -1)
-        for key, kernel in kernels.items():
-            q = np.asarray(spatial_q_test(data, kernel, return_pval=False))
-            z_scores[key][start:end] = (q - kernel.trace()) / np.sqrt(2.0 * kernel.square_trace())
+        constant = np.ptp(maps, axis=(1, 2)) == 0
+        scores = spatial_q_test_fft_many(data, list(kernels.values()), return_pval=False)
+        for q, key in zip(scores, kernels, strict=True):
+            null = nulls[key]
+            sigma = np.sqrt(null["var_Q"])
+            z = (q - null["mean_Q"]) / sigma if sigma > 0 else np.zeros_like(q)
+            z[constant] = 0.0
+            z_scores[key][start:end] = z
 
     result = pd.DataFrame(
         {
@@ -225,6 +248,13 @@ def cache_small_intestine_kernel_results(
             )
     result.to_csv(SMALL_INTESTINE_SCORES_FILE, index=False)
     pd.DataFrame(priority_rows).to_csv(SMALL_INTESTINE_PATTERN_RANKS_FILE, index=False)
+    update_cache_entry(
+        outputs[0].parent,
+        "small-intestine-scores",
+        signature,
+        outputs,
+        signature_data=signature_data,
+    )
     LOGGER.info("Small-intestine analysis: cached scores for %d genes", len(result))
     return result
 
@@ -238,8 +268,7 @@ def design_contrastive_pattern_kernel(
     # Compare normalized power spectra after mean-filling off-tissue bins.
     powers = []
     for pattern in (target, contrast):
-        filled = pattern.astype(float).copy()
-        filled[~mask] = float(pattern[mask].mean())
+        filled = mean_fill_structural_holes(pattern[None], mask)[0]
         filled -= filled.mean()
         filled /= filled.std(ddof=1) + np.finfo(float).eps
         power = gaussian_filter(
