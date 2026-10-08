@@ -61,8 +61,12 @@ BRAIN_DEV_TIME_COLORS = dict(
 SPATIAL_SPOT_RADIUS_SCALE = 1.5
 
 
+from .workflow import require_current_figure_cache
+
+
 def _load_brain_dev_stats() -> pd.DataFrame:
     """Load wide brain-dev p-values for per-gene profile annotations."""
+    require_current_figure_cache("brain_dev")
     tests = pd.read_csv(RESULT_DIR / BRAIN_DEV_TESTS_FILE)
     base = tests[
         tests["panel"].eq("brain_dev")
@@ -259,6 +263,7 @@ class BrainDevProfilePlotter:
 
     def __init__(self, genes: list[str]) -> None:
         """Fit radial spectra for exactly the requested brain-dev genes."""
+        require_current_figure_cache("brain_dev")
         self.samples, self.meta, _sample_sets = load_panel("brain_dev")
         present = set.intersection(*(set(adata.var_names) for adata in self.samples.values()))
         self.genes = unique(genes)

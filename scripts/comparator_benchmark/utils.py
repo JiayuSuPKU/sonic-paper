@@ -331,24 +331,17 @@ def build_permutation_nulls(
     real_set: SampleSet,
     n_perm: int = 12,
     rng_seed: int = 42,
-    continuous_groups: Sequence[str] | None = None,
 ) -> list[SampleSet]:
     """Generate null contrasts by shuffling sample-level design values.
 
     For binary contrasts, the shuffled design is represented back as
     ``a_paths`` / ``b_paths`` so the downstream two-group test path remains
     unchanged. For continuous-design contrasts, the sample list is fixed and
-    only ``design_values`` is shuffled. When ``continuous_groups`` is set, each
-    permuted design value must come from a different group than the target
-    sample, which avoids within-timepoint-only null swaps for brain-dev.
+    only ``design_values`` is shuffled. Unchanged designs and duplicate draws
+    are excluded; individual samples may retain their original timepoint.
     """
     if real_set.design_values is not None:
         design = np.asarray(real_set.design_values, dtype=float)
-        groups = (
-            None if continuous_groups is None else np.asarray(list(continuous_groups), dtype=str)
-        )
-        if groups is not None and groups.shape[0] != design.shape[0]:
-            raise ValueError("continuous_groups must align with design_values")
         rng = np.random.default_rng(rng_seed)
         seen = {tuple(design.tolist())}
         out: list[SampleSet] = []
@@ -357,11 +350,6 @@ def build_permutation_nulls(
         while len(out) < n_perm and attempts < max_attempts:
             attempts += 1
             order = rng.permutation(design.shape[0])
-            # When groups are set, skip permutations that would assign any sample the
-            # same group as itself. This avoids within-timepoint-only null swaps for
-            # the brain development dataset.
-            if groups is not None and np.any(groups[order] == groups):
-                continue
             permuted = design[order].astype(float)
             key = tuple(permuted.tolist())
             if key in seen:
@@ -457,7 +445,6 @@ def build_sample_sets(panel: str, meta: pd.DataFrame) -> list[SampleSet]:
                 real,
                 n_perm=BRAIN_DEV_NULL_PERMUTATIONS,
                 rng_seed=42,
-                continuous_groups=sub["timepoint"].astype(str).tolist(),
             ),
         ]
         return sets
@@ -668,6 +655,7 @@ def fit_all_samples(
     n_radial_bins: int = N_RADIAL_BINS,
     freq_edges: np.ndarray | None = None,
     adaptive_freq_edges: bool = True,
+    binning: str = "linear",
 ):
     """Fit a ``ComparatorIrregular`` on ALL samples in the panel.
 
@@ -681,7 +669,7 @@ def fit_all_samples(
     from sonic import ComparatorIrregular
 
     paths_order = sorted(samples.keys())
-    adatas = [samples[p][:, common_genes].copy() for p in paths_order]
+    adatas = [samples[p][:, common_genes] for p in paths_order]
 
     cmp = ComparatorIrregular(
         samples=adatas,
@@ -692,6 +680,17 @@ def fit_all_samples(
         adaptive_freq_edges=adaptive_freq_edges,
         obsm_key="spatial",
     )
+    if binning == "log":
+        if freq_edges is not None:
+            raise ValueError("Specify binning or explicit freq_edges, not both")
+        # Resolve geometry only; expression spectra are computed once below.
+        cmp._adaptive_freq_edges = False
+        cmp._resolve_freq_edges()
+        cmp.freq_edges = geometric_frequency_edges(np.asarray(cmp.freq_edges))
+        cmp.freq_edges_requested_ = cmp.freq_edges.copy()
+        cmp._adaptive_freq_edges = adaptive_freq_edges
+    elif binning != "linear":
+        raise ValueError(f"Unknown binning: {binning!r}")
     t0 = time.time()
     # NB: n_jobs=1 — joblib parallelism with -1 can hang for minutes when other
     # multithreaded numpy work is active. The per-sample loop is sequential here;

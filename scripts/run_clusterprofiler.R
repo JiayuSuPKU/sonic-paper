@@ -216,8 +216,7 @@ run_one <- function(sub) {
   go <- tryCatch(
     do.call(enrichGO, go_args),
     error = function(e) {
-      message("enrichGO failed for ", query_name, ": ", conditionMessage(e))
-      NULL
+      stop("enrichGO failed for ", query_name, ": ", conditionMessage(e), call. = FALSE)
     }
   )
 
@@ -261,8 +260,7 @@ run_one <- function(sub) {
     kegg <- tryCatch(
       do.call(enrichKEGG, kegg_args),
       error = function(e) {
-        message("enrichKEGG failed for ", query_name, ": ", conditionMessage(e))
-        NULL
+        stop("enrichKEGG failed for ", query_name, ": ", conditionMessage(e), call. = FALSE)
       }
     )
   }

@@ -14,7 +14,8 @@ import os
 import sys
 import tempfile
 import time
-from collections.abc import Callable
+from functools import wraps
+from inspect import signature as function_signature
 from pathlib import Path
 from typing import Any
 
@@ -29,23 +30,19 @@ if __package__ in {None, ""}:
 from sonic.statistics import apply_bh_correction
 
 from scripts.paper_utils import (
+    _load_cache_manifest,
     cache_entry_is_current,
     cache_signature,
     installed_version,
     path_fingerprint,
     project_relative,
     run_clusterprofiler,
+    source_provenance,
     update_cache_entry,
     write_workflow_manifest,
 )
 
-from .ad_pig_helpers import (
-    ad_pig_anisotropy_cache_ready,
-    ad_pig_cache_has_current_qc,
-    ad_pig_spectral_replicate_distance_cache_ready,
-)
 from .brain_dev_helpers import (
-    brain_dev_anisotropy_cache_ready,
     brain_dev_forced_controls,
     brain_dev_positive_control_table,
 )
@@ -98,12 +95,9 @@ from .config import (
     TEST_LABELS,
 )
 from .utils import (
-    cache_has_columns,
     de_test_binary,
     de_test_continuous,
-    ensure_dirs,
     fit_all_samples,
-    geometric_frequency_edges,
     load_panel,
     log,
     log1p_normalized_samples,
@@ -113,7 +107,7 @@ from .utils import (
 )
 
 # Key statistical knobs are explicit; bump a revision for algorithm-only changes.
-CACHE_REVISIONS = {"ad_pig": 1, "brain_dev": 1}
+CACHE_REVISIONS = {"ad_pig": 2, "brain_dev": 2}
 COMMON_CACHE_PARAMETERS = {
     "n_radial_bins": N_RADIAL_BINS,
     "spatial_tests": SPATIAL_TESTS,
@@ -181,6 +175,7 @@ def _panel_cache_signature_data(
                 for path in metadata["h5ad_path"].dropna().astype(str)
             )
     return {
+        "source": source_provenance(__file__),
         "cache_revision": CACHE_REVISIONS[panel],
         "dependencies": {"sonic-spatial": installed_version("sonic-spatial")},
         "inputs": [path_fingerprint(path) for path in inputs],
@@ -193,243 +188,115 @@ def _panel_cache_signature_data(
     }
 
 
-def _run_guarded_panel(
-    panel: str,
-    runner: Callable[..., dict[str, Any]],
-    *,
-    force: bool,
-    presence_threshold: float,
-    max_genes: int,
-) -> dict[str, Any]:
-    signature_data = _panel_cache_signature_data(
-        panel,
-        presence_threshold=presence_threshold,
-        max_genes=max_genes,
-    )
-    signature = cache_signature(signature_data)
-    refresh = force or not cache_entry_is_current(RESULT_DIR, panel, signature)
-    result = runner(
-        force=refresh,
-        presence_threshold=presence_threshold,
-        max_genes=max_genes,
-    )
-    owned_outputs = [
-        output for output in result["outputs"].values() if isinstance(output, (str, Path))
-    ]
-    if refresh or result.get("provenance") is not None:
-        update_cache_entry(
-            RESULT_DIR,
-            panel,
-            signature,
-            owned_outputs,
-            signature_data=signature_data,
-            provenance=result.get("provenance"),
+def _result_directory(presence_threshold, max_genes, result_dir=None):
+    if not isinstance(max_genes, int) or isinstance(max_genes, bool) or max_genes < 1:
+        raise ValueError("max_genes must be a positive integer")
+    if not np.isfinite(presence_threshold) or not 0 <= presence_threshold <= 1:
+        raise ValueError("presence_threshold must be between 0 and 1")
+    custom = max_genes != MAX_GENES or presence_threshold != PRESENCE_THRESHOLD
+    if result_dir is None:
+        return (
+            RESULT_DIR / "runs" / f"genes-{max_genes}_presence-{presence_threshold}"
+            if custom
+            else RESULT_DIR
         )
-    return result
+    result_dir = Path(result_dir).expanduser().resolve()
+    if custom and result_dir == RESULT_DIR.resolve():
+        raise ValueError("Nondefault runs must use a separate result directory")
+    return result_dir
 
 
-def _ad_pig_full_cache_ready(test_path: Path, null_path: Path) -> bool:
-    if not cache_has_columns(
-        test_path,
-        {
-            "panel",
-            "scenario_id",
-            "input",
-            "binning",
-            "feature_mode",
-            "requested_n_radial_bins",
-            "n_radial_bins",
-            "test",
-            "Feature",
-            "P_value",
-            "P_adj",
-        },
-    ):
-        return False
-    if not cache_has_columns(
-        null_path,
-        {
-            "panel",
-            "scenario_id",
-            "input",
-            "binning",
-            "feature_mode",
-            "requested_n_radial_bins",
-            "n_radial_bins",
-            "perm_idx",
-            "test",
-            "P_value",
-        },
-    ):
-        return False
-    if not ad_pig_cache_has_current_qc(test_path):
-        return False
-    try:
-        tests = pd.read_csv(
-            test_path,
-            usecols=[
-                "panel",
-                "input",
-                "binning",
-                "feature_mode",
-                "requested_n_radial_bins",
-                "n_radial_bins",
-                "test",
-            ],
-        )
-        null = pd.read_csv(
-            null_path,
-            usecols=[
-                "panel",
-                "input",
-                "binning",
-                "feature_mode",
-                "requested_n_radial_bins",
-                "n_radial_bins",
-                "test",
-            ],
-        )
-    except (OSError, ValueError, pd.errors.EmptyDataError):
-        return False
-    expected = {
-        (input_transform, binning, feature_mode, N_RADIAL_BINS)
-        for input_transform in AD_PIG_FULL_INPUTS
-        for binning in AD_PIG_FULL_BINNINGS
-        for feature_mode in AD_PIG_FULL_FEATURE_MODES
-    }
-    # Validate against the requested count; collapsed log grids can have fewer
-    # actual bins while still representing the configured scenario.
-    observed_scenarios = set(
-        tests.loc[
-            tests["panel"].eq("ad_pig"),
-            ["input", "binning", "feature_mode", "requested_n_radial_bins"],
-        ]
-        .drop_duplicates()
-        .itertuples(index=False, name=None)
-    )
-    null_scenarios = set(
-        null.loc[
-            null["panel"].eq("ad_pig"),
-            ["input", "binning", "feature_mode", "requested_n_radial_bins"],
-        ]
-        .drop_duplicates()
-        .itertuples(index=False, name=None)
-    )
-    if observed_scenarios != expected or null_scenarios != expected:
-        return False
-    observed_tests = set(tests.loc[tests["panel"].eq("ad_pig"), "test"].dropna().astype(str))
-    null_tests = set(null.loc[null["panel"].eq("ad_pig"), "test"].dropna().astype(str))
-    return observed_tests == set(TEST_LABELS) and null_tests == {test for test, _ in SPATIAL_TESTS}
+def _cached_stage(panel):
+    """Apply the same provenance checks to direct calls and the CLI."""
+
+    def decorate(func):
+        @wraps(func)
+        def run(**kwargs):
+            bound = function_signature(func).bind(**kwargs)
+            bound.apply_defaults()
+            args = bound.arguments
+            result_dir = _result_directory(
+                args["presence_threshold"], args["max_genes"], args["result_dir"]
+            )
+            args["result_dir"] = result_dir
+            data = _panel_cache_signature_data(
+                panel, presence_threshold=args["presence_threshold"], max_genes=args["max_genes"]
+            )
+            data["stage"] = func.__name__
+            data["stage_parameters"] = {
+                key: value
+                for key, value in args.items()
+                if key not in {"force", "result_dir", "_context"}
+            }
+            if "enrichment" in func.__name__:
+                # Enrichment may only consume current observed tests.
+                dependency = (
+                    "run_ad_pig_full_scenarios"
+                    if panel == "ad_pig"
+                    else "run_brain_dev_full_scenarios"
+                )
+                _require_current_stage(
+                    panel, dependency, result_dir, args["presence_threshold"], args["max_genes"]
+                )
+                test_file = AD_PIG_FULL_TESTS_FILE if panel == "ad_pig" else BRAIN_DEV_TESTS_FILE
+                data["observed_tests"] = path_fingerprint(result_dir / test_file)
+            signature = cache_signature(data)
+            if not args["force"] and cache_entry_is_current(result_dir, func.__name__, signature):
+                entry = _load_cache_manifest(result_dir / "cache_manifest.json")["entries"][
+                    func.__name__
+                ]
+                result = entry["provenance"]["result"]
+                return tuple(result) if "enrichment" in func.__name__ else result
+            if not func.__name__.endswith("_workflow"):
+                args["force"] = True
+            result = func(**args)
+            outputs = result[0] if isinstance(result, tuple) else result.get("outputs", result)
+            update_cache_entry(
+                result_dir,
+                func.__name__,
+                signature,
+                list(outputs.values()),
+                signature_data=data,
+                provenance={"result": result},
+            )
+            return result
+
+        return run
+
+    return decorate
 
 
-def _brain_dev_cache_ready(test_path: Path, null_path: Path) -> bool:
-    """Return whether brain-dev observed and permutation caches are current."""
-    if not cache_has_columns(
-        test_path,
-        {
-            "panel",
-            "scenario_id",
-            "input",
-            "binning",
-            "feature_mode",
-            "requested_n_radial_bins",
-            "n_radial_bins",
-            "test",
-            "Feature",
-            "P_value",
-            "P_adj",
-        },
-    ):
-        return False
-    if not cache_has_columns(
-        null_path,
-        {
-            "panel",
-            "scenario_id",
-            "input",
-            "binning",
-            "feature_mode",
-            "requested_n_radial_bins",
-            "n_radial_bins",
-            "perm_idx",
-            "test",
-            "P_value",
-        },
-    ):
-        return False
-    try:
-        tests = pd.read_csv(
-            test_path,
-            usecols=[
-                "panel",
-                "input",
-                "binning",
-                "feature_mode",
-                "requested_n_radial_bins",
-                "test",
-            ],
+def _require_current_stage(panel, stage, result_dir, presence_threshold, max_genes):
+    entry = _load_cache_manifest(result_dir / "cache_manifest.json")["entries"].get(stage, {})
+    recorded = entry.get("signature_data", {})
+    current = _panel_cache_signature_data(
+        panel, presence_threshold=presence_threshold, max_genes=max_genes
+    )
+    # Preserve stage-only knobs while requiring current source, inputs and panel settings.
+    data = {**recorded, **current}
+    if not recorded or not cache_entry_is_current(result_dir, stage, cache_signature(data)):
+        raise RuntimeError(
+            f"Stale or missing {panel} cache ({stage}); rerun comparator_benchmark.workflow "
+            f"--analysis {panel.replace('_', '-')} before using these results."
         )
-        null = pd.read_csv(
-            null_path,
-            usecols=[
-                "panel",
-                "input",
-                "binning",
-                "feature_mode",
-                "requested_n_radial_bins",
-                "perm_idx",
-                "test",
-            ],
-        )
-    except (OSError, ValueError, pd.errors.EmptyDataError):
-        return False
 
-    expected = {
-        (
-            input_transform,
-            BRAIN_DEV_REFERENCE_BINNING,
-            feature_mode,
-            BRAIN_DEV_REFERENCE_N_RADIAL_BINS,
-        )
-        for input_transform in BRAIN_DEV_FULL_INPUTS
-        for feature_mode in BRAIN_DEV_FULL_FEATURE_MODES
-    }
-    observed_scenarios = set(
-        tests.loc[
-            tests["panel"].eq("brain_dev"),
-            ["input", "binning", "feature_mode", "requested_n_radial_bins"],
-        ]
-        .drop_duplicates()
-        .itertuples(index=False, name=None)
-    )
-    null_scenarios = set(
-        null.loc[
-            null["panel"].eq("brain_dev"),
-            ["input", "binning", "feature_mode", "requested_n_radial_bins"],
-        ]
-        .drop_duplicates()
-        .itertuples(index=False, name=None)
-    )
-    if observed_scenarios != expected or null_scenarios != expected:
-        return False
-    observed_tests = set(tests.loc[tests["panel"].eq("brain_dev"), "test"].dropna().astype(str))
-    null_tests = set(null.loc[null["panel"].eq("brain_dev"), "test"].dropna().astype(str))
-    if observed_tests != set(TEST_LABELS) or null_tests != {test for test, _ in SPATIAL_TESTS}:
-        return False
 
-    null_perm_counts = (
-        null.loc[null["panel"].eq("brain_dev")]
-        .groupby(["input", "binning", "feature_mode", "requested_n_radial_bins", "test"])[
-            "perm_idx"
-        ]
-        .nunique()
+def require_current_figure_cache(panel: str) -> None:
+    """Validate default paper caches without running or modifying the analysis."""
+    _require_current_stage(
+        panel, f"run_{panel}_workflow", RESULT_DIR, PRESENCE_THRESHOLD, MAX_GENES
     )
-    expected_null_groups = len(expected) * len(SPATIAL_TESTS)
-    return (
-        null_perm_counts.size == expected_null_groups
-        and int(null_perm_counts.min()) == BRAIN_DEV_NULL_PERMUTATIONS
-        and int(null_perm_counts.max()) == BRAIN_DEV_NULL_PERMUTATIONS
-    )
+
+
+def _panel_data(panel, context, presence_threshold, max_genes, result_dir):
+    if context is None:
+        context = {}
+    if "loaded" not in context:
+        context["loaded"] = load_panel(panel)
+        context["genes"] = _select_comparison_genes(
+            panel, context["loaded"][0], presence_threshold, max_genes, result_dir=result_dir
+        )
+    return context["loaded"], context["genes"]
 
 
 def _select_comparison_genes(
@@ -437,6 +304,8 @@ def _select_comparison_genes(
     samples: dict[Path, Any],
     presence_threshold: float = PRESENCE_THRESHOLD,
     max_genes: int = MAX_GENES,
+    *,
+    result_dir: Path = RESULT_DIR,
 ) -> list[str]:
     """Select benchmark genes, forcing present curated controls into each panel."""
     genes = select_gene_panel(samples, presence_threshold, max_genes)
@@ -446,7 +315,9 @@ def _select_comparison_genes(
     present = set.intersection(*(set(adata.var_names) for adata in samples.values()))
     controls = [gene for gene in PANELS[panel].pos_controls if gene in present]
     if panel == "brain_dev":
-        controls.extend(gene for gene in brain_dev_forced_controls() if gene in present)
+        controls.extend(
+            gene for gene in brain_dev_forced_controls(result_dir=result_dir) if gene in present
+        )
     return list(dict.fromkeys(genes + controls))
 
 
@@ -465,10 +336,11 @@ def _subset_design(sample_set: Any, paths_order: list[Path]) -> dict[str, Any]:
             raise ValueError("Configured continuous comparison has no samples")
         if len(sample_set.design_values) != len(idx_list):
             raise ValueError("Configured design values do not align with its samples")
+        order = np.argsort(idx_list)
         return {
             "is_design": True,
-            "idx": np.asarray(idx_list, dtype=int),
-            "design_values": sample_set.design_values,
+            "idx": np.asarray(idx_list, dtype=int)[order],
+            "design_values": np.asarray(sample_set.design_values)[order],
             "design_name": sample_set.design_name,
         }
 
@@ -476,11 +348,21 @@ def _subset_design(sample_set: Any, paths_order: list[Path]) -> dict[str, Any]:
     b_idx = [path_to_idx[path] for path in sample_set.b_paths]
     if not a_idx or not b_idx:
         raise ValueError("Configured binary comparison has an empty sample group")
+    order = np.argsort(a_idx + b_idx)
     return {
         "is_design": False,
-        "idx": np.asarray(a_idx + b_idx, dtype=int),
-        "groups": np.asarray(["A"] * len(a_idx) + ["B"] * len(b_idx)),
+        "idx": np.asarray(a_idx + b_idx, dtype=int)[order],
+        "groups": np.asarray(["A"] * len(a_idx) + ["B"] * len(b_idx))[order],
     }
+
+
+def _comparison_samples(comparator, idx):
+    # All benchmark permutations use every sample; changing labels needs no copy.
+    return (
+        comparator
+        if np.array_equal(idx, np.arange(len(comparator.spectra_)))
+        else comparator.subset(idx)
+    )
 
 
 def _spatial_test(
@@ -491,7 +373,7 @@ def _spatial_test(
 ) -> pd.DataFrame:
     # ``comparator`` already owns precomputed spectra. ``subset`` only selects
     # sample rows and supplies the current real or permuted sample-level design.
-    sub = comparator.subset(subset["idx"])
+    sub = _comparison_samples(comparator, subset["idx"])
     if subset["is_design"]:
         design_name = subset["design_name"]
         return sub.test_diff_freq(
@@ -598,59 +480,31 @@ def _fit_scenario_samples(
             return int(fitted_n)
         return int(fallback)
 
-    if binning == "linear":
-        comparator, paths_order = fit_all_samples(
-            samples, genes, feature_mode, n_radial_bins=n_radial_bins
-        )
-        actual_n_bins = _actual_bin_count(comparator, n_radial_bins)
-        return comparator, paths_order, int(actual_n_bins)
-    if binning != "log":
-        raise ValueError(f"Unknown binning: {binning!r}")
-
-    # Build log edges from the radial grid first, then reuse those frequency
-    # edges for either radial or 2D feature extraction in the scenario grid.
-    # This temporary fit is only used to recover the requested physical
-    # frequency range; the actual scenario fit below lets SONIC adapt bins.
-    linear_cmp, _paths = fit_all_samples(
-        samples,
-        genes,
-        "radial",
-        n_radial_bins=n_radial_bins,
-        adaptive_freq_edges=False,
-    )
-    log_edges = geometric_frequency_edges(np.asarray(linear_cmp.freq_edges))
     comparator, paths_order = fit_all_samples(
-        samples,
-        genes,
-        feature_mode,
-        n_radial_bins=n_radial_bins,
-        freq_edges=log_edges,
+        samples, genes, feature_mode, n_radial_bins=n_radial_bins, binning=binning
     )
-    actual_n_bins = _actual_bin_count(comparator, log_edges.size - 1)
-    return comparator, paths_order, int(actual_n_bins)
+    return comparator, paths_order, _actual_bin_count(comparator, n_radial_bins)
 
 
+@_cached_stage("ad_pig")
 def run_ad_pig_full_scenarios(  # noqa: C901
     *,
     force: bool = False,
     presence_threshold: float = PRESENCE_THRESHOLD,
     max_genes: int = MAX_GENES,
+    result_dir: Path | None = None,
+    _context: dict | None = None,
 ) -> dict[str, Any]:
     """Cache observed tests and permutation-null ECDF p-values for all AD/PIG scenarios."""
-    test_path = RESULT_DIR / AD_PIG_FULL_TESTS_FILE
-    null_path = RESULT_DIR / AD_PIG_FULL_NULL_ECDF_FILE
-    if _ad_pig_full_cache_ready(test_path, null_path) and not force:
-        log("using cached AD/PIG full scenario tests; pass --force to recompute")
-        return {
-            "ad_pig_full_tests": str(test_path.relative_to(PROJECT_ROOT)),
-            "ad_pig_full_null_ecdf": str(null_path.relative_to(PROJECT_ROOT)),
-        }
+    test_path = result_dir / AD_PIG_FULL_TESTS_FILE
+    null_path = result_dir / AD_PIG_FULL_NULL_ECDF_FILE
 
-    ensure_dirs()
+    result_dir.mkdir(parents=True, exist_ok=True)
 
     # Load the AD/PIG panel data and select genes for comparison.
-    samples, _meta, sample_sets = load_panel("ad_pig")
-    genes = _select_comparison_genes("ad_pig", samples, presence_threshold, max_genes)
+    (samples, _meta, sample_sets), genes = _panel_data(
+        "ad_pig", _context, presence_threshold, max_genes, result_dir
+    )
     real_set = next(s for s in sample_sets if s.null_type == "real")
     perm_sets = [s for s in sample_sets if s.null_type == "perm"]
     # Normalize each input representation once, then reuse it across the
@@ -684,6 +538,12 @@ def run_ad_pig_full_scenarios(  # noqa: C901
                     feature_mode=feature_mode,
                     n_radial_bins=N_RADIAL_BINS,
                 )
+                if _context is not None and input_transform == "raw" and feature_mode == "radial":
+                    _context.setdefault("reference_fits", {})[binning] = (
+                        comparator,
+                        paths_order,
+                        actual_n_bins,
+                    )
                 if actual_n_bins != N_RADIAL_BINS:
                     log(f"  adapted requested {N_RADIAL_BINS} bins to actual {actual_n_bins} bins")
                 suffix = f"bins{actual_n_bins}"
@@ -724,11 +584,13 @@ def run_ad_pig_full_scenarios(  # noqa: C901
                         )
                     )
 
+                del comparator
+
     save_csv(pd.concat(observed_parts, ignore_index=True), test_path)
     save_csv(pd.concat(null_parts, ignore_index=True), null_path)
     return {
-        "ad_pig_full_tests": str(test_path.relative_to(PROJECT_ROOT)),
-        "ad_pig_full_null_ecdf": str(null_path.relative_to(PROJECT_ROOT)),
+        "ad_pig_full_tests": project_relative(test_path),
+        "ad_pig_full_null_ecdf": project_relative(null_path),
     }
 
 
@@ -738,15 +600,14 @@ def _effective_rank_summary(
     real_set: Any,
     *,
     normalize_shape: bool,
+    sample_rank: np.ndarray,
 ) -> dict[str, Any]:
     subset = _subset_design(real_set, paths_order)
     if subset["is_design"]:
         raise ValueError("AD/PIG effective-rank summary requires a binary real contrast")
-    real_cmp = comparator.subset(subset["idx"])
+    real_cmp = _comparison_samples(comparator, subset["idx"])
     n_bins = int(real_cmp.spectra_.shape[-1])
-    # Compute per-sample rank of cross-gene spectra.
-    sample_rank = np.asarray(real_cmp.effective_rank(), dtype=float)
-    # Compute the pooled residual covariance.
+    # Raw per-sample ranks are shared; residual covariance depends on normalization.
     null_state = real_cmp.estimate_null_covariance(
         subset["groups"],
         normalize_shape=normalize_shape,
@@ -762,190 +623,147 @@ def _effective_rank_summary(
     }
 
 
+@_cached_stage("ad_pig")
 def run_ad_pig_radial_bin_robustness(  # noqa: C901
     *,
     force: bool = False,
     presence_threshold: float = PRESENCE_THRESHOLD,
     max_genes: int = MAX_GENES,
     bin_counts: tuple[int, ...] = RADIAL_BIN_DIAGNOSTIC_BINS,
+    result_dir: Path | None = None,
+    _context: dict | None = None,
 ) -> dict[str, Any]:
     """Cache raw/radial bin-count robustness metrics for AD/PIG."""
-    path = RESULT_DIR / AD_PIG_RADIAL_BIN_ROBUSTNESS_FILE
-    robustness_columns = {
-        "panel",
-        "input",
-        "binning",
-        "feature_mode",
-        "test",
-        "requested_n_radial_bins",
-        "n_radial_bins",
-        "n_frequency_bins",
-        "sample_effective_rank_samples",
-        "sample_effective_rank_values",
-        "residual_effective_rank",
-        "perm_fpr_0p05",
-        "n_fdr_hits",
-        "pvalue_spearman_vs_ref",
-        "ref_fdr_recovered_fraction",
-    }
-    cache_ready = cache_has_columns(path, robustness_columns)
-    if cache_ready:
-        try:
-            cached = pd.read_csv(path, usecols=list(robustness_columns))
-            expected = {
-                ("raw", binning, "radial", test, int(n_bins))
-                for n_bins in bin_counts
-                for binning in AD_PIG_FULL_BINNINGS
-                for test, _ in SPATIAL_TESTS
-            }
-            found = set(
-                cached.loc[
-                    cached["panel"].eq("ad_pig"),
-                    [
-                        "input",
-                        "binning",
-                        "feature_mode",
-                        "test",
-                        "requested_n_radial_bins",
-                    ],
-                ]
-                .drop_duplicates()
-                .itertuples(index=False, name=None)
-            )
-            cache_ready = found == expected
-        except (OSError, ValueError, pd.errors.EmptyDataError):
-            cache_ready = False
-    if cache_ready and not force:
-        log("using cached AD/PIG radial-bin robustness; pass --force to recompute")
-        return {"ad_pig_radial_bin_robustness": str(path.relative_to(PROJECT_ROOT))}
-
-    ensure_dirs()
+    path = result_dir / AD_PIG_RADIAL_BIN_ROBUSTNESS_FILE
+    result_dir.mkdir(parents=True, exist_ok=True)
 
     # Load the AD/PIG panel data and select genes for comparison.
-    samples, _meta, sample_sets = load_panel("ad_pig")
-    genes = _select_comparison_genes("ad_pig", samples, presence_threshold, max_genes)
+    (samples, _meta, sample_sets), genes = _panel_data(
+        "ad_pig", _context, presence_threshold, max_genes, result_dir
+    )
     real_set = next(s for s in sample_sets if s.null_type == "real")  # 1 real sample set
     perm_sets = [s for s in sample_sets if s.null_type == "perm"]  # 12 shuffled sample sets
 
-    # Run the spatial test per n_radial_bins choice
-    fitted: dict[tuple[int, str], tuple[Any, list[Path], int]] = {}
-    observed: dict[tuple[int, str, str], pd.DataFrame] = {}
-    for n_bins in bin_counts:
-        for binning in AD_PIG_FULL_BINNINGS:
+    # Keep small reference p-value tables, releasing each other fit immediately.
+    rows: list[dict[str, Any]] = []
+    references = {} if _context is None else _context.get("reference_fits", {})
+    for binning in AD_PIG_FULL_BINNINGS:
+        observed = {}
+        order = list(dict.fromkeys([AD_PIG_REFERENCE_N_RADIAL_BINS, *bin_counts]))
+        for n_bins in order:
             log(f"AD/PIG radial-bin robustness n_bins={n_bins} binning={binning}")
-            comparator, paths_order, actual_n_bins = _fit_scenario_samples(
-                samples,
-                genes,
-                binning=binning,
-                feature_mode="radial",
-                n_radial_bins=n_bins,
-            )
-            if actual_n_bins != n_bins:
-                log(f"  adapted requested {n_bins} bins to actual {actual_n_bins}")
-            fitted[(n_bins, binning)] = (comparator, paths_order, actual_n_bins)
+            fitted = references.get(binning) if n_bins == AD_PIG_REFERENCE_N_RADIAL_BINS else None
+            if fitted is None:
+                fitted = _fit_scenario_samples(
+                    samples, genes, binning=binning, feature_mode="radial", n_radial_bins=n_bins
+                )
+            comparator, paths_order, actual_n_bins = fitted
             real_subset = _subset_design(real_set, paths_order)
-            if real_subset["is_design"]:
-                raise ValueError("AD/PIG radial-bin robustness requires a binary real contrast")
-            # Run DF and DF-norm tests
+            sample_rank = np.asarray(comparator.effective_rank(), dtype=float)
             for test, normalize_shape in SPATIAL_TESTS:
                 observed[(n_bins, binning, test)] = _spatial_test(
                     comparator, real_subset, normalize_shape=normalize_shape
                 )[["Feature", "P_value"]].copy()
+            if n_bins not in bin_counts:
+                del comparator, fitted
+                continue
+            for test, normalize_shape in SPATIAL_TESTS:
+                frame = observed[(n_bins, binning, test)]
+                ref = observed.get((AD_PIG_REFERENCE_N_RADIAL_BINS, binning, test), pd.DataFrame())
+                merged = frame.merge(ref, on="Feature", suffixes=("", "_ref"))
+                current_score = -np.log10(np.clip(merged["P_value"].to_numpy(float), 1e-300, 1.0))
+                ref_score = -np.log10(np.clip(merged["P_value_ref"].to_numpy(float), 1e-300, 1.0))
+                if (
+                    current_score.size < 2
+                    or ref_score.size < 2
+                    or np.nanstd(current_score) == 0
+                    or np.nanstd(ref_score) == 0
+                ):
+                    corr = np.nan
+                else:
+                    rho = spearmanr(current_score, ref_score, nan_policy="omit").statistic
+                    corr = float(rho) if np.isfinite(rho) else np.nan
 
-    # Compare each bin-count run with the same-binning requested-30-bin
-    # reference so linear and log grids are judged on their own scale.
-    rows: list[dict[str, Any]] = []
-    for (n_bins, binning), (comparator, paths_order, actual_n_bins) in fitted.items():
-        for test, normalize_shape in SPATIAL_TESTS:
-            frame = observed[(n_bins, binning, test)]
-            ref = observed.get((AD_PIG_REFERENCE_N_RADIAL_BINS, binning, test), pd.DataFrame())
-            merged = frame.merge(ref, on="Feature", suffixes=("", "_ref"))
-            current_score = -np.log10(np.clip(merged["P_value"].to_numpy(float), 1e-300, 1.0))
-            ref_score = -np.log10(np.clip(merged["P_value_ref"].to_numpy(float), 1e-300, 1.0))
-            if (
-                current_score.size < 2
-                or ref_score.size < 2
-                or np.nanstd(current_score) == 0
-                or np.nanstd(ref_score) == 0
-            ):
-                corr = np.nan
-            else:
-                rho = spearmanr(current_score, ref_score, nan_policy="omit").statistic
-                corr = float(rho) if np.isfinite(rho) else np.nan
+                current_q = apply_bh_correction(frame["P_value"].to_numpy(float))
+                ref_q = (
+                    apply_bh_correction(ref["P_value"].to_numpy(float))
+                    if not ref.empty
+                    else np.array([], dtype=float)
+                )
+                current_hits = set(frame.loc[current_q <= AD_PIG_FDR_ALPHA, "Feature"])
+                ref_hits = set(ref.loc[ref_q <= AD_PIG_FDR_ALPHA, "Feature"])
 
-            current_q = apply_bh_correction(frame["P_value"].to_numpy(float))
-            ref_q = (
-                apply_bh_correction(ref["P_value"].to_numpy(float))
-                if not ref.empty
-                else np.array([], dtype=float)
-            )
-            current_hits = set(frame.loc[current_q <= AD_PIG_FDR_ALPHA, "Feature"])
-            ref_hits = set(ref.loc[ref_q <= AD_PIG_FDR_ALPHA, "Feature"])
+                null_parts: list[np.ndarray] = []
+                for perm_set in perm_sets:
+                    subset = _subset_design(perm_set, paths_order)
+                    if subset["is_design"]:
+                        raise ValueError("AD/PIG permutation requires a binary comparison")
+                    perm = _spatial_test(comparator, subset, normalize_shape=normalize_shape)
+                    null_parts.append(perm["P_value"].to_numpy(float))
+                null_p = np.concatenate(null_parts) if null_parts else np.array([], dtype=float)
+                rank_summary = _effective_rank_summary(
+                    comparator,
+                    paths_order,
+                    real_set,
+                    normalize_shape=normalize_shape,
+                    sample_rank=sample_rank,
+                )
+                recovered = len(current_hits & ref_hits)
+                rows.append(
+                    {
+                        "panel": "ad_pig",
+                        "input": "raw",
+                        "binning": binning,
+                        "feature_mode": "radial",
+                        "test": test,
+                        "requested_n_radial_bins": int(n_bins),
+                        "n_radial_bins": int(actual_n_bins),
+                        **rank_summary,
+                        "n_perm_sets": len(perm_sets),
+                        "n_null_pvalues": int(null_p.size),
+                        "perm_fpr_0p05": (float((null_p < 0.05).mean()) if null_p.size else np.nan),
+                        "perm_median_p": (float(np.nanmedian(null_p)) if null_p.size else np.nan),
+                        "n_fdr_hits": int(len(current_hits)),
+                        "ref_n_fdr_hits": int(len(ref_hits)),
+                        "pvalue_spearman_vs_ref": corr,
+                        "ref_fdr_recovered_n": int(recovered),
+                        "ref_fdr_recovered_fraction": (
+                            float(recovered / len(ref_hits)) if ref_hits else np.nan
+                        ),
+                        "n_genes": int(frame.shape[0]),
+                    }
+                )
 
-            null_parts: list[np.ndarray] = []
-            for perm_set in perm_sets:
-                subset = _subset_design(perm_set, paths_order)
-                if subset["is_design"]:
-                    raise ValueError("AD/PIG permutation requires a binary comparison")
-                perm = _spatial_test(comparator, subset, normalize_shape=normalize_shape)
-                null_parts.append(perm["P_value"].to_numpy(float))
-            null_p = np.concatenate(null_parts) if null_parts else np.array([], dtype=float)
-            rank_summary = _effective_rank_summary(
-                comparator,
-                paths_order,
-                real_set,
-                normalize_shape=normalize_shape,
-            )
-            recovered = len(current_hits & ref_hits)
-            rows.append(
-                {
-                    "panel": "ad_pig",
-                    "input": "raw",
-                    "binning": binning,
-                    "feature_mode": "radial",
-                    "test": test,
-                    "requested_n_radial_bins": int(n_bins),
-                    "n_radial_bins": int(actual_n_bins),
-                    **rank_summary,
-                    "n_perm_sets": len(perm_sets),
-                    "n_null_pvalues": int(null_p.size),
-                    "perm_fpr_0p05": (float((null_p < 0.05).mean()) if null_p.size else np.nan),
-                    "perm_median_p": (float(np.nanmedian(null_p)) if null_p.size else np.nan),
-                    "n_fdr_hits": int(len(current_hits)),
-                    "ref_n_fdr_hits": int(len(ref_hits)),
-                    "pvalue_spearman_vs_ref": corr,
-                    "ref_fdr_recovered_n": int(recovered),
-                    "ref_fdr_recovered_fraction": (
-                        float(recovered / len(ref_hits)) if ref_hits else np.nan
-                    ),
-                    "n_genes": int(frame.shape[0]),
-                }
-            )
+            if n_bins != AD_PIG_REFERENCE_N_RADIAL_BINS:
+                for test, _ in SPATIAL_TESTS:
+                    del observed[(n_bins, binning, test)]
+            del comparator, fitted
 
     save_csv(pd.DataFrame(rows), path)
-    return {"ad_pig_radial_bin_robustness": str(path.relative_to(PROJECT_ROOT))}
+    return {"ad_pig_radial_bin_robustness": project_relative(path)}
 
 
+@_cached_stage("ad_pig")
 def run_ad_pig_spectral_replicate_distance_cache(
     *,
     force: bool = False,
     presence_threshold: float = PRESENCE_THRESHOLD,
     max_genes: int = MAX_GENES,
+    result_dir: Path | None = None,
+    _context: dict | None = None,
 ) -> dict[str, Any]:
     """Relative DC/radial-bin distances for within- vs cross-animal sections."""
-    path = RESULT_DIR / AD_PIG_SPECTRAL_REPLICATE_DISTANCE_FILE
-    if ad_pig_spectral_replicate_distance_cache_ready(path) and not force:
-        log("using cached AD/PIG spectral replicate distances; pass --force to recompute")
-        return {"ad_pig_spectral_replicate_distance": str(path.relative_to(PROJECT_ROOT))}
+    path = result_dir / AD_PIG_SPECTRAL_REPLICATE_DISTANCE_FILE
 
-    ensure_dirs()
+    result_dir.mkdir(parents=True, exist_ok=True)
 
     # Load the AD/PIG panel data and select genes for comparison.
-    samples, _meta, sample_sets = load_panel("ad_pig")
+    (samples, _meta, sample_sets), selected_genes = _panel_data(
+        "ad_pig", _context, presence_threshold, max_genes, result_dir
+    )
     real_set = next(s for s in sample_sets if s.null_type == "real")
     paths_order = sorted([*real_set.a_paths, *real_set.b_paths])
-    real_samples = {path_i: samples[path_i] for path_i in paths_order}
-    genes = _select_comparison_genes("ad_pig", real_samples, presence_threshold, max_genes)
+    genes = selected_genes
     pig_gene_set = {gene for gene in AD_PIG_POS_CONTROLS if gene in set(genes)}
     condition_by_path = {
         **dict.fromkeys(real_set.a_paths, "WT"),
@@ -954,12 +772,16 @@ def run_ad_pig_spectral_replicate_distance_cache(
 
     log(f"AD/PIG spectral replicate distances samples={len(paths_order)} genes={len(genes)}")
     # Compute binned radial spectra across genes and samples.
-    comparator, paths_order = fit_all_samples(
-        real_samples,
-        genes,
-        AD_PIG_REFERENCE_FEATURE_MODE,
-        n_radial_bins=AD_PIG_REFERENCE_N_RADIAL_BINS,
-    )
+    reference = None if _context is None else _context.get("reference_fits", {}).get("linear")
+    if reference is None:
+        comparator, paths_order = fit_all_samples(
+            {p: samples[p] for p in paths_order},
+            genes,
+            AD_PIG_REFERENCE_FEATURE_MODE,
+            n_radial_bins=AD_PIG_REFERENCE_N_RADIAL_BINS,
+        )
+    else:
+        comparator, paths_order, _ = reference
     if comparator.dc_ is None or comparator.spectra_ is None:
         raise RuntimeError("Comparator did not produce dc_ and spectra_ caches")
 
@@ -1023,7 +845,7 @@ def run_ad_pig_spectral_replicate_distance_cache(
     if not rows:
         raise RuntimeError("No same-condition AD/PIG sample comparisons were available")
     save_csv(pd.concat(rows, ignore_index=True), path)
-    return {"ad_pig_spectral_replicate_distance": str(path.relative_to(PROJECT_ROOT))}
+    return {"ad_pig_spectral_replicate_distance": project_relative(path)}
 
 
 def _raw_2d_anisotropy_scores(
@@ -1039,7 +861,7 @@ def _raw_2d_anisotropy_scores(
     from sonic import ComparatorIrregular
     from sonic.comparators.features import power_spectrum_anisotropy
 
-    adatas = [samples[path_i][:, genes].copy() for path_i in paths_order]
+    adatas = [samples[path_i][:, genes] for path_i in paths_order]
     comparator = ComparatorIrregular(
         samples=adatas,
         gene_names=genes,
@@ -1056,45 +878,49 @@ def _raw_2d_anisotropy_scores(
         spectrum_chunker, _dc, _presence, n_genes, grid_shape = comparator._nufft_spectrum_chunker(
             sample_idx
         )
-        power = spectrum_chunker(0, n_genes)
-        scores = power_spectrum_anisotropy(
-            power,
-            grid_shape,
-            comparator._spacings[sample_idx],
-            fft_solver=comparator._spectrum_fft_solver,
-        )
-        scores.insert(0, "gene", genes)
-        scores["gene_set"] = [gene_set_by_gene[gene] for gene in genes]
-        scores.insert(0, "group", group_by_path[path_i])
-        scores.insert(0, "sample", path_i.stem)
-        scores.insert(0, "panel", panel)
-        rows.append(scores)
+        for start in range(0, n_genes, 32):
+            stop = min(start + 32, n_genes)
+            power = spectrum_chunker(start, stop)
+            scores = power_spectrum_anisotropy(
+                power,
+                grid_shape,
+                comparator._spacings[sample_idx],
+                fft_solver=comparator._spectrum_fft_solver,
+            )
+            scores.insert(0, "gene", genes[start:stop])
+            scores["gene_set"] = [gene_set_by_gene[gene] for gene in genes[start:stop]]
+            scores.insert(0, "group", group_by_path[path_i])
+            scores.insert(0, "sample", path_i.stem)
+            scores.insert(0, "panel", panel)
+            rows.append(scores)
+            del power
     return pd.concat(rows, ignore_index=True)
 
 
+@_cached_stage("ad_pig")
 def run_ad_pig_anisotropy_cache(
     *,
     force: bool = False,
     presence_threshold: float = PRESENCE_THRESHOLD,
     max_genes: int = MAX_GENES,
+    result_dir: Path | None = None,
+    _context: dict | None = None,
 ) -> dict[str, Any]:
     """Raw 2D power-spectrum anisotropy for AD/PIG genes and background genes."""
-    path = RESULT_DIR / AD_PIG_ANISOTROPY_FILE
-    if ad_pig_anisotropy_cache_ready(path) and not force:
-        log("using cached AD/PIG anisotropy; pass --force to recompute")
-        return {"ad_pig_anisotropy": str(path.relative_to(PROJECT_ROOT))}
+    path = result_dir / AD_PIG_ANISOTROPY_FILE
 
-    ensure_dirs()
+    result_dir.mkdir(parents=True, exist_ok=True)
 
     # Load the AD/PIG panel data and select genes for comparison.
-    samples, _meta, sample_sets = load_panel("ad_pig")
+    (samples, _meta, sample_sets), selected_genes = _panel_data(
+        "ad_pig", _context, presence_threshold, max_genes, result_dir
+    )
     real_set = next(s for s in sample_sets if s.null_type == "real")
     paths_order = list(real_set.a_paths + real_set.b_paths)
     groups = {
         **dict.fromkeys(real_set.a_paths, "WT"),
         **dict.fromkeys(real_set.b_paths, "AppNL-G-F"),
     }
-    real_samples = {path_i: samples[path_i] for path_i in paths_order}
     present = set.intersection(*(set(samples[path_i].var_names) for path_i in paths_order))
     # Keep PIG genes explicit and use the expression-ranked non-PIG panel only
     # as the background distribution for the anisotropy supplement.
@@ -1102,9 +928,7 @@ def run_ad_pig_anisotropy_cache(
     if not pig_genes:
         raise RuntimeError("No AD/PIG positive-control genes are present in real samples")
     background_genes = [
-        gene
-        for gene in select_gene_panel(real_samples, presence_threshold, max_genes)
-        if gene in present and gene not in set(pig_genes)
+        gene for gene in selected_genes if gene in present and gene not in set(pig_genes)
     ]
     genes = list(dict.fromkeys(pig_genes + background_genes))
     pig_gene_set = set(pig_genes)
@@ -1125,38 +949,39 @@ def run_ad_pig_anisotropy_cache(
     )
     long["is_pig"] = long["gene_set"].eq("PIG")
     save_csv(long, path)
-    return {"ad_pig_anisotropy": str(path.relative_to(PROJECT_ROOT))}
+    return {"ad_pig_anisotropy": project_relative(path)}
 
 
+@_cached_stage("brain_dev")
 def run_brain_dev_anisotropy_cache(
     *,
     force: bool = False,
     presence_threshold: float = PRESENCE_THRESHOLD,
     max_genes: int = MAX_GENES,
+    result_dir: Path | None = None,
+    _context: dict | None = None,
 ) -> dict[str, Any]:
     """Raw 2D power-spectrum anisotropy for brain-dev marker and background genes."""
-    path = RESULT_DIR / BRAIN_DEV_ANISOTROPY_FILE
-    if brain_dev_anisotropy_cache_ready(path) and not force:
-        log("using cached brain-development anisotropy; pass --force to recompute")
-        return {"brain_dev_anisotropy": str(path.relative_to(PROJECT_ROOT))}
+    path = result_dir / BRAIN_DEV_ANISOTROPY_FILE
 
-    ensure_dirs()
+    result_dir.mkdir(parents=True, exist_ok=True)
 
     # Load the brain development panel data and select genes for comparison.
-    samples, meta, sample_sets = load_panel("brain_dev")
+    (samples, meta, sample_sets), selected_genes = _panel_data(
+        "brain_dev", _context, presence_threshold, max_genes, result_dir
+    )
     real_set = next(s for s in sample_sets if s.null_type == "real")
     paths_order = list(real_set.a_paths)
-    real_samples = {path_i: samples[path_i] for path_i in paths_order}
     present = set.intersection(*(set(samples[path_i].var_names) for path_i in paths_order))
 
     # Separate marker genes and background genes for anisotropy distribution comparison.
-    marker_genes = [gene for gene in brain_dev_forced_controls() if gene in present]
+    marker_genes = [
+        gene for gene in brain_dev_forced_controls(result_dir=result_dir) if gene in present
+    ]
     if not marker_genes:
         raise RuntimeError("No brain-dev marker genes are present in real samples")
     background_genes = [
-        gene
-        for gene in select_gene_panel(real_samples, presence_threshold, max_genes)
-        if gene in present and gene not in set(marker_genes)
+        gene for gene in selected_genes if gene in present and gene not in set(marker_genes)
     ]
     genes = list(dict.fromkeys(marker_genes + background_genes))
     marker_set = set(marker_genes)
@@ -1179,7 +1004,7 @@ def run_brain_dev_anisotropy_cache(
     )
     long["is_marker"] = long["gene_set"].eq("marker")
     save_csv(long, path)
-    return {"brain_dev_anisotropy": str(path.relative_to(PROJECT_ROOT))}
+    return {"brain_dev_anisotropy": project_relative(path)}
 
 
 def _reference_tests_wide(
@@ -1244,8 +1069,10 @@ def _safe_term_key(row: pd.Series) -> str:
     return f"{source}:{name}"
 
 
-def _read_top_enrichment(panel: str, test: str, top_n: int) -> pd.DataFrame:
-    path = RESULT_DIR / "enrichment_cache" / f"{panel}_{test}_topN{top_n}_enrich.csv"
+def _read_top_enrichment(
+    panel: str, test: str, top_n: int, result_dir: Path = RESULT_DIR
+) -> pd.DataFrame:
+    path = result_dir / "enrichment_cache" / f"{panel}_{test}_topN{top_n}_enrich.csv"
     if not path.exists() or path.stat().st_size == 0:
         return pd.DataFrame()
     try:
@@ -1265,7 +1092,9 @@ def _read_top_enrichment(panel: str, test: str, top_n: int) -> pd.DataFrame:
     return df
 
 
-def _df_norm_enrichment_contrasts(panel: str, top_n: int) -> pd.DataFrame:  # noqa: C901
+def _df_norm_enrichment_contrasts(  # noqa: C901
+    panel: str, top_n: int, result_dir: Path = RESULT_DIR
+) -> pd.DataFrame:
     parts: list[pd.DataFrame] = []
     base_cols = [
         "panel",
@@ -1299,15 +1128,10 @@ def _df_norm_enrichment_contrasts(panel: str, top_n: int) -> pd.DataFrame:  # no
         "method",
     ]
     for test in ("DF", "DF_norm"):
-        df = _read_top_enrichment(panel, test, top_n)
-        if df.empty:
-            continue
-        keep = [col for col in base_cols + test_cols if col in df.columns]
-        out = df[keep].copy()
+        df = _read_top_enrichment(panel, test, top_n, result_dir)
+        out = df.reindex(columns=base_cols + test_cols).copy()
         out = out.rename(columns={col: f"{col}_{test}" for col in test_cols if col in out.columns})
         parts.append(out)
-    if len(parts) != 2:
-        return pd.DataFrame()
 
     # Missing terms on one side are retained with p_adjust=1/score=0 so the
     # contrast table can rank both shared and side-specific enrichments.
@@ -1356,10 +1180,13 @@ def _df_norm_enrichment_contrasts(panel: str, top_n: int) -> pd.DataFrame:  # no
             if name not in merged.columns:
                 merged[name] = ""
             merged[name] = merged[name].fillna("").astype(str)
+        merged[f"semantic_simplified_{test}"] = (
+            merged[f"semantic_simplified_{test}"].astype("boolean").fillna(False).astype(bool)
+        )
         name = f"significant_{test}"
         if name not in merged.columns:
             merged[name] = False
-        merged[name] = merged[name].where(merged[name].notna(), False).astype(bool)
+        merged[name] = merged[name].astype("boolean").fillna(False).astype(bool)
 
     merged["delta_norm_minus_DF"] = merged["score_DF_norm"] - merged["score_DF"]
     merged["abs_delta"] = merged["delta_norm_minus_DF"].abs()
@@ -1391,9 +1218,10 @@ def _run_topn_enrichment_cache(
     top_n: int,
     contrast_file: str,
     force: bool = False,
+    result_dir: Path = RESULT_DIR,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Cache top-N DF/DF-norm clusterProfiler results for one panel."""
-    cache_dir = RESULT_DIR / "enrichment_cache"
+    cache_dir = result_dir / "enrichment_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     top_by_test = {
@@ -1461,28 +1289,40 @@ def _run_topn_enrichment_cache(
                 timeout_seconds=int(os.environ.get("CLUSTERPROFILER_TIMEOUT_SECONDS", "900")),
             )
 
-    contrast_path = RESULT_DIR / contrast_file
-    contrasts = _df_norm_enrichment_contrasts(panel, top_n)
-    save_csv(contrasts, contrast_path)
+    contrast_path = result_dir / contrast_file
+    if job_rows or genes_changed or not contrast_path.exists():
+        contrasts = _df_norm_enrichment_contrasts(panel, top_n, result_dir)
+        save_csv(contrasts, contrast_path)
     return (
         {
-            "enrichment_cache": str(cache_dir.relative_to(PROJECT_ROOT)),
-            f"{panel}_enrichment_contrasts": str(contrast_path.relative_to(PROJECT_ROOT)),
+            f"{panel}_enrichment_genes": project_relative(genes_path),
+            **{
+                f"{panel}_enrichment_{test}": project_relative(
+                    cache_dir / f"{panel}_{test}_topN{top_n}_enrich.csv"
+                )
+                for test in top_by_test
+            },
+            f"{panel}_enrichment_contrasts": project_relative(contrast_path),
         },
         provenance,
     )
 
 
+@_cached_stage("ad_pig")
 def run_ad_pig_enrichment_cache(
     *,
     force: bool = False,
     top_n: int = AD_PIG_ENRICHMENT_TOP_N,
+    presence_threshold: float = PRESENCE_THRESHOLD,
+    max_genes: int = MAX_GENES,
+    result_dir: Path | None = None,
+    _context: dict | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Cache reference-scenario top genes, enrichment tables, and DF-vs-DF-norm contrasts."""
-    ensure_dirs()
+    result_dir.mkdir(parents=True, exist_ok=True)
 
     # Reuse the reference test results from the full_scenarios run
-    full_path = RESULT_DIR / AD_PIG_FULL_TESTS_FILE
+    full_path = result_dir / AD_PIG_FULL_TESTS_FILE
     if not full_path.exists():
         raise FileNotFoundError(f"Missing {full_path}; run run_ad_pig_full_scenarios() first.")
     full_tests = pd.read_csv(full_path)
@@ -1493,21 +1333,27 @@ def run_ad_pig_enrichment_cache(
         top_n=top_n,
         contrast_file=AD_ENRICH_CONTRAST_FILE,
         force=force,
+        result_dir=result_dir,
     )
 
 
+@_cached_stage("brain_dev")
 def run_brain_dev_enrichment_cache(
     *,
     force: bool = False,
     top_n: int = BRAIN_DEV_ENRICHMENT_TOP_N,
+    presence_threshold: float = PRESENCE_THRESHOLD,
+    max_genes: int = MAX_GENES,
+    result_dir: Path | None = None,
+    _context: dict | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Cache brain-dev top genes, enrichment tables, and DF-vs-DF-norm contrasts."""
-    ensure_dirs()
+    result_dir.mkdir(parents=True, exist_ok=True)
 
     # Reuse the reference test results from the full_scenarios run
-    test_path = RESULT_DIR / BRAIN_DEV_TESTS_FILE
+    test_path = result_dir / BRAIN_DEV_TESTS_FILE
     if not test_path.exists():
-        raise FileNotFoundError(f"Missing {test_path}; run _run_brain_dev_full_scenarios() first.")
+        raise FileNotFoundError(f"Missing {test_path}; run run_brain_dev_full_scenarios() first.")
     reference = _brain_dev_reference_tests_wide(pd.read_csv(test_path))
     return _run_topn_enrichment_cache(
         panel="brain_dev",
@@ -1515,6 +1361,7 @@ def run_brain_dev_enrichment_cache(
         top_n=top_n,
         contrast_file=BRAIN_DEV_ENRICH_CONTRAST_FILE,
         force=force,
+        result_dir=result_dir,
     )
 
 
@@ -1611,6 +1458,7 @@ def _run_brain_dev_full_scenarios(
                         meta=meta,
                     )
                 )
+            del comparator
 
     return (
         pd.concat(observed_parts, ignore_index=True),
@@ -1618,70 +1466,92 @@ def _run_brain_dev_full_scenarios(
     )
 
 
+@_cached_stage("brain_dev")
+def run_brain_dev_full_scenarios(
+    *,
+    force: bool = False,
+    presence_threshold: float = PRESENCE_THRESHOLD,
+    max_genes: int = MAX_GENES,
+    result_dir: Path | None = None,
+    _context: dict | None = None,
+) -> dict[str, Any]:
+    (samples, _meta, sample_sets), genes = _panel_data(
+        "brain_dev", _context, presence_threshold, max_genes, result_dir
+    )
+    observed, null = _run_brain_dev_full_scenarios(
+        samples=samples, sample_sets=sample_sets, genes=genes
+    )
+    outputs = {
+        "brain_dev_tests": result_dir / BRAIN_DEV_TESTS_FILE,
+        "brain_dev_null_ecdf": result_dir / BRAIN_DEV_NULL_ECDF_FILE,
+    }
+    save_csv(observed, outputs["brain_dev_tests"])
+    save_csv(null, outputs["brain_dev_null_ecdf"])
+    return {key: project_relative(path) for key, path in outputs.items()}
+
+
+@_cached_stage("ad_pig")
 def run_ad_pig_workflow(
     *,
     force: bool = False,
     presence_threshold: float = PRESENCE_THRESHOLD,
     max_genes: int = MAX_GENES,
+    result_dir: Path | None = None,
+    _context: dict | None = None,
 ) -> dict[str, Any]:
     """Compute/cache AD/PIG benchmark inputs."""
-    ensure_dirs()
+    result_dir.mkdir(parents=True, exist_ok=True)
     outputs: dict[str, Any] = {}
+    context = {} if _context is None else _context
+    stage_args = {
+        "force": force,
+        "presence_threshold": presence_threshold,
+        "max_genes": max_genes,
+        "result_dir": result_dir,
+        "_context": context,
+    }
     # The order matters: enrichment and figure selections depend on the
     # reference rows produced by the full scenario grid.
     log("AD/PIG step 1/3: full scenario grid and permuted-null ECDFs")
-    outputs.update(
-        run_ad_pig_full_scenarios(
-            force=force,
-            presence_threshold=presence_threshold,
-            max_genes=max_genes,
-        )
-    )
+    outputs.update(run_ad_pig_full_scenarios(**stage_args))
 
     log("AD/PIG step 2/3: raw radial bin-count robustness")
-    outputs.update(
-        run_ad_pig_radial_bin_robustness(
-            force=force,
-            presence_threshold=presence_threshold,
-            max_genes=max_genes,
-        )
-    )
+    outputs.update(run_ad_pig_radial_bin_robustness(**stage_args))
 
     log("AD/PIG step 3/3: reference enrichment, anisotropy, and replicate spectra")
-    enrichment_outputs, provenance = run_ad_pig_enrichment_cache(force=force)
+    enrichment_outputs, provenance = run_ad_pig_enrichment_cache(**stage_args)
     outputs.update(enrichment_outputs)
-    outputs.update(
-        run_ad_pig_anisotropy_cache(
-            force=force,
-            presence_threshold=presence_threshold,
-            max_genes=max_genes,
-        )
-    )
-    outputs.update(
-        run_ad_pig_spectral_replicate_distance_cache(
-            force=force,
-            presence_threshold=presence_threshold,
-            max_genes=max_genes,
-        )
-    )
+    outputs.update(run_ad_pig_anisotropy_cache(**stage_args))
+    outputs.update(run_ad_pig_spectral_replicate_distance_cache(**stage_args))
     result: dict[str, Any] = {"outputs": outputs}
     if provenance is not None:
         result["provenance"] = {"clusterprofiler": provenance}
     return result
 
 
+@_cached_stage("brain_dev")
 def run_brain_dev_workflow(
     *,
     force: bool = False,
     presence_threshold: float = PRESENCE_THRESHOLD,
     max_genes: int = MAX_GENES,
+    result_dir: Path | None = None,
+    _context: dict | None = None,
 ) -> dict[str, Any]:
     """Cache the brain-development continuous-time benchmark inputs."""
-    ensure_dirs()
+    result_dir.mkdir(parents=True, exist_ok=True)
     outputs: dict[str, Any] = {}
-    controls = brain_dev_positive_control_table(force=force)
-    outputs["brain_dev_positive_controls"] = str(
-        (RESULT_DIR / BRAIN_DEV_POSITIVE_CONTROLS_FILE).relative_to(PROJECT_ROOT)
+    context = {} if _context is None else _context
+    stage_args = {
+        "force": force,
+        "presence_threshold": presence_threshold,
+        "max_genes": max_genes,
+        "result_dir": result_dir,
+        "_context": context,
+    }
+    controls = brain_dev_positive_control_table(force=force, result_dir=result_dir)
+    outputs["brain_dev_positive_controls"] = project_relative(
+        result_dir / BRAIN_DEV_POSITIVE_CONTROLS_FILE
     )
     log(
         "Brain-dev step 1/3: build positive-control gene sets "
@@ -1689,37 +1559,11 @@ def run_brain_dev_workflow(
     )
 
     log("Brain-dev step 2/3: full scenario grid and permuted-null ECDFs")
-    test_path = RESULT_DIR / BRAIN_DEV_TESTS_FILE
-    null_path = RESULT_DIR / BRAIN_DEV_NULL_ECDF_FILE
-    if _brain_dev_cache_ready(test_path, null_path) and not force:
-        log("using cached brain-development tests; pass --force to recompute")
-    else:
-        log(
-            "brain-development continuous-design scenario grid "
-            f"permutations={BRAIN_DEV_NULL_PERMUTATIONS}"
-        )
-        samples, _meta, sample_sets = load_panel("brain_dev")
-        genes = _select_comparison_genes("brain_dev", samples, presence_threshold, max_genes)
-        observed, null = _run_brain_dev_full_scenarios(
-            samples=samples,
-            sample_sets=sample_sets,
-            genes=genes,
-        )
-        save_csv(observed, test_path)
-        save_csv(null, null_path)
-
-    outputs["brain_dev_tests"] = str(test_path.relative_to(PROJECT_ROOT))
-    outputs["brain_dev_null_ecdf"] = str(null_path.relative_to(PROJECT_ROOT))
+    outputs.update(run_brain_dev_full_scenarios(**stage_args))
 
     log("Brain-dev step 3/3: anisotropy and reference enrichment")
-    outputs.update(
-        run_brain_dev_anisotropy_cache(
-            force=force,
-            presence_threshold=presence_threshold,
-            max_genes=max_genes,
-        )
-    )
-    enrichment_outputs, provenance = run_brain_dev_enrichment_cache(force=force)
+    outputs.update(run_brain_dev_anisotropy_cache(**stage_args))
+    enrichment_outputs, provenance = run_brain_dev_enrichment_cache(**stage_args)
     outputs.update(enrichment_outputs)
     result: dict[str, Any] = {"outputs": outputs}
     if provenance is not None:
@@ -1733,48 +1577,46 @@ def run_workflow(
     force: bool = False,
     presence_threshold: float = PRESENCE_THRESHOLD,
     max_genes: int = MAX_GENES,
+    result_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Run one of the panel-specific comparator-benchmark workflows."""
     started_at = time.perf_counter()
+    result_dir = _result_directory(presence_threshold, max_genes, result_dir)
     if analysis == "ad-pig":
-        result = _run_guarded_panel(
-            "ad_pig",
-            run_ad_pig_workflow,
+        result = run_ad_pig_workflow(
             force=force,
             presence_threshold=presence_threshold,
             max_genes=max_genes,
+            result_dir=result_dir,
         )
     elif analysis == "brain-dev":
-        result = _run_guarded_panel(
-            "brain_dev",
-            run_brain_dev_workflow,
+        result = run_brain_dev_workflow(
             force=force,
             presence_threshold=presence_threshold,
             max_genes=max_genes,
+            result_dir=result_dir,
         )
     elif analysis == "all":
-        ad = _run_guarded_panel(
-            "ad_pig",
-            run_ad_pig_workflow,
+        ad = run_ad_pig_workflow(
             force=force,
             presence_threshold=presence_threshold,
             max_genes=max_genes,
+            result_dir=result_dir,
         )
-        brain = _run_guarded_panel(
-            "brain_dev",
-            run_brain_dev_workflow,
+        brain = run_brain_dev_workflow(
             force=force,
             presence_threshold=presence_threshold,
             max_genes=max_genes,
+            result_dir=result_dir,
         )
         result = {"outputs": {**ad["outputs"], **brain["outputs"]}}
     else:
         raise ValueError(f"Unknown analysis mode: {analysis!r}")
 
-    result["outputs"]["cache_manifest"] = project_relative(RESULT_DIR / "cache_manifest.json")
+    result["outputs"]["cache_manifest"] = project_relative(result_dir / "cache_manifest.json")
     manifest_path = write_workflow_manifest(
         "comparator_benchmark",
-        RESULT_DIR,
+        result_dir,
         started_at=started_at,
         parameters={
             "analysis": analysis,
@@ -1805,6 +1647,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=int(os.environ.get("MAX_GENES", MAX_GENES)),
     )
+    parser.add_argument(
+        "--result-dir",
+        type=Path,
+        help="Output directory; nondefault runs are isolated automatically.",
+    )
     parser.add_argument("--presence-threshold", type=float, default=PRESENCE_THRESHOLD)
     return parser.parse_args()
 
@@ -1816,6 +1663,7 @@ def main() -> None:
         force=args.force,
         presence_threshold=args.presence_threshold,
         max_genes=args.max_genes,
+        result_dir=args.result_dir,
     )
 
 

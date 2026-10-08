@@ -11,6 +11,14 @@ from xml.etree import ElementTree as ET
 import numpy as np
 import pandas as pd
 
+from scripts.paper_utils import (
+    cache_entry_is_current,
+    cache_signature,
+    path_fingerprint,
+    source_provenance,
+    update_cache_entry,
+)
+
 from .config import (
     BRAIN_DEV_ANISOTROPY_FILE,
     BRAIN_DEV_CELL_TYPE_CONTROL_GROUPS,
@@ -22,7 +30,7 @@ from .config import (
     BRAIN_DEV_TABLE_S4_CNMFS,
     RESULT_DIR,
 )
-from .utils import cache_has_columns, ensure_dirs, save_csv
+from .utils import cache_has_columns, save_csv
 
 
 def _read_xlsx_values(  # noqa: C901
@@ -282,18 +290,19 @@ def _read_table_s4_controls() -> pd.DataFrame:
     return best[keep].copy()
 
 
-def brain_dev_positive_control_table(force: bool = False) -> pd.DataFrame:
+def brain_dev_positive_control_table(
+    force: bool = False, *, result_dir: Path = RESULT_DIR
+) -> pd.DataFrame:
     """Cache paper-derived brain-dev cell-type controls from Table S4."""
-    ensure_dirs()
-    positive_path = RESULT_DIR / BRAIN_DEV_POSITIVE_CONTROLS_FILE
-    required = {
-        "gene",
-        "control_group",
-        "group_label",
-        "mean_score",
-        "rank_in_group",
+    positive_path = result_dir / BRAIN_DEV_POSITIVE_CONTROLS_FILE
+    data = {
+        "source": source_provenance(__file__),
+        "table_s4": path_fingerprint(BRAIN_DEV_TABLE_S4_CNMFS),
     }
-    if positive_path.exists() and cache_has_columns(positive_path, required) and not force:
+    signature = cache_signature(data)
+    if not force and cache_entry_is_current(
+        result_dir, "brain_dev_controls", signature, outputs=[positive_path]
+    ):
         return pd.read_csv(positive_path)
 
     # Build the positive control table using both a manually curated gene list,
@@ -303,12 +312,15 @@ def brain_dev_positive_control_table(force: bool = False) -> pd.DataFrame:
     positive.insert(1, "source", "Cell 2026 Table S4 cNMF")
     positive.loc[positive["manual_control"].astype(bool), "source"] = "Cell 2026 manual curation"
     save_csv(positive, positive_path)
+    update_cache_entry(
+        result_dir, "brain_dev_controls", signature, [positive_path], signature_data=data
+    )
     return positive
 
 
-def brain_dev_forced_controls(force: bool = False) -> list[str]:
+def brain_dev_forced_controls(force: bool = False, *, result_dir: Path = RESULT_DIR) -> list[str]:
     """Return Table S4/manual control genes for panel selection."""
-    controls = brain_dev_positive_control_table(force=force)
+    controls = brain_dev_positive_control_table(force=force, result_dir=result_dir)
     top = controls[
         controls["rank_in_group"].le(BRAIN_DEV_CELL_TYPE_CONTROL_TOP_N) | controls["manual_control"]
     ].copy()

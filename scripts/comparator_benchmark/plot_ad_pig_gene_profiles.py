@@ -50,8 +50,12 @@ WT_COLOR = PAPER_COLORS["charcoal"]
 AD_COLOR = PAPER_COLORS["gold"]
 
 
+from .workflow import require_current_figure_cache
+
+
 def _load_ad_pig_stats() -> pd.DataFrame:
     """Load reference-scenario AD/PIG p-values used for row annotations."""
+    require_current_figure_cache("ad_pig")
     tests = pd.read_csv(RESULT_DIR / AD_PIG_FULL_TESTS_FILE)
     # Profile PDFs always annotate the manuscript reference scenario:
     # raw counts, linear radial bins, radial features, configured 30 bins.
@@ -60,7 +64,7 @@ def _load_ad_pig_stats() -> pd.DataFrame:
         & tests["input"].eq(AD_PIG_REFERENCE_INPUT)
         & tests["binning"].eq(AD_PIG_REFERENCE_BINNING)
         & tests["feature_mode"].eq(AD_PIG_REFERENCE_FEATURE_MODE)
-        & tests["n_radial_bins"].eq(AD_PIG_REFERENCE_N_RADIAL_BINS)
+        & tests["requested_n_radial_bins"].eq(AD_PIG_REFERENCE_N_RADIAL_BINS)
     ].copy()
     if ref.empty:
         raise RuntimeError("Reference AD/PIG scenario is missing from ad_pig_full_tests.csv")
@@ -74,6 +78,7 @@ class AdPigProfilePlotter:
 
     def __init__(self, genes: list[str]) -> None:
         """Load AD/PIG samples and fit radial spectra for exactly ``genes``."""
+        require_current_figure_cache("ad_pig")
         self.samples, _meta, sample_sets = load_panel("ad_pig")
         present = set.intersection(*(set(adata.var_names) for adata in self.samples.values()))
         self.genes = unique(genes)

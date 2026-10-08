@@ -12,7 +12,7 @@ expression (DE) baseline for both AD/PIG and brain-development benchmarks.
 
 ## Environment
 
-The root environment installs the published `sonic-spatial==1.0.0rc1`
+The root environment installs the published `sonic-spatial==1.0.0rc2`
 distribution and all shared analysis dependencies. Apply any additional
 `env*.yml` overlays the same way.
 
@@ -98,8 +98,8 @@ design, and the local Cell 2026 Table S4 supplement under
 `data/brain_dev/supplementary/table_s4_cnmf_programs.xlsx`. It caches:
 
 1. A four-scenario grid: raw/log1p input crossed with radial/2D features,
-   linear-bin frequencies, observed DE/DF/DF-norm tests, and 30
-   between-timepoint permutation ECDFs.
+   linear-bin frequencies, observed DE/DF/DF-norm tests, and 50
+   ordinary sample-label permutation ECDFs (excluding unchanged/duplicate designs).
 2. Reference raw/linear-bin/2D extras: cell-type/process positive controls,
    marker/background anisotropy, and top-100 DF-vs-DF-norm enrichment contrasts.
 
@@ -116,12 +116,17 @@ Use `--force` to recompute cached outputs for the selected analysis:
 run_sonic_paper python -m scripts.comparator_benchmark.workflow --analysis ad-pig --force
 ```
 
-Use `--max-genes` or `--presence-threshold` for smaller local runs. For a fast
-smoke test without overwriting existing caches, use a small gene cap:
+Use `--max-genes` or `--presence-threshold` for smaller local runs. Nondefault
+settings automatically write to `results/comparator_benchmark/runs/genes-<cap>_presence-<threshold>/`.
+The cap applies before adding curated controls. These runs leave paper caches intact:
 
 ```bash
 run_sonic_paper python -m scripts.comparator_benchmark.workflow --analysis brain-dev --max-genes 25
 ```
+
+An explicit `--result-dir` can select another output directory; nondefault
+settings cannot target the canonical paper directory. Direct Python stage calls
+accept the same settings and enforce the same provenance checks as the CLI.
 
 Render the manuscript figures from the notebook after the relevant workflow
 mode has completed:
@@ -133,6 +138,10 @@ run_sonic_paper python -m jupyter nbconvert --to notebook --execute \
   --ExecutePreprocessor.timeout=1200 \
   --ExecutePreprocessor.kernel_name=sonic_paper
 ```
+
+Figure loaders reject stale caches or nondefault paper settings and ask for a
+workflow rerun. Cache hits leave scientific outputs untouched, and each panel
+owns only its own enrichment files.
 
 The notebook writes PDF figures under `figures/comparator_benchmark/`.
 
@@ -197,7 +206,8 @@ run_sonic_paper python -m scripts.comparator_benchmark.plot_brain_dev_gene_profi
   The reference scenario for main figures is raw/linear-bin/2D.
 - `brain_dev_null_ecdf.csv` - permutation-null DF and DF-norm p-values for
   brain-dev ECDF calibration. The workflow keeps only p-values and scenario
-  metadata from 30 between-timepoint label permutations per scenario/test.
+  metadata from 50 sample-label permutations per scenario/test. Individual samples
+  may retain their timepoint; forcing every row to move biases this null.
 - `brain_dev_anisotropy.csv` - raw 2D spectrum anisotropy scores for
   brain-dev marker and non-marker background genes.
 - `brain_dev_positive_controls.csv` - paper-derived positive-control genes
