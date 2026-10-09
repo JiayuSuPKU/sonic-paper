@@ -81,8 +81,8 @@ The workflow writes:
 
 Comparison, diagnostics, enrichment, and meta-program mapping have separate
 cache entries. Missing diagnostics can be rebuilt from saved spectra and
-normalized expression. Plotting edits do not invalidate numerical stages. 
-R-wrapper edits invalidate enrichment only (and its downstream map). 
+normalized expression. Plotting edits do not invalidate numerical stages.
+R-wrapper edits invalidate enrichment only (and its downstream map).
 Successful enrichment jobs with no terms are cached as empty tables.
 
 ## Rendering Figures:

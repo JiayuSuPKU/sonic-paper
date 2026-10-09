@@ -32,7 +32,7 @@ mamba env create -f environment.yml
 conda run -n sonic_paper python -c "import sonic; print(sonic.__version__)"
 ```
 
-The environment pins the published `sonic-spatial==1.0.0rc1` distribution;
+The environment pins the published `sonic-spatial==1.0.0rc2` distribution;
 Python code imports it as `sonic`. For active package development, replace the
 published installation with the sibling source checkout:
 

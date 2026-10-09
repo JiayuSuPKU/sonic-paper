@@ -8,18 +8,18 @@ Specifically, the workflow is configured to run on three datasets:
 - FFPE targeted probes
 - ONT transcript isoforms
 
-For SV analysis, we test genes across three resolutions: 16um, 8um, and 2um. 
-For DU analysis, we test one resolution (16um) using conditional association 
-(`hsic-gp`, `cov_only`), crossing all SVP genes with a combined regulator design matrix 
-containing both RBP and TF-ChIP covariates. The workflow is supported by the 
+For SV analysis, we test genes across three resolutions: 16um, 8um, and 2um.
+For DU analysis, we test one resolution (16um) using conditional association
+(`hsic-gp`, `cov_only`), crossing all SVP genes with a combined regulator design matrix
+containing both RBP and TF-ChIP covariates. The workflow is supported by the
 `SplisosmFFT` class for scalable FFT-based implementations.
 
 Caches fingerprint nested Zarr files, installed SPLISOSM/analysis source, and
 outputs. ReMap TF/interval caches also track the source BED and parser;
-annotation caches detect changed reference files. 
+annotation caches detect changed reference files.
 Source fingerprints ignore Python comments, docstrings, formatting, and log-message
 wording. Only imported shared helpers and their dependencies are included; SONIC
-code/version changes do not invalidate SPLISOSM caches. 
+code/version changes do not invalidate SPLISOSM caches.
 
 ## Minimal Dependencies
 
@@ -46,7 +46,7 @@ with `NUMBA_DISABLE_JIT=1`.
 
 ## How To Run
 
-Use `workflow.py` to compute result tables, and the notebook `visualization.ipynb` 
+Use `workflow.py` to compute result tables, and the notebook `visualization.ipynb`
 for interactive plotting surface.
 
 All commands assume the repository root is the current working directory.

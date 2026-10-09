@@ -55,18 +55,18 @@ same in-memory joint PCA.
 PCA coordinates and the long per-gene-section table are reconstructed in
 memory and are not cached. Prepared sections track raw inputs, annotation settings,
 preprocessing source, and their written outputs. Metrics and enrichment caches
-also validate output fingerprints. Changes to the numerical code, configuration 
-values, ordinary strings, logging argument expressions, and dependency versions 
-will invalidate the cache. Non-Python sources (including the R enrichment wrapper) 
+also validate output fingerprints. Changes to the numerical code, configuration
+values, ordinary strings, logging argument expressions, and dependency versions
+will invalidate the cache. Non-Python sources (including the R enrichment wrapper)
 retain byte-level hashes.
 
 ## GO pathway selection
 
 Cluster GO uses one Benjamini-Hochberg correction across all cluster-term tests
-within each species. Candidate terms must pass this across-cluster FDR (<= 0.05); 
-Wang semantic simplification (cutoff 0.7) uses the same FDR to select representatives. 
-The figure then keeps terms covering at most 5% of the effective universe and 
-displays the four most significant retained terms per species-cluster. 
+within each species. Candidate terms must pass this across-cluster FDR (<= 0.05);
+Wang semantic simplification (cutoff 0.7) uses the same FDR to select representatives.
+The figure then keeps terms covering at most 5% of the effective universe and
+displays the four most significant retained terms per species-cluster.
 Full tested-term tables remain cached, with raw p-values and `global_qvalue`.
 
 Temporal and stage-transition GO retain their per-query BH correction and use

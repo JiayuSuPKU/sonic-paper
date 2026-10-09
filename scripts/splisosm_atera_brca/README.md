@@ -17,7 +17,7 @@ and output fingerprints. ANKRD30A annotation/priority, TCGA cohort/clinical, and
 PRO-seq window/track changes invalidate their downstream caches.
 Source fingerprints ignore Python comments, docstrings, formatting, and log-message
 wording. Only imported shared helpers and their dependencies are included; SONIC
-code/version changes do not invalidate SPLISOSM caches. 
+code/version changes do not invalidate SPLISOSM caches.
 
 Notebook TF expression panels use the same log1p-CP10K normalization as DU covariates;
 their direction indicates the difference in mean normalized log expression.
@@ -66,7 +66,7 @@ conda run -n sonic_paper_splisosm python scripts/splisosm_atera_brca/workflow.py
 
 By default, `workflow.py` runs SV, all-SVP DU, all-SVP probe genome/transcript
 mapping, top-20 SVP PNG inspection panels, and the ANKRD30A long-read/TCGA
-summary analysis, including the T47D TRPS1-degradation PRO-seq cache. 
+summary analysis, including the T47D TRPS1-degradation PRO-seq cache.
 It does not render the final PDFs. Use `--skip-top20` or
 `--skip-ankrd30a` to omit optional downstream stages.
 
@@ -105,8 +105,8 @@ The standalone `run_ankrd30a_analysis.py` file wraps the ANKRD30A-specific analy
   StringTie/prepDE and counts Atera probe regions directly with featureCounts.
   Probe-region TCGA counts do not use probe-to-transcript assignment.
 - TRPS1-KO PRO-seq validation uses only ANKRD30A-region slices of GSE236172
-  processed bigWigs, summarizes TSS signal (total normalized signal in 
-  +/-1Kb TSS region, both strands) and compares to control (0h) across 
+  processed bigWigs, summarizes TSS signal (total normalized signal in
+  +/-1Kb TSS region, both strands) and compares to control (0h) across
   TRPS1 degradation timepoints.
 
 ## Inputs

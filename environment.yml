@@ -29,4 +29,4 @@ dependencies:
   - pip
   - adjusttext
   - pip:
-      - "sonic-spatial[dev]==1.0.0rc1"
+      - "sonic-spatial[dev]==1.0.0rc2"
