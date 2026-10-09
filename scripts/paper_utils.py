@@ -254,7 +254,11 @@ def source_file_fingerprint(path: str | Path) -> str:
 
 
 def source_provenance(analysis_file: str | Path) -> dict[str, Any]:
-    """Fingerprint SONIC and analysis code without cosmetic Python source changes."""
+    """Fingerprint Python dependencies without cosmetic source changes.
+
+    Enrichment stages must fingerprint CLUSTERPROFILER_SCRIPT explicitly;
+    changing the R wrapper must not invalidate numerical analysis caches.
+    """
     import sonic
 
     provenance = {"fingerprint_schema": "python-ast-v1"}
@@ -267,10 +271,9 @@ def source_provenance(analysis_file: str | Path) -> dict[str, Any]:
             digest.update(str(path.relative_to(root)).encode())
             digest.update(source_file_fingerprint(path).encode())
         if name == "analysis":
-            for path in (Path(__file__), CLUSTERPROFILER_SCRIPT):
-                if path.is_file():
-                    digest.update(path.name.encode())
-                    digest.update(source_file_fingerprint(path).encode())
+            path = Path(__file__)
+            digest.update(path.name.encode())
+            digest.update(source_file_fingerprint(path).encode())
         provenance[f"{name}_source_sha256"] = digest.hexdigest()
     provenance["versions"] = {
         name: installed_version(name)

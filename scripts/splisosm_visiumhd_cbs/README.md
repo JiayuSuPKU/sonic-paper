@@ -83,7 +83,7 @@ Main cached files:
 - `runtime_memory_metrics.csv`
 - `shared_svp_hits.csv`
 - `du_rbp_shared_associations.csv`
-- `du_tf_chip_shared_associations.csv`
+- `du_tf_shared_associations.csv`
 - `workflow_manifest.json`
 - `cache_manifest.json`
 

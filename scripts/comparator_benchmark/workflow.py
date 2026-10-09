@@ -30,6 +30,7 @@ if __package__ in {None, ""}:
 from sonic.statistics import apply_bh_correction
 
 from scripts.paper_utils import (
+    CLUSTERPROFILER_SCRIPT,
     _load_cache_manifest,
     cache_entry_is_current,
     cache_signature,
@@ -37,6 +38,7 @@ from scripts.paper_utils import (
     path_fingerprint,
     project_relative,
     run_clusterprofiler,
+    source_file_fingerprint,
     source_provenance,
     update_cache_entry,
     write_workflow_manifest,
@@ -159,6 +161,7 @@ def _panel_cache_signature_data(
     *,
     presence_threshold: float,
     max_genes: int,
+    stage: str = "",
 ) -> dict[str, Any]:
     panel_config = PANELS[panel]
     inputs = [panel_config.metadata_csv]
@@ -176,6 +179,12 @@ def _panel_cache_signature_data(
             )
     return {
         "source": source_provenance(__file__),
+        # Workflow entries also own enrichment outputs; numerical stages do not.
+        **(
+            {"enrichment_wrapper_sha256": source_file_fingerprint(CLUSTERPROFILER_SCRIPT)}
+            if "enrichment" in stage or stage.endswith("_workflow")
+            else {}
+        ),
         "cache_revision": CACHE_REVISIONS[panel],
         "dependencies": {"sonic-spatial": installed_version("sonic-spatial")},
         "inputs": [path_fingerprint(path) for path in inputs],
@@ -220,7 +229,10 @@ def _cached_stage(panel):
             )
             args["result_dir"] = result_dir
             data = _panel_cache_signature_data(
-                panel, presence_threshold=args["presence_threshold"], max_genes=args["max_genes"]
+                panel,
+                presence_threshold=args["presence_threshold"],
+                max_genes=args["max_genes"],
+                stage=func.__name__,
             )
             data["stage"] = func.__name__
             data["stage_parameters"] = {
@@ -270,7 +282,7 @@ def _require_current_stage(panel, stage, result_dir, presence_threshold, max_gen
     entry = _load_cache_manifest(result_dir / "cache_manifest.json")["entries"].get(stage, {})
     recorded = entry.get("signature_data", {})
     current = _panel_cache_signature_data(
-        panel, presence_threshold=presence_threshold, max_genes=max_genes
+        panel, presence_threshold=presence_threshold, max_genes=max_genes, stage=stage
     )
     # Preserve stage-only knobs while requiring current source, inputs and panel settings.
     data = {**recorded, **current}
